@@ -122,6 +122,9 @@ structure WindowProps {
     showInactive?: boolean
     ignoreMouseEvents?: boolean
     visibleOnAllWorkspaces?: boolean
+    // Pool support
+    showOnCreate?: boolean
+    visible?: boolean
     // Platform-specific
     trafficLightPosition?: TrafficLightPosition
     titleBarOverlay?: TitleBarOverlayOptions
@@ -145,6 +148,8 @@ enum WindowActionType {
     SetTitle = "setTitle"
     EnterFullscreen = "enterFullscreen"
     ExitFullscreen = "exitFullscreen"
+    Show = "show"
+    Hide = "hide"
 }
 
 structure WindowAction {

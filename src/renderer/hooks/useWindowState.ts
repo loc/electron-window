@@ -2,6 +2,8 @@ import { useSyncExternalStore } from "react";
 import { useWindowContext } from "../context.js";
 import type { Bounds, WindowState } from "../../shared/types.js";
 
+const DEFAULT_BOUNDS: Bounds = { x: 0, y: 0, width: 0, height: 0 };
+
 /**
  * Hook to subscribe to window focus state
  * Re-renders when focus changes
@@ -12,7 +14,7 @@ export function useWindowFocused(): boolean {
   return useSyncExternalStore(
     subscribe,
     () => getSnapshot()?.isFocused ?? false,
-    () => false
+    () => false,
   );
 }
 
@@ -26,7 +28,7 @@ export function useWindowVisible(): boolean {
   return useSyncExternalStore(
     subscribe,
     () => getSnapshot()?.isVisible ?? false,
-    () => false
+    () => false,
   );
 }
 
@@ -40,7 +42,7 @@ export function useWindowMaximized(): boolean {
   return useSyncExternalStore(
     subscribe,
     () => getSnapshot()?.isMaximized ?? false,
-    () => false
+    () => false,
   );
 }
 
@@ -54,7 +56,7 @@ export function useWindowMinimized(): boolean {
   return useSyncExternalStore(
     subscribe,
     () => getSnapshot()?.isMinimized ?? false,
-    () => false
+    () => false,
   );
 }
 
@@ -68,7 +70,7 @@ export function useWindowFullscreen(): boolean {
   return useSyncExternalStore(
     subscribe,
     () => getSnapshot()?.isFullscreen ?? false,
-    () => false
+    () => false,
   );
 }
 
@@ -79,12 +81,10 @@ export function useWindowFullscreen(): boolean {
 export function useWindowBounds(): Bounds {
   const { subscribe, getSnapshot } = useWindowContext();
 
-  const defaultBounds: Bounds = { x: 0, y: 0, width: 0, height: 0 };
-
   return useSyncExternalStore(
     subscribe,
-    () => getSnapshot()?.bounds ?? defaultBounds,
-    () => defaultBounds
+    () => getSnapshot()?.bounds ?? DEFAULT_BOUNDS,
+    () => DEFAULT_BOUNDS,
   );
 }
 

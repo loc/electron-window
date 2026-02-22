@@ -26,6 +26,7 @@ import {
   CREATION_ONLY_PROPS,
   RENDERER_ALLOWED_PROPS,
 } from "../shared/types.js";
+import { usePersistedBounds } from "./hooks/usePersistedBounds.js";
 import {
   devWarning,
   debounce,
@@ -53,6 +54,7 @@ const CHANGEABLE_BEHAVIOR_PROPS = new Set([
   "opacity",
   "trafficLightPosition",
   "titleBarOverlay",
+  "visible",
 ]);
 
 /**
@@ -118,15 +120,8 @@ async function waitForWindowReady(win: globalThis.Window): Promise<void> {
   }
 }
 
-export interface WindowRef {
-  windowId: WindowId | null;
-  focus: () => void;
-  blur: () => void;
-  minimize: () => void;
-  maximize: () => void;
-  close: () => void;
-  getBounds: () => Bounds | null;
-}
+// WindowRef is the same as WindowHandle — consumers get the same API via ref or hook
+export type WindowRef = WindowHandle;
 
 /**
  * Declarative window component using createPortal.
@@ -147,15 +142,28 @@ export const Window = forwardRef<WindowRef, WindowProps>(
       onMinimize,
       onRestore,
       onEnterFullscreen,
-      onLeaveFullscreen,
+      onExitFullscreen,
       onDisplayChange,
+      onFocus,
+      onBlur,
+      onClose,
       injectStyles = "auto",
       name,
       title,
       recreateOnShapeChange = false,
+      persistBounds,
+      visible = true,
     } = props;
 
     const provider = useWindowProviderContext();
+
+    // Persistence support — hook always called, only has effect when key is provided
+    const persistence = usePersistedBounds(persistBounds ?? "", {
+      defaultWidth: props.defaultWidth,
+      defaultHeight: props.defaultHeight,
+      defaultX: props.defaultX,
+      defaultY: props.defaultY,
+    });
 
     // Stable window ID — only regenerated when window is recreated due to shape change
     const [windowId, setWindowId] = useState<WindowId>(() =>
@@ -176,6 +184,9 @@ export const Window = forwardRef<WindowRef, WindowProps>(
     const debouncedBoundsChange = useRef(
       debounce((bounds: Bounds) => {
         onBoundsChange?.(bounds);
+        if (persistBounds) {
+          persistence.save(bounds);
+        }
       }, 100),
     );
 
@@ -190,7 +201,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         props.y !== undefined;
       if (hasControlledBounds && !onBoundsChange) {
         devWarning(
-          "Using controlled bounds (width/height/x/y) without onBoundsChange.\n" +
+          `${name ? `[${name}] ` : ""}Using controlled bounds (width/height/x/y) without onBoundsChange.\n` +
             "The window will revert to prop values when user resizes.\n" +
             "Use defaultWidth/defaultHeight for initial-only bounds, or add onBoundsChange for two-way sync.",
         );
@@ -218,6 +229,17 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         // 1. Pre-register props so main process can configure the BrowserWindow
         //    before window.open triggers setWindowOpenHandler
         const ipcProps = extractIPCProps(props);
+        // Apply persisted bounds if persistence is enabled
+        if (persistBounds && persistence.bounds) {
+          if (persistence.bounds.defaultWidth)
+            ipcProps.defaultWidth = persistence.bounds.defaultWidth;
+          if (persistence.bounds.defaultHeight)
+            ipcProps.defaultHeight = persistence.bounds.defaultHeight;
+          if (persistence.bounds.defaultX !== undefined)
+            ipcProps.defaultX = persistence.bounds.defaultX;
+          if (persistence.bounds.defaultY !== undefined)
+            ipcProps.defaultY = persistence.bounds.defaultY;
+        }
         await provider.registerWindow(windowId, ipcProps);
         if (cancelled) return;
 
@@ -347,7 +369,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(
           } else {
             for (const key of changedCreationOnlyProps) {
               devWarning(
-                `"${key}" is a creation-only prop and cannot be changed after window creation. ` +
+                `${name ? `[${name}] ` : ""}"${key}" is a creation-only prop and cannot be changed after window creation. ` +
                   `Use recreateOnShapeChange prop to allow recreation.`,
               );
             }
@@ -408,11 +430,13 @@ export const Window = forwardRef<WindowRef, WindowProps>(
             setWindowState((prev) =>
               prev ? { ...prev, isFocused: true } : prev,
             );
+            onFocus?.();
             break;
           case "blurred":
             setWindowState((prev) =>
               prev ? { ...prev, isFocused: false } : prev,
             );
+            onBlur?.();
             break;
           case "maximized":
             setWindowState((prev) =>
@@ -448,7 +472,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(
             setWindowState((prev) =>
               prev ? { ...prev, isFullscreen: false } : prev,
             );
-            onLeaveFullscreen?.();
+            onExitFullscreen?.();
             break;
           case "boundsChanged":
             if (event.bounds) {
@@ -472,6 +496,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(
             setIsReady(false);
             setWindowState(null);
             childWindowRef.current = null;
+            onClose?.();
             break;
         }
       });
@@ -481,12 +506,15 @@ export const Window = forwardRef<WindowRef, WindowProps>(
       isReady,
       windowId,
       provider,
+      onFocus,
+      onBlur,
+      onClose,
       onMaximize,
       onUnmaximize,
       onMinimize,
       onRestore,
       onEnterFullscreen,
-      onLeaveFullscreen,
+      onExitFullscreen,
       onDisplayChange,
       onUserClose,
     ]);
@@ -564,18 +592,28 @@ export const Window = forwardRef<WindowRef, WindowProps>(
 
     useImperativeHandle(
       ref,
-      () => ({
-        windowId,
-        focus: () => void provider.windowAction(windowId, { type: "focus" }),
-        blur: () => void provider.windowAction(windowId, { type: "blur" }),
-        minimize: () =>
-          void provider.windowAction(windowId, { type: "minimize" }),
-        maximize: () =>
-          void provider.windowAction(windowId, { type: "maximize" }),
-        close: () => void provider.windowAction(windowId, { type: "close" }),
-        getBounds: () => windowState?.bounds ?? null,
-      }),
-      [windowId, windowState, provider],
+      () =>
+        handle ?? {
+          id: windowId,
+          isFocused: false,
+          isMaximized: false,
+          isMinimized: false,
+          isFullscreen: false,
+          bounds: { x: 0, y: 0, width: 0, height: 0 },
+          focus: () => {},
+          blur: () => {},
+          minimize: () => {},
+          maximize: () => {},
+          unmaximize: () => {},
+          toggleMaximize: () => {},
+          close: () => {},
+          forceClose: () => {},
+          setBounds: () => {},
+          setTitle: () => {},
+          enterFullscreen: () => {},
+          exitFullscreen: () => {},
+        },
+      [handle, windowId],
     );
 
     const contextValue = useMemo<WindowContextValue>(

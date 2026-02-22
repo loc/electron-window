@@ -182,20 +182,8 @@ describe("Window ref", () => {
   });
 
   it("exposes window methods via ref", async () => {
-    const ref = React.createRef<{
-      windowId: string | null;
-      focus: () => void;
-      blur: () => void;
-      minimize: () => void;
-      maximize: () => void;
-      close: () => void;
-      getBounds: () => {
-        x: number;
-        y: number;
-        width: number;
-        height: number;
-      } | null;
-    }>();
+    const ref =
+      React.createRef<import("../../src/shared/types.js").WindowHandle>();
 
     render(
       <MockWindowProvider>
@@ -213,13 +201,13 @@ describe("Window ref", () => {
       expect(ref.current).not.toBeNull();
     });
 
-    expect(ref.current?.windowId).toBeDefined();
+    expect(ref.current?.id).toBeDefined();
     expect(typeof ref.current?.focus).toBe("function");
     expect(typeof ref.current?.blur).toBe("function");
     expect(typeof ref.current?.minimize).toBe("function");
     expect(typeof ref.current?.maximize).toBe("function");
     expect(typeof ref.current?.close).toBe("function");
-    expect(typeof ref.current?.getBounds).toBe("function");
+    expect(ref.current?.bounds).toBeDefined();
   });
 
   it("ref methods are callable", async () => {

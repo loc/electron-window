@@ -23,8 +23,6 @@ export interface UsePersistedBoundsResult {
     defaultX?: number;
     defaultY?: number;
   };
-  /** Always true — bounds load synchronously from localStorage */
-  isLoaded: true;
   /** Save current bounds (debounced) */
   save: (bounds: Bounds) => void;
   /** Clear persisted bounds */
@@ -105,7 +103,7 @@ export function usePersistedBounds(
     [persistedBounds, defaultWidth, defaultHeight, defaultX, defaultY],
   );
 
-  return { bounds, isLoaded: true, save, clear };
+  return { bounds, save, clear };
 }
 
 /**

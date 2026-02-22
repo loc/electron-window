@@ -13,7 +13,6 @@ export type {
   SecurityValidator,
 } from "./WindowManager.js";
 export { WindowInstance } from "./WindowInstance.js";
-export { WindowPool, ResourcePool, createWindowPool } from "./WindowPool.js";
 
 // Re-export types needed in main process
 export type {

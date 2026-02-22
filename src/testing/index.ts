@@ -5,20 +5,24 @@
 
 import React, { useCallback, useMemo, type ReactNode } from "react";
 import {
+  WindowContext,
   WindowProviderContext,
+  type WindowContextValue,
   type WindowProviderContextValue,
 } from "../renderer/context.js";
 import type {
   WindowId,
   WindowState,
+  WindowHandle,
   Bounds,
+  DisplayInfo,
   WindowEvent,
 } from "../shared/types.js";
 
 /**
  * Mock window data for testing
  */
-export interface MockWindow {
+export interface MockWindowData {
   id: WindowId;
   state: WindowState;
   props: Record<string, unknown>;
@@ -29,7 +33,7 @@ export interface MockWindow {
  * Mock store for window data
  */
 interface MockStore {
-  windows: Map<WindowId, MockWindow>;
+  windows: Map<WindowId, MockWindowData>;
   listeners: Map<
     WindowId,
     Set<(event: { type: string; [key: string]: unknown }) => void>
@@ -55,21 +59,21 @@ export function resetMockWindows(): void {
 /**
  * Get all mock windows
  */
-export function getMockWindows(): MockWindow[] {
+export function getMockWindows(): MockWindowData[] {
   return [...mockStore.windows.values()];
 }
 
 /**
  * Get a specific mock window by ID
  */
-export function getMockWindow(id: WindowId): MockWindow | undefined {
+export function getMockWindow(id: WindowId): MockWindowData | undefined {
   return mockStore.windows.get(id);
 }
 
 /**
  * Get mock windows by name (if name prop was provided)
  */
-export function getMockWindowByName(name: string): MockWindow | undefined {
+export function getMockWindowByName(name: string): MockWindowData | undefined {
   for (const window of mockStore.windows.values()) {
     if (window.props.name === name) {
       return window;
@@ -93,6 +97,7 @@ type SimulatedEvent =
   | { type: "leaveFullscreen" }
   | { type: "boundsChanged"; bounds: Bounds }
   | { type: "userCloseRequested" }
+  | { type: "displayChanged"; display: DisplayInfo }
   | { type: "ready" };
 
 /**
@@ -198,7 +203,7 @@ export function MockWindowProvider({
         title: (props.title as string) ?? "",
       };
 
-      const window: MockWindow = {
+      const window: MockWindowData = {
         id,
         state,
         props,
@@ -361,6 +366,82 @@ export function MockWindowProvider({
 
   return React.createElement(
     WindowProviderContext.Provider,
+    { value: contextValue },
+    children,
+  );
+}
+
+/**
+ * Props for MockWindow
+ */
+export interface MockWindowComponentProps {
+  children: React.ReactNode;
+  id?: string;
+  state?: Partial<WindowState>;
+}
+
+/**
+ * Wraps children in a WindowContext.Provider with configurable state.
+ * Use this to test components that call useCurrentWindow() without needing
+ * a real <Window> or MockWindowProvider.
+ *
+ * @example
+ * render(
+ *   <MockWindow state={{ isFocused: true }}>
+ *     <MyPanel />
+ *   </MockWindow>
+ * );
+ */
+export function MockWindow({
+  children,
+  id = "mock-window",
+  state = {},
+}: MockWindowComponentProps): JSX.Element {
+  const fullState: WindowState = {
+    id,
+    isFocused: false,
+    isVisible: true,
+    isMaximized: false,
+    isMinimized: false,
+    isFullscreen: false,
+    bounds: { x: 0, y: 0, width: 800, height: 600 },
+    title: "",
+    ...state,
+  };
+
+  const handle: WindowHandle = {
+    id,
+    isFocused: fullState.isFocused,
+    isMaximized: fullState.isMaximized,
+    isMinimized: fullState.isMinimized,
+    isFullscreen: fullState.isFullscreen,
+    bounds: fullState.bounds,
+    focus: () => {},
+    blur: () => {},
+    minimize: () => {},
+    maximize: () => {},
+    unmaximize: () => {},
+    toggleMaximize: () => {},
+    close: () => {},
+    forceClose: () => {},
+    setBounds: () => {},
+    setTitle: () => {},
+    enterFullscreen: () => {},
+    exitFullscreen: () => {},
+  };
+
+  const contextValue: WindowContextValue = {
+    windowId: id,
+    state: fullState,
+    display: null,
+    handle,
+    subscribe: (_listener) => () => {},
+    getSnapshot: () => fullState,
+    getDisplaySnapshot: () => null,
+  };
+
+  return React.createElement(
+    WindowContext.Provider,
     { value: contextValue },
     children,
   );

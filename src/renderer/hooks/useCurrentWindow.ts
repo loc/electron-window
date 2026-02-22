@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { useWindowContext, useWindowProviderContext } from "../context.js";
 import type { WindowHandle, Bounds } from "../../shared/types.js";
 
@@ -7,12 +7,18 @@ import type { WindowHandle, Bounds } from "../../shared/types.js";
  * Provides imperative access to window methods
  */
 export function useCurrentWindow(): WindowHandle {
-  const { windowId, state } = useWindowContext();
+  const context = useWindowContext();
+  const { windowId, state } = context;
   const provider = useWindowProviderContext();
 
   if (!windowId) {
     throw new Error("useCurrentWindow: No window ID in context");
   }
+
+  // Keep a ref to the latest state so toggleMaximize reads current value
+  // without taking a dependency on it (which would change its identity).
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   const focus = useCallback(() => {
     provider.windowAction(windowId, { type: "focus" });
@@ -35,12 +41,12 @@ export function useCurrentWindow(): WindowHandle {
   }, [provider, windowId]);
 
   const toggleMaximize = useCallback(() => {
-    if (state?.isMaximized) {
+    if (stateRef.current?.isMaximized) {
       provider.windowAction(windowId, { type: "unmaximize" });
     } else {
       provider.windowAction(windowId, { type: "maximize" });
     }
-  }, [provider, windowId, state?.isMaximized]);
+  }, [provider, windowId]); // stable — reads state via ref at call time
 
   const close = useCallback(() => {
     provider.windowAction(windowId, { type: "close" });
@@ -54,14 +60,14 @@ export function useCurrentWindow(): WindowHandle {
     (bounds: Partial<Bounds>) => {
       provider.windowAction(windowId, { type: "setBounds", bounds });
     },
-    [provider, windowId]
+    [provider, windowId],
   );
 
   const setTitle = useCallback(
     (title: string) => {
       provider.windowAction(windowId, { type: "setTitle", title });
     },
-    [provider, windowId]
+    [provider, windowId],
   );
 
   const enterFullscreen = useCallback(() => {

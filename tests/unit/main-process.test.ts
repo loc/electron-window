@@ -314,7 +314,7 @@ describe("filterAllowedProps (via WindowManager IPC implementation)", () => {
       "fullscreen",
       "fullscreenable",
       "ignoreMouseEvents",
-      "show",
+      "visible",
       "showInactive",
       "visibleOnAllWorkspaces",
       "trafficLightPosition",

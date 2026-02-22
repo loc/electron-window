@@ -124,6 +124,7 @@ export interface WindowInstanceOptions {
   browserWindow: BrowserWindow;
   props: Omit<BaseWindowProps, "open" | "children">;
   onEvent: (event: WindowEvent) => void;
+  showOnCreate?: boolean; // default true
 }
 
 /**
@@ -159,10 +160,14 @@ export class WindowInstance {
     this.setupEventListeners();
     this.applyPostCreationProps();
 
-    if (this.currentProps.showInactive) {
-      this.browserWindow.showInactive();
-    } else {
-      this.browserWindow.show();
+    // Only show on creation if requested (pool pre-warming passes false)
+    const shouldShow = options.showOnCreate !== false;
+    if (shouldShow) {
+      if (this.currentProps.showInactive) {
+        this.browserWindow.showInactive();
+      } else {
+        this.browserWindow.show();
+      }
     }
   }
 
@@ -304,6 +309,17 @@ export class WindowInstance {
       }
 
       (this.currentProps as Record<string, unknown>)[key] = value;
+    }
+
+    // Handle visible prop explicitly (not a simple setter)
+    if ("visible" in newProps) {
+      if (newProps.visible === false) {
+        this.browserWindow.hide();
+      } else {
+        this.show();
+      }
+      (this.currentProps as Record<string, unknown>)["visible"] =
+        newProps.visible;
     }
 
     const boundsChanged =

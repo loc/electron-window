@@ -7,10 +7,13 @@
 export { Window, type WindowRef } from "./Window.js";
 export {
   PooledWindow,
+  createWindowPool,
   createWindowPoolDefinition,
   type PooledWindowProps,
   type WindowPoolDefinition,
+  type PooledWindowRef,
 } from "./PooledWindow.js";
+export { RendererWindowPool, type PoolShape } from "./RendererWindowPool.js";
 export { WindowProvider, type WindowProviderProps } from "./WindowProvider.js";
 
 // Hooks

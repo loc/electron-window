@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import React, { useState, useEffect } from "react";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { Window } from "../../src/renderer/Window.js";
+import { Window, type WindowRef } from "../../src/renderer/Window.js";
 import {
   MockWindowProvider,
   resetMockWindows,
@@ -707,20 +707,7 @@ describe("<Window> user interactions - imperative methods", () => {
   });
 
   it("window ref provides working methods", async () => {
-    const ref = React.createRef<{
-      windowId: string | null;
-      focus: () => void;
-      blur: () => void;
-      minimize: () => void;
-      maximize: () => void;
-      close: () => void;
-      getBounds: () => {
-        x: number;
-        y: number;
-        width: number;
-        height: number;
-      } | null;
-    }>();
+    const ref = React.createRef<WindowRef>();
 
     render(
       <MockWindowProvider>
@@ -738,14 +725,17 @@ describe("<Window> user interactions - imperative methods", () => {
       expect(ref.current).not.toBeNull();
     });
 
+    // Ref exposes WindowHandle — same API as useCurrentWindow
+    expect(ref.current?.id).toBeDefined();
+
     // All methods should be callable without throwing
     expect(() => ref.current?.focus()).not.toThrow();
     expect(() => ref.current?.blur()).not.toThrow();
     expect(() => ref.current?.minimize()).not.toThrow();
     expect(() => ref.current?.maximize()).not.toThrow();
 
-    // getBounds should return valid bounds
-    const bounds = ref.current?.getBounds();
+    // bounds is a property (not a method) on WindowHandle
+    const bounds = ref.current?.bounds;
     expect(bounds).toHaveProperty("x");
     expect(bounds).toHaveProperty("y");
     expect(bounds).toHaveProperty("width");

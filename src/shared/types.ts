@@ -83,6 +83,26 @@ export type TitleBarStyle =
   | "hiddenInset"
   | "customButtonsOnHover";
 
+/** Vibrancy effect options (macOS) */
+export type VibrancyType =
+  | "appearance-based"
+  | "light"
+  | "dark"
+  | "titlebar"
+  | "selection"
+  | "menu"
+  | "popover"
+  | "sidebar"
+  | "header"
+  | "sheet"
+  | "window"
+  | "hud"
+  | "fullscreen-ui"
+  | "tooltip"
+  | "content"
+  | "under-window"
+  | "under-page";
+
 /**
  * Props that can only be set at window creation time
  * These have no setter methods in Electron
@@ -140,7 +160,7 @@ export const RENDERER_ALLOWED_PROPS = new Set([
   // Mouse
   "ignoreMouseEvents",
   // Visibility
-  "show",
+  "visible",
   "showInactive",
   "visibleOnAllWorkspaces",
   // Platform-specific
@@ -157,7 +177,7 @@ export interface BaseWindowProps {
   /**
    * Whether the window should be open/visible.
    * When true, the window is created/shown.
-   * When false, the window is destroyed (or hidden if keepMounted is true).
+   * When false, the window is destroyed.
    */
   open: boolean;
 
@@ -172,12 +192,6 @@ export interface BaseWindowProps {
    * When false, the close button is hidden/disabled.
    */
   closable?: boolean;
-
-  /**
-   * Keep the window mounted (hidden) instead of destroying when open=false.
-   * Useful for preserving state in complex windows.
-   */
-  keepMounted?: boolean;
 
   // --- Geometry: Initial values (creation-only) ---
 
@@ -266,7 +280,7 @@ export interface BaseWindowProps {
    * Vibrancy effect (macOS only). Creation-only.
    * @creationOnly Cannot be changed after window creation.
    */
-  vibrancy?: string;
+  vibrancy?: VibrancyType;
 
   /** Background color */
   backgroundColor?: string;
@@ -275,6 +289,13 @@ export interface BaseWindowProps {
   opacity?: number;
 
   // --- Behavior ---
+
+  /**
+   * Whether the window is visible. Default: true.
+   * Set to false to hide the window without destroying it (state is preserved).
+   * Unlike `open`, which controls the window's existence, `visible` controls whether it's shown.
+   */
+  visible?: boolean;
 
   /** Whether the window is resizable. Default: true. */
   resizable?: boolean;
@@ -378,11 +399,20 @@ export interface BaseWindowProps {
   /** Fired when window is restored from minimized */
   onRestore?: () => void;
 
+  /** Fired when the window gains focus */
+  onFocus?: () => void;
+
+  /** Fired when the window loses focus */
+  onBlur?: () => void;
+
+  /** Fired when the window is destroyed (for any reason — user close, programmatic, unmount) */
+  onClose?: () => void;
+
   /** Fired when window enters fullscreen */
   onEnterFullscreen?: () => void;
 
-  /** Fired when window leaves fullscreen */
-  onLeaveFullscreen?: () => void;
+  /** Fired when window exits fullscreen */
+  onExitFullscreen?: () => void;
 
   /** Fired when window moves to a different display */
   onDisplayChange?: (display: DisplayInfo) => void;
@@ -486,7 +516,9 @@ export type WindowAction =
   | { type: "setBounds"; bounds: Partial<Bounds> }
   | { type: "setTitle"; title: string }
   | { type: "enterFullscreen" }
-  | { type: "exitFullscreen" };
+  | { type: "exitFullscreen" }
+  | { type: "show" }
+  | { type: "hide" };
 
 /**
  * Window event types from main process

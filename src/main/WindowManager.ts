@@ -201,6 +201,7 @@ export class WindowManager {
           if (parentBW.isDestroyed()) return;
           this.dispatchEvent(parentBW.webContents, event);
         },
+        showOnCreate: (pending.props as any).showOnCreate !== false,
       });
 
       this.windows.set(windowId, instance);
@@ -363,6 +364,12 @@ export class WindowManager {
               break;
             case "exitFullscreen":
               instance.exitFullscreen();
+              break;
+            case "show":
+              instance.show();
+              break;
+            case "hide":
+              instance.hide();
               break;
           }
           return true;

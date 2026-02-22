@@ -65,7 +65,6 @@ describe("usePersistedBounds", () => {
       defaultX: 10,
       defaultY: 20,
     });
-    expect(result.current.isLoaded).toBe(true);
   });
 
   it("reads persisted bounds synchronously on first render", () => {

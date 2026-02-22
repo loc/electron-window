@@ -161,12 +161,12 @@ describe("<Window> state events", () => {
     await waitFor(() => expect(onEnterFullscreen).toHaveBeenCalledOnce());
   });
 
-  it("calls onLeaveFullscreen when leaveFullscreen event fires", async () => {
-    const onLeaveFullscreen = vi.fn();
+  it("calls onExitFullscreen when leaveFullscreen event fires", async () => {
+    const onExitFullscreen = vi.fn();
 
     render(
       <MockWindowProvider>
-        <Window open onLeaveFullscreen={onLeaveFullscreen}>
+        <Window open onExitFullscreen={onExitFullscreen}>
           <div>Content</div>
         </Window>
       </MockWindowProvider>,
@@ -178,7 +178,7 @@ describe("<Window> state events", () => {
       type: "leaveFullscreen",
     });
 
-    await waitFor(() => expect(onLeaveFullscreen).toHaveBeenCalledOnce());
+    await waitFor(() => expect(onExitFullscreen).toHaveBeenCalledOnce());
   });
 
   it("calls onDisplayChange with display info when displayChanged event fires", async () => {
