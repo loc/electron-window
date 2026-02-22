@@ -1,43 +1,19 @@
 import type { BrowserWindowConstructorOptions } from "electron";
+import type {
+  Bounds,
+  DisplayInfo,
+  WindowState,
+} from "../generated-ipc/common/electron_window.js";
+
+// Re-export from generated IPC types to ensure structural identity.
+// Prevents "Type X is not assignable to Type X" errors when consumers
+// import from both entry points.
+export type { Bounds, DisplayInfo, WindowState };
 
 /**
  * Unique identifier for a window instance
  */
 export type WindowId = string;
-
-/**
- * Window bounds (position and size)
- */
-export interface Bounds {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-/**
- * Window state information
- */
-export interface WindowState {
-  id: WindowId;
-  isFocused: boolean;
-  isVisible: boolean;
-  isMaximized: boolean;
-  isMinimized: boolean;
-  isFullscreen: boolean;
-  bounds: Bounds;
-  title: string;
-}
-
-/**
- * Display information
- */
-export interface DisplayInfo {
-  id: number;
-  bounds: Bounds;
-  workArea: Bounds;
-  scaleFactor: number;
-}
 
 /**
  * Title bar overlay options (Windows)
@@ -411,7 +387,7 @@ export interface BaseWindowProps {
   /** Fired when window enters fullscreen */
   onEnterFullscreen?: () => void;
 
-  /** Fired when window exits fullscreen */
+  /** Fired when window exits fullscreen (maps to Electron's 'leave-full-screen' event) */
   onExitFullscreen?: () => void;
 
   /** Fired when window moves to a different display */
@@ -432,6 +408,9 @@ export interface WindowProps extends BaseWindowProps {
 export interface WindowHandle {
   /** Unique window identifier */
   readonly id: WindowId;
+
+  /** Whether the window is ready and methods are operational */
+  readonly isReady: boolean;
 
   /** Current focused state */
   readonly isFocused: boolean;

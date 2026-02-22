@@ -411,6 +411,7 @@ export function MockWindow({
 
   const handle: WindowHandle = {
     id,
+    isReady: true,
     isFocused: fullState.isFocused,
     isMaximized: fullState.isMaximized,
     isMinimized: fullState.isMinimized,

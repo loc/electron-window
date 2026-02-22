@@ -557,6 +557,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(
 
       return {
         id: windowId,
+        isReady: true,
         isFocused: windowState?.isFocused ?? false,
         isMaximized: windowState?.isMaximized ?? false,
         isMinimized: windowState?.isMinimized ?? false,
@@ -595,6 +596,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(
       () =>
         handle ?? {
           id: windowId,
+          isReady: false,
           isFocused: false,
           isMaximized: false,
           isMinimized: false,

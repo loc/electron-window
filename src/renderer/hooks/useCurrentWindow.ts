@@ -80,6 +80,7 @@ export function useCurrentWindow(): WindowHandle {
 
   return {
     id: windowId,
+    isReady: true,
     isFocused: state?.isFocused ?? false,
     isMaximized: state?.isMaximized ?? false,
     isMinimized: state?.isMinimized ?? false,

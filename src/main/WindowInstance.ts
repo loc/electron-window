@@ -7,6 +7,7 @@ import type {
   DisplayInfo,
 } from "../generated-ipc/common/electron_window.js";
 import type { BaseWindowProps } from "../shared/types.js";
+import { CREATION_ONLY_PROPS } from "../shared/types.js";
 import {
   debounce,
   isMac,
@@ -104,20 +105,6 @@ const PROP_SETTERS: Record<
     win.setMaximumSize(w ?? 0, v as number);
   },
 };
-
-/**
- * Creation-only props that cannot be changed after window creation
- */
-const CREATION_ONLY_PROPS = new Set([
-  "transparent",
-  "frame",
-  "titleBarStyle",
-  "type",
-  "vibrancy",
-  "visualEffectState",
-  "roundedCorners",
-  "thickFrame",
-]);
 
 export interface WindowInstanceOptions {
   id: WindowId;

@@ -21,6 +21,7 @@ import type {
   Bounds,
   DisplayInfo,
   WindowPoolConfig,
+  BaseWindowProps,
 } from "../shared/types.js";
 import { CREATION_ONLY_PROPS } from "../shared/types.js";
 import { debounce } from "../shared/utils.js";
@@ -65,6 +66,10 @@ export interface WindowPoolDefinition {
   config?: WindowPoolConfig;
 }
 
+// Singleton pool instances keyed by pool definition. Pools outlive individual
+// component mounts and are shared across all <PooledWindow> uses of the same def.
+const poolInstances = new WeakMap<WindowPoolDefinition, RendererWindowPool>();
+
 /**
  * Create a pool definition. The shape props (transparent, frame, etc.) are
  * fixed for all windows in this pool — consumers cannot override them per-use.
@@ -81,64 +86,30 @@ export function createWindowPool(
 /** @deprecated Use createWindowPool instead */
 export const createWindowPoolDefinition = createWindowPool;
 
-export interface PooledWindowProps {
+/**
+ * Explicitly destroy a pool and remove it from the shared cache.
+ * Only needed for cleanup in tests or when you're certain the pool
+ * definition will never be used again.
+ */
+export function destroyWindowPool(poolDef: WindowPoolDefinition): void {
+  const instance = poolInstances.get(poolDef);
+  if (instance) {
+    instance.destroy();
+    poolInstances.delete(poolDef);
+  }
+}
+
+// Props owned by the pool's shape definition — consumers can't override these per-use
+type PoolShapeProps = "transparent" | "frame" | "titleBarStyle" | "vibrancy";
+// Props that don't apply to pooled windows
+type PoolExcludedProps = PoolShapeProps | "recreateOnShapeChange";
+
+export interface PooledWindowProps
+  extends Omit<BaseWindowProps, PoolExcludedProps> {
   /** Pool to acquire windows from */
   pool: WindowPoolDefinition;
-  /** Whether the window should be open */
-  open: boolean;
   /** Content to render inside the window */
   children: React.ReactNode;
-  /** Window title */
-  title?: string;
-  // Geometry
-  defaultWidth?: number;
-  defaultHeight?: number;
-  defaultX?: number;
-  defaultY?: number;
-  width?: number;
-  height?: number;
-  x?: number;
-  y?: number;
-  minWidth?: number;
-  maxWidth?: number;
-  minHeight?: number;
-  maxHeight?: number;
-  center?: boolean;
-  // Behavior
-  resizable?: boolean;
-  movable?: boolean;
-  minimizable?: boolean;
-  maximizable?: boolean;
-  closable?: boolean;
-  focusable?: boolean;
-  alwaysOnTop?: boolean | string;
-  skipTaskbar?: boolean;
-  fullscreen?: boolean;
-  fullscreenable?: boolean;
-  ignoreMouseEvents?: boolean;
-  visibleOnAllWorkspaces?: boolean;
-  // Appearance
-  backgroundColor?: string;
-  opacity?: number;
-  // Platform-specific
-  trafficLightPosition?: { x: number; y: number };
-  titleBarOverlay?: { color?: string; symbolColor?: string; height?: number };
-  // Target display
-  targetDisplay?: number | "primary" | "cursor";
-  // Callbacks
-  onUserClose?: () => void;
-  onBoundsChange?: (bounds: Bounds) => void;
-  onReady?: () => void;
-  onFocus?: () => void;
-  onBlur?: () => void;
-  onClose?: () => void;
-  onMaximize?: () => void;
-  onUnmaximize?: () => void;
-  onMinimize?: () => void;
-  onRestore?: () => void;
-  onEnterFullscreen?: () => void;
-  onExitFullscreen?: () => void;
-  onDisplayChange?: (display: DisplayInfo) => void;
 }
 
 export type PooledWindowRef = WindowHandle;
@@ -181,19 +152,24 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
   ) {
     const provider = useWindowProviderContext();
 
-    // Pool is created once per component mount and kept in a ref.
-    // We don't destroy it on unmount — it can be remounted and reused.
-    const poolRef = useRef<RendererWindowPool | null>(null);
-    if (!poolRef.current) {
-      poolRef.current = new RendererWindowPool({
-        shape: poolDef.shape,
-        config: poolDef.config,
-        registerWindow: provider.registerWindow,
-        unregisterWindow: provider.unregisterWindow,
-        windowAction: provider.windowAction,
-      });
-      void poolRef.current.warmUp();
-    }
+    // Share one pool instance per pool definition across all mounts.
+    // The pool captures provider methods at creation time — stable in practice
+    // since the provider comes from context and doesn't change across renders.
+    const pool = useMemo(() => {
+      let instance = poolInstances.get(poolDef);
+      if (!instance) {
+        instance = new RendererWindowPool({
+          shape: poolDef.shape,
+          config: poolDef.config,
+          registerWindow: provider.registerWindow,
+          unregisterWindow: provider.unregisterWindow,
+          windowAction: provider.windowAction,
+        });
+        poolInstances.set(poolDef, instance);
+        void instance.warmUp();
+      }
+      return instance;
+    }, [poolDef]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
     const [windowId, setWindowId] = useState<WindowId | null>(null);
@@ -216,14 +192,14 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
     // Acquire on open=true, release on open=false
     useEffect(() => {
       if (!open) {
-        if (entryRef.current && poolRef.current) {
+        if (entryRef.current) {
           const idToRelease = entryRef.current.id;
           entryRef.current = null;
           setPortalTarget(null);
           setWindowId(null);
           setIsReady(false);
           setWindowState(null);
-          void poolRef.current.release(idToRelease);
+          void pool.release(idToRelease);
         }
         return;
       }
@@ -231,9 +207,6 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
       let cancelled = false;
 
       async function acquireWindow() {
-        const pool = poolRef.current;
-        if (!pool) return;
-
         const entry = await pool.acquire();
         if (cancelled) {
           void pool.release(entry.id);
@@ -411,13 +384,13 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
     useEffect(() => {
       return () => {
         debouncedBoundsChange.current.cancel();
-        if (entryRef.current && poolRef.current) {
-          void poolRef.current.release(entryRef.current.id);
+        if (entryRef.current) {
+          void pool.release(entryRef.current.id);
           entryRef.current = null;
         }
         // Intentionally do NOT destroy the pool — it outlives individual mounts
       };
-    }, []);
+    }, [pool]);
 
     const subscribe = useCallback((listener: () => void) => {
       stateListeners.current.add(listener);
@@ -434,6 +407,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
 
       return {
         id: windowId,
+        isReady: true,
         isFocused: windowState?.isFocused ?? false,
         isMaximized: windowState?.isMaximized ?? false,
         isMinimized: windowState?.isMinimized ?? false,
@@ -474,6 +448,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
       () =>
         handle ?? {
           id: windowId ?? "",
+          isReady: false,
           isFocused: false,
           isMaximized: false,
           isMinimized: false,

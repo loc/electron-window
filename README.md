@@ -95,11 +95,9 @@ The main component for creating windows.
   open={boolean}                    // Required: whether window should exist
   onUserClose={() => void}          // Called when user closes window
   closable={boolean}                // Can user close? (default: true)
-  keepMounted={boolean}             // Hide instead of destroy when open=false
-
   // Visibility
   visible={boolean}                 // Show/hide without destroying (default: true)
-                                    // Unlike `open`, the window stays mounted when false
+                                    // Use visible={false} to hide without destroying
 
   // Geometry (initial)
   defaultWidth={number}             // Initial width (creation-only)
@@ -135,7 +133,7 @@ The main component for creating windows.
 
 #### `visible` vs `open`
 
-- `open={false}` — destroys the window (or hides it if `keepMounted` is set)
+- `open={false}` — destroys the window
 - `visible={false}` — hides the window while keeping it alive and mounted; state is preserved
 
 #### `webPreferences` is main-process-only
