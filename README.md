@@ -1,18 +1,16 @@
 # @loc/electron-window
 
-Declarative React components for Electron window management.
+Declarative React components for Electron window management. Opens native windows with `<Window open>`, renders children via portals so your React context (providers, themes, state) works inside child windows without any extra wiring.
 
-## Installation
+## Install
 
 ```bash
 npm install @loc/electron-window
-# or
-yarn add @loc/electron-window
 ```
 
-## Quick Start
+## Setup
 
-### Main Process
+Three files — one per Electron process:
 
 ```ts
 // main.ts
@@ -25,24 +23,16 @@ const manager = setupWindowManager({
     },
   },
 });
-
-// Register your main window (and any other BrowserWindows you create)
 manager.setupForWindow(mainWindow);
 ```
 
-### Preload Script
-
 ```ts
-// preload.ts
+// preload.ts — must be bundled (esbuild, webpack, etc.)
 import "@loc/electron-window/preload";
 ```
 
-> **Note:** The preload import must be bundled (esbuild, webpack, etc.) before use. Do not point Electron directly at `node_modules/@loc/electron-window/dist/preload/index.js`.
-
-### Renderer Process
-
 ```tsx
-// App.tsx
+// renderer
 import { WindowProvider, Window } from "@loc/electron-window";
 
 function App() {
@@ -50,8 +40,7 @@ function App() {
 
   return (
     <WindowProvider>
-      <button onClick={() => setShowSettings(true)}>Open Settings</button>
-
+      <button onClick={() => setShowSettings(true)}>Settings</button>
       <Window
         open={showSettings}
         onUserClose={() => setShowSettings(false)}
@@ -66,132 +55,230 @@ function App() {
 }
 ```
 
-## Features
+Children of `<Window>` are in the parent React tree. Redux stores, theme providers, routers — they all work inside child windows automatically.
 
-- **Declarative API**: Manage windows with React components and props
-- **Type-safe**: Full TypeScript support with comprehensive types
-- **Two-intent model**: Clean separation of app intent vs user actions
-- **Context preservation**: Children of `<Window>` share the parent React tree — your providers, themes, and state are all available inside child windows without any extra wiring
-- **Bounds persistence**: Window positions and sizes are saved to localStorage by default; no server or file I/O required
-- **Hooks**: `useCurrentWindow`, `useWindowFocused`, `useWindowBounds`, etc.
-- **Testing utilities**: Mock providers for unit testing without Electron
+## `<Window>` Props
 
-## How it works
+### Lifecycle
 
-1. The renderer calls `window.open()` to create a child `BrowserWindow`
-2. The main process intercepts it via `setWindowOpenHandler` + `did-create-window`
-3. Child window content is rendered via `createPortal`, preserving the parent React context (providers, themes, state)
-4. Props are sent from the renderer to the main process over type-safe IPC to configure the `BrowserWindow`
+| Prop          | Type         | Default  | Description                                                 |
+| ------------- | ------------ | -------- | ----------------------------------------------------------- |
+| `open`        | `boolean`    | required | Whether the window exists. `false` destroys it.             |
+| `visible`     | `boolean`    | `true`   | Show/hide without destroying. State is preserved.           |
+| `closable`    | `boolean`    | `true`   | Whether the user can close the window.                      |
+| `onUserClose` | `() => void` | —        | User clicked X. Fires once; sync your state here.           |
+| `onClose`     | `() => void` | —        | Window destroyed (any reason: user, programmatic, unmount). |
+| `onReady`     | `() => void` | —        | Window ready and content mounted.                           |
 
-## API Reference
+`open` controls existence. `visible` controls visibility. `open={true} visible={false}` creates a hidden window with state preserved. `open={false}` destroys everything.
 
-### `<Window>`
+### Geometry
 
-The main component for creating windows.
+| Prop                             | Type               | Description                                                            |
+| -------------------------------- | ------------------ | ---------------------------------------------------------------------- |
+| `defaultWidth` / `defaultHeight` | `number`           | Initial size. Applied once on creation. User can resize freely.        |
+| `defaultX` / `defaultY`          | `number`           | Initial position. Applied once on creation.                            |
+| `width` / `height`               | `number`           | Controlled size. Changes resize the window. Use with `onBoundsChange`. |
+| `x` / `y`                        | `number`           | Controlled position. Changes move the window.                          |
+| `onBoundsChange`                 | `(bounds) => void` | Fires on resize/move. Debounced internally (100ms).                    |
+| `minWidth` / `maxWidth`          | `number`           | Size constraints.                                                      |
+| `minHeight` / `maxHeight`        | `number`           | Size constraints.                                                      |
+| `center`                         | `boolean`          | Center on creation. Default `true` when no position specified.         |
+
+The `default*` / controlled split follows React's `defaultValue` / `value` pattern. Use `defaultWidth` for fire-and-forget, `width` + `onBoundsChange` for two-way sync.
+
+### Appearance
+
+| Prop              | Type      | Default | Description                                          |
+| ----------------- | --------- | ------- | ---------------------------------------------------- |
+| `title`           | `string`  | `""`    | Window title.                                        |
+| `transparent`     | `boolean` | `false` | Transparent background. **Creation-only.**           |
+| `frame`           | `boolean` | `true`  | Show window chrome. **Creation-only.**               |
+| `titleBarStyle`   | `string`  | —       | `"hidden"`, `"hiddenInset"`, etc. **Creation-only.** |
+| `vibrancy`        | `string`  | —       | macOS vibrancy effect. **Creation-only.**            |
+| `backgroundColor` | `string`  | —       | Background color.                                    |
+| `opacity`         | `number`  | —       | Window opacity (0.0–1.0).                            |
+
+**Creation-only** props can't change after the window is created. Changing them logs a dev warning. Set `recreateOnShapeChange` to destroy and recreate the window instead.
+
+### Behavior
+
+| Prop                     | Type      | Default |
+| ------------------------ | --------- | ------- |
+| `resizable`              | `boolean` | `true`  |
+| `movable`                | `boolean` | `true`  |
+| `minimizable`            | `boolean` | `true`  |
+| `maximizable`            | `boolean` | `true`  |
+| `focusable`              | `boolean` | `true`  |
+| `alwaysOnTop`            | `boolean` | `false` |
+| `skipTaskbar`            | `boolean` | `false` |
+| `fullscreen`             | `boolean` | `false` |
+| `fullscreenable`         | `boolean` | `true`  |
+| `showInactive`           | `boolean` | `false` |
+| `ignoreMouseEvents`      | `boolean` | `false` |
+| `visibleOnAllWorkspaces` | `boolean` | `false` |
+
+### Events
+
+| Prop                                     | Fires when                          |
+| ---------------------------------------- | ----------------------------------- |
+| `onFocus`                                | Window gains focus                  |
+| `onBlur`                                 | Window loses focus                  |
+| `onMaximize` / `onUnmaximize`            | Maximize state changes              |
+| `onMinimize` / `onRestore`               | Minimize state changes              |
+| `onEnterFullscreen` / `onExitFullscreen` | Fullscreen changes                  |
+| `onDisplayChange`                        | Window moves to a different monitor |
+| `onBoundsChange`                         | Window resized or moved             |
+
+### Platform
+
+| Prop                   | Platform | Description                                    |
+| ---------------------- | -------- | ---------------------------------------------- |
+| `trafficLightPosition` | macOS    | `{ x, y }` for close/minimize/maximize buttons |
+| `titleBarOverlay`      | Windows  | `{ color, symbolColor, height }`               |
+| `targetDisplay`        | all      | `"primary"`, `"cursor"`, or display index      |
+
+### Advanced
+
+| Prop                    | Type                               | Default  | Description                                                      |
+| ----------------------- | ---------------------------------- | -------- | ---------------------------------------------------------------- |
+| `persistBounds`         | `string`                           | —        | Unique key. Saves bounds to localStorage, restores on reopen.    |
+| `recreateOnShapeChange` | `boolean`                          | `false`  | Recreate window when creation-only props change.                 |
+| `name`                  | `string`                           | —        | Debug label for DevTools and warning messages.                   |
+| `injectStyles`          | `"auto" \| false \| (doc) => void` | `"auto"` | How to copy styles into the child window. `false` for CSS-in-JS. |
+
+## Hooks
+
+All hooks must be called inside a `<Window>`'s children.
 
 ```tsx
+function WindowContent() {
+  // Imperative handle — stable callbacks, state as snapshot
+  const win = useCurrentWindow();
+  win.focus();
+  win.close();
+  win.setBounds({ width: 800, height: 600 });
+
+  // Reactive state — each re-renders only when its value changes
+  const isFocused = useWindowFocused();
+  const isMaximized = useWindowMaximized();
+  const isMinimized = useWindowMinimized();
+  const isFullscreen = useWindowFullscreen();
+  const isVisible = useWindowVisible();
+  const bounds = useWindowBounds(); // { x, y, width, height }
+  const display = useWindowDisplay(); // { id, bounds, workArea, scaleFactor }
+  const state = useWindowState(); // full WindowState object
+}
+```
+
+`useCurrentWindow()` returns a `WindowHandle` with stable method references — `focus`, `close`, etc. won't change identity across renders.
+
+## Bounds Persistence
+
+```tsx
+// Simple — just add a key
 <Window
-  // Lifecycle
-  open={boolean}                    // Required: whether window should exist
-  onUserClose={() => void}          // Called when user closes window
-  closable={boolean}                // Can user close? (default: true)
-  // Visibility
-  visible={boolean}                 // Show/hide without destroying (default: true)
-                                    // Use visible={false} to hide without destroying
-
-  // Geometry (initial)
-  defaultWidth={number}             // Initial width (creation-only)
-  defaultHeight={number}            // Initial height (creation-only)
-  defaultX={number}                 // Initial x position (creation-only)
-  defaultY={number}                 // Initial y position (creation-only)
-
-  // Geometry (controlled)
-  width={number}                    // Controlled width
-  height={number}                   // Controlled height
-  onBoundsChange={(bounds) => void} // Called on resize/move
-
-  // Appearance
-  title={string}
-  transparent={boolean}             // Creation-only
-  frame={boolean}                   // Creation-only
-  backgroundColor={string}
-
-  // Behavior
-  resizable={boolean}
-  movable={boolean}
-  alwaysOnTop={boolean}
-
-  // Persistence
-  persistBounds="unique-key"        // Auto-save/restore bounds
-
-  // Security note: webPreferences is main-process-only and cannot be set
-  // from the renderer. Configure it in setupWindowManager's defaultWindowOptions.
+  open={show}
+  persistBounds="settings"
+  defaultWidth={600}
+  defaultHeight={400}
 >
-  {children}
+  <Settings />
 </Window>
 ```
 
-#### `visible` vs `open`
+First open uses defaults. User resizes/moves, bounds save to localStorage. Next open restores them.
 
-- `open={false}` — destroys the window
-- `visible={false}` — hides the window while keeping it alive and mounted; state is preserved
+For manual control, use the hook directly:
 
-#### `webPreferences` is main-process-only
+```tsx
+import { usePersistedBounds } from "@loc/electron-window";
 
-`webPreferences` (and other sensitive `BrowserWindow` options) cannot be set from the renderer. This is intentional — only the main process can configure security-sensitive options. Set them in `setupWindowManager`'s `defaultWindowOptions`:
+function PersistentWindow({ children }) {
+  const { bounds, save, clear } = usePersistedBounds("my-window", {
+    defaultWidth: 800,
+    defaultHeight: 600,
+  });
 
-```ts
-setupWindowManager({
-  defaultWindowOptions: {
-    webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
-      sandbox: true,
-    },
-  },
-});
+  return (
+    <Window open {...bounds} onBoundsChange={save}>
+      {children}
+      <button onClick={clear}>Reset Position</button>
+    </Window>
+  );
+}
 ```
 
-### `<PooledWindow>`
+## Pooled Windows
 
-Pre-warms windows for instant display. Useful for overlays and panels that appear frequently.
+For windows that appear/disappear frequently (overlays, HUDs, menus), pool pre-warms hidden windows for instant display:
 
 ```tsx
 import { PooledWindow, createWindowPool } from "@loc/electron-window";
 
+// Create once at module level
 const overlayPool = createWindowPool(
-  { transparent: true, frame: false },
-  { minIdle: 1, maxIdle: 3, idleTimeout: 5000 },
+  { transparent: true, frame: false }, // shape (creation-only props)
+  { minIdle: 1, maxIdle: 3, idleTimeout: 5000 }, // pool config
 );
 
 function App() {
-  const [showOverlay, setShowOverlay] = useState(false);
+  const [show, setShow] = useState(false);
   return (
-    <PooledWindow pool={overlayPool} open={showOverlay}>
-      <OverlayContent />
+    <PooledWindow pool={overlayPool} open={show} alwaysOnTop>
+      <Overlay />
     </PooledWindow>
   );
 }
 ```
 
-### Hooks
+On `open={true}`: acquires a pre-warmed window from the pool (instant). On `open={false}`: hides and returns to pool (no destroy/recreate cost).
+
+Shape props (`transparent`, `frame`, `titleBarStyle`, `vibrancy`) are fixed by the pool. All other props can change per use.
+
+## Common Patterns
+
+### Unsaved changes — prevent close while dirty
 
 ```tsx
-// Inside a Window's children
-function SettingsPanel() {
-  // Imperative access
-  const window = useCurrentWindow();
-  window.focus();
-  window.minimize();
-  window.close();
-
-  // Reactive state (re-renders on change)
-  const isFocused = useWindowFocused();
-  const bounds = useWindowBounds();
-  const isMaximized = useWindowMaximized();
-}
+<Window
+  open={showEditor}
+  closable={!hasUnsavedChanges}
+  onUserClose={() => setShowEditor(false)}
+>
+  <Editor />
+  {hasUnsavedChanges && <SavePrompt />}
+</Window>
 ```
 
-### Testing
+### Window ref — control from parent
+
+```tsx
+const ref = useRef<WindowRef>(null);
+
+<Window ref={ref} open={show}>
+  <Content />
+</Window>;
+
+// Later
+ref.current?.focus();
+ref.current?.setBounds({ width: 1024, height: 768 });
+```
+
+### Multiple independent windows
+
+```tsx
+<Window open={showA} title="Window A">
+  <ContentA />
+</Window>
+<Window open={showB} title="Window B">
+  <ContentB />
+</Window>
+```
+
+Each `<Window>` manages its own lifecycle independently.
+
+## Testing
 
 ```tsx
 import {
@@ -199,11 +286,12 @@ import {
   MockWindow,
   getMockWindows,
   resetMockWindows,
+  simulateMockWindowEvent,
 } from "@loc/electron-window/testing";
 
+// Test window management
 test("opens settings window", async () => {
   resetMockWindows();
-
   render(
     <MockWindowProvider>
       <MyApp />
@@ -218,26 +306,48 @@ test("opens settings window", async () => {
   });
 });
 
-// Test components that use useCurrentWindow() directly:
-test("panel renders focused state", () => {
+// Test components that use useCurrentWindow()
+test("shows focused indicator", () => {
   render(
     <MockWindow state={{ isFocused: true }}>
-      <SettingsPanel />
+      <StatusBar />
     </MockWindow>,
   );
-
   expect(screen.getByText("Focused")).toBeInTheDocument();
+});
+
+// Simulate events
+test("handles bounds change", async () => {
+  resetMockWindows();
+  render(
+    <MockWindowProvider>
+      <MyApp />
+    </MockWindowProvider>,
+  );
+  // ... open window ...
+  simulateMockWindowEvent(getMockWindows()[0].id, {
+    type: "boundsChanged",
+    bounds: { x: 0, y: 0, width: 500, height: 400 },
+  });
 });
 ```
 
+## Security
+
+- `webPreferences` cannot be set from the renderer — only via `setupWindowManager` in the main process
+- All renderer-supplied props are filtered through an allowlist before reaching `BrowserWindow`
+- Child windows can only open `about:blank` — arbitrary URLs are rejected
+- IPC validated via schema with origin and frame checks
+- Rate limits on window creation (configurable `maxPendingWindows` and `maxWindows`)
+
 ## Entry Points
 
-| Import                         | Use                        |
-| ------------------------------ | -------------------------- |
-| `@loc/electron-window`         | React components, hooks    |
-| `@loc/electron-window/main`    | Main process setup         |
-| `@loc/electron-window/preload` | Preload script setup       |
-| `@loc/electron-window/testing` | Mock providers for testing |
+| Import                         | Use                                 |
+| ------------------------------ | ----------------------------------- |
+| `@loc/electron-window`         | Components, hooks (renderer)        |
+| `@loc/electron-window/main`    | `setupWindowManager` (main process) |
+| `@loc/electron-window/preload` | IPC bridge (preload script)         |
+| `@loc/electron-window/testing` | Mocks for unit tests                |
 
 ## License
 
