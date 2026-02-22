@@ -1211,3 +1211,185 @@ describe("<Window> closable prop", () => {
     });
   });
 });
+
+describe("<Window> timing and cancellation", () => {
+  beforeEach(() => {
+    resetMockWindows();
+    resetMockWindowsGlobal();
+    vi.clearAllMocks();
+  });
+
+  it("cancels window creation when component unmounts during registerWindow", async () => {
+    // registerWindow is async — unmounting before the microtask resumes sets
+    // `cancelled = true`, so openWindow() bails before calling window.open.
+    const { unmount } = render(
+      <MockWindowProvider>
+        <Window open>
+          <div>Content</div>
+        </Window>
+      </MockWindowProvider>,
+    );
+
+    // Unmount synchronously before any microtasks/macrotasks run
+    unmount();
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(getGlobalMockWindows().size).toBe(0);
+  });
+
+  it("cancels window creation when open changes to false during setup", async () => {
+    // Toggle open→false on the next tick, before openWindow() can finish
+    function TestApp() {
+      const [open, setOpen] = React.useState(true);
+      React.useEffect(() => {
+        const timer = setTimeout(() => setOpen(false), 0);
+        return () => clearTimeout(timer);
+      }, []);
+      return (
+        <MockWindowProvider>
+          <Window open={open}>
+            <div>Content</div>
+          </Window>
+        </MockWindowProvider>
+      );
+    }
+
+    render(<TestApp />);
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // The close-effect runs when open becomes false, closing the window and
+    // calling unregisterWindow — net result is zero windows.
+    expect(getGlobalMockWindows().size).toBe(0);
+  });
+
+  it("handles window.open returning null gracefully", async () => {
+    const originalOpen = window.open;
+    (window.open as ReturnType<typeof vi.fn>) = vi.fn(() => null);
+
+    const consoleWarnSpy = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => {});
+
+    render(
+      <MockWindowProvider>
+        <Window open>
+          <div>Content</div>
+        </Window>
+      </MockWindowProvider>,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // window.open returned null → devWarning fires, no portal is created,
+    // no window is leaked in the mock store.
+    expect(getGlobalMockWindows().size).toBe(0);
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/window\.open blocked/),
+    );
+
+    window.open = originalOpen;
+    consoleWarnSpy.mockRestore();
+  });
+
+  it("cancels waitForWindowReady polling loop when unmounted", async () => {
+    // SlowMockWindow keeps innerWidth=0 and document.body=null, so
+    // waitForWindowReady never exits on its own — it loops until cancelled.
+    const { SlowMockWindow } = await import("../setup.js");
+    const originalOpen = window.open;
+
+    let slowWin: InstanceType<typeof SlowMockWindow> | null = null;
+    (window.open as ReturnType<typeof vi.fn>) = vi.fn(() => {
+      slowWin = new SlowMockWindow();
+      return slowWin as unknown as Window;
+    });
+
+    const { unmount } = render(
+      <MockWindowProvider>
+        <Window open>
+          <div>Content</div>
+        </Window>
+      </MockWindowProvider>,
+    );
+
+    // Let openWindow() reach waitForWindowReady and start looping
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(slowWin).not.toBeNull();
+    // Window is not ready yet — no entry in the mock store
+    expect(getGlobalMockWindows().size).toBe(0);
+
+    // Unmounting sets cancelled=true, causing waitForWindowReady to throw and
+    // openWindow() to call win.close() and bail — no leak.
+    unmount();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(
+      (slowWin as InstanceType<typeof SlowMockWindow>).close,
+    ).toHaveBeenCalled();
+    expect(getGlobalMockWindows().size).toBe(0);
+
+    window.open = originalOpen;
+  });
+
+  it("rapid open/close/open creates exactly one window", async () => {
+    function TestApp() {
+      const [open, setOpen] = React.useState(false);
+      return (
+        <MockWindowProvider>
+          <button onClick={() => setOpen(true)}>Open</button>
+          <button onClick={() => setOpen(false)}>Close</button>
+          <Window open={open} onUserClose={() => setOpen(false)}>
+            <div data-testid="window-content">Content</div>
+          </Window>
+        </MockWindowProvider>
+      );
+    }
+
+    render(<TestApp />);
+
+    // Open and wait for the window to be registered
+    fireEvent.click(screen.getByText("Open"));
+    await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
+
+    // Close then immediately open, without waiting for close to settle
+    fireEvent.click(screen.getByText("Close"));
+    fireEvent.click(screen.getByText("Open"));
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    // The cancelled flag from the close should prevent any double-open leak.
+    // Exactly one window survives.
+    await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
+  });
+
+  it("cleans up debounced bounds handler on unmount", async () => {
+    const onBoundsChange = vi.fn();
+
+    const { unmount } = render(
+      <MockWindowProvider>
+        <Window open onBoundsChange={onBoundsChange}>
+          <div>Content</div>
+        </Window>
+      </MockWindowProvider>,
+    );
+
+    await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
+
+    const mockWins = getMockWindows();
+    simulateMockWindowEvent(mockWins[0].id, {
+      type: "boundsChanged",
+      bounds: { x: 0, y: 0, width: 500, height: 400 },
+    });
+
+    // Unmount before the debounce delay (100ms) elapses — the pending callback
+    // should be cancelled so onBoundsChange never fires.
+    unmount();
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    // If debounce cleanup works, onBoundsChange is never called after unmount.
+    // (A failure here would also surface as a "setState on unmounted component" warning.)
+    expect(onBoundsChange).not.toHaveBeenCalled();
+  });
+});

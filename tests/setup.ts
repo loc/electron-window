@@ -109,6 +109,60 @@ export function simulateUserClose(windowName: string) {
   win.simulateUnload();
 }
 
+/**
+ * A mock window that stays "not ready" (innerWidth=0, document.body=null) until
+ * makeReady() is called. Use this to test the waitForWindowReady polling loop
+ * and cancellation paths.
+ */
+export class SlowMockWindow {
+  innerWidth = 0;
+  innerHeight = 0;
+  screenX = 0;
+  screenY = 0;
+  outerWidth = 0;
+  outerHeight = 0;
+  closed = false;
+  document: { body: null | HTMLElement; title: string };
+
+  private _eventListeners = new Map<
+    string,
+    Set<EventListenerOrEventListenerObject>
+  >();
+
+  focus = vi.fn();
+  blur = vi.fn();
+  close = vi.fn(() => {
+    this.closed = true;
+  });
+
+  constructor() {
+    // Start with document.body = null so waitForWindowReady loops
+    this.document = { body: null, title: "" };
+  }
+
+  makeReady() {
+    this.innerWidth = 800;
+    this.innerHeight = 600;
+    this.outerWidth = 800;
+    this.outerHeight = 600;
+    this.document = window.document.implementation.createHTMLDocument("ready");
+  }
+
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+    if (!this._eventListeners.has(type)) {
+      this._eventListeners.set(type, new Set());
+    }
+    this._eventListeners.get(type)!.add(listener);
+  }
+
+  removeEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+  ) {
+    this._eventListeners.get(type)?.delete(listener);
+  }
+}
+
 // Mock Electron in test environment
 vi.mock("electron", () => ({
   BrowserWindow: vi.fn(),
