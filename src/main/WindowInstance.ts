@@ -1,10 +1,11 @@
 import { BrowserWindow, screen } from "electron";
-import type {
-  Bounds,
-  WindowId,
-  WindowState,
-  WindowEvent,
-  DisplayInfo,
+import {
+  WindowEventType,
+  type Bounds,
+  type WindowId,
+  type WindowState,
+  type WindowEvent,
+  type DisplayInfo,
 } from "../generated-ipc/common/electron_window.js";
 import type { BaseWindowProps } from "../shared/types.js";
 import { CREATION_ONLY_PROPS } from "../shared/types.js";
@@ -138,7 +139,7 @@ export class WindowInstance {
     this.emitBoundsChange = debounce(() => {
       if (this.browserWindow && !this.isDestroyed) {
         this.onEvent({
-          type: "boundsChanged",
+          type: WindowEventType.BoundsChanged,
           id: this.id,
           bounds: this.getBounds(),
         });
@@ -189,7 +190,7 @@ export class WindowInstance {
     win.on("closed", () => {
       this.isDestroyed = true;
       this.browserWindow = null;
-      this.onEvent({ type: "closed", id: this.id });
+      this.onEvent({ type: WindowEventType.Closed, id: this.id });
     });
 
     win.on("close", (event) => {
@@ -198,37 +199,37 @@ export class WindowInstance {
         return;
       }
       if (!this.isDestroyed && !this._forceClosing) {
-        this.onEvent({ type: "userCloseRequested", id: this.id });
+        this.onEvent({ type: WindowEventType.UserCloseRequested, id: this.id });
       }
     });
 
     win.on("focus", () => {
-      if (!this.isDestroyed) this.onEvent({ type: "focused", id: this.id });
+      if (!this.isDestroyed) this.onEvent({ type: WindowEventType.Focused, id: this.id });
     });
     win.on("blur", () => {
-      if (!this.isDestroyed) this.onEvent({ type: "blurred", id: this.id });
+      if (!this.isDestroyed) this.onEvent({ type: WindowEventType.Blurred, id: this.id });
     });
 
     win.on("maximize", () => {
-      if (!this.isDestroyed) this.onEvent({ type: "maximized", id: this.id });
+      if (!this.isDestroyed) this.onEvent({ type: WindowEventType.Maximized, id: this.id });
     });
     win.on("unmaximize", () => {
-      if (!this.isDestroyed) this.onEvent({ type: "unmaximized", id: this.id });
+      if (!this.isDestroyed) this.onEvent({ type: WindowEventType.Unmaximized, id: this.id });
     });
     win.on("minimize", () => {
-      if (!this.isDestroyed) this.onEvent({ type: "minimized", id: this.id });
+      if (!this.isDestroyed) this.onEvent({ type: WindowEventType.Minimized, id: this.id });
     });
     win.on("restore", () => {
-      if (!this.isDestroyed) this.onEvent({ type: "restored", id: this.id });
+      if (!this.isDestroyed) this.onEvent({ type: WindowEventType.Restored, id: this.id });
     });
 
     win.on("enter-full-screen", () => {
       if (!this.isDestroyed)
-        this.onEvent({ type: "enterFullscreen", id: this.id });
+        this.onEvent({ type: WindowEventType.EnterFullscreen, id: this.id });
     });
     win.on("leave-full-screen", () => {
       if (!this.isDestroyed)
-        this.onEvent({ type: "leaveFullscreen", id: this.id });
+        this.onEvent({ type: WindowEventType.LeaveFullscreen, id: this.id });
     });
 
     win.on("resize", () => {
@@ -268,7 +269,7 @@ export class WindowInstance {
     if (this.lastDisplay === null || this.lastDisplay.id !== displayInfo.id) {
       this.lastDisplay = displayInfo;
       this.onEvent({
-        type: "displayChanged",
+        type: WindowEventType.DisplayChanged,
         id: this.id,
         display: displayInfo,
       });

@@ -176,7 +176,7 @@ enum WindowEventType {
 }
 
 structure WindowEvent {
-    type: string
+    type: WindowEventType
     id: WindowId
     bounds?: Bounds
     display?: DisplayInfo
