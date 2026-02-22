@@ -29,9 +29,8 @@
   ],
   "sideEffects": [
     "./dist/preload/index.js",
-    "./src/preload/index.ts",
-    "./src/generated-ipc/preload/electron_window.ts",
-    "./src/generated-ipc/_internal/preload/electron_window.ts"
+    "./src/preload/**",
+    "./src/generated-ipc/**/preload/**"
   ],
   "engines": {
     "node": ">=20"
