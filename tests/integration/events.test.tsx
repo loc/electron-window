@@ -173,6 +173,54 @@ describe("<Window> state events", () => {
     await waitFor(() => expect(onExitFullscreen).toHaveBeenCalledOnce());
   });
 
+  it("calls onClose when closed event fires", async () => {
+    const onClose = vi.fn();
+
+    render(
+      <MockWindowProvider>
+        <Window open onClose={onClose}>
+          <div>Content</div>
+        </Window>
+      </MockWindowProvider>,
+    );
+
+    await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
+
+    const mockWindows = getMockWindows();
+    simulateMockWindowEvent(mockWindows[0].id, { type: "closed" });
+
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("onClose is distinct from onUserClose", async () => {
+    const onClose = vi.fn();
+    const onUserClose = vi.fn();
+
+    render(
+      <MockWindowProvider>
+        <Window open onClose={onClose} onUserClose={onUserClose}>
+          <div>Content</div>
+        </Window>
+      </MockWindowProvider>,
+    );
+
+    await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
+
+    // Fire userCloseRequested — should call onUserClose but NOT onClose
+    const mockWindows = getMockWindows();
+    simulateMockWindowEvent(mockWindows[0].id, { type: "userCloseRequested" });
+
+    await waitFor(() => expect(onUserClose).toHaveBeenCalledOnce());
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Fire closed — should call onClose
+    simulateMockWindowEvent(mockWindows[0].id, { type: "closed" });
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  });
+
   it("calls onDisplayChange with display info when displayChanged event fires", async () => {
     const onDisplayChange = vi.fn();
     const display = {

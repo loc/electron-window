@@ -1212,6 +1212,67 @@ describe("<Window> closable prop", () => {
   });
 });
 
+describe("<Window> visible prop", () => {
+  beforeEach(() => {
+    resetMockWindows();
+    resetMockWindowsGlobal();
+    vi.clearAllMocks();
+  });
+
+  it("sends visible=false to main process via updateWindow", async () => {
+    function TestApp() {
+      const [visible, setVisible] = React.useState(true);
+      return (
+        <MockWindowProvider>
+          <button onClick={() => setVisible(false)}>Hide</button>
+          <button onClick={() => setVisible(true)}>Show</button>
+          <Window open visible={visible}>
+            <div>Content</div>
+          </Window>
+        </MockWindowProvider>
+      );
+    }
+
+    render(<TestApp />);
+    await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
+
+    // Change visible to false
+    fireEvent.click(screen.getByText("Hide"));
+
+    await waitFor(() => {
+      const mockWindows = getMockWindows();
+      expect(mockWindows[0].props.visible).toBe(false);
+    });
+
+    // Change visible back to true
+    fireEvent.click(screen.getByText("Show"));
+
+    await waitFor(() => {
+      const mockWindows = getMockWindows();
+      expect(mockWindows[0].props.visible).toBe(true);
+    });
+  });
+
+  it("window stays open when visible=false (not destroyed)", async () => {
+    render(
+      <MockWindowProvider>
+        <Window open visible={false}>
+          <div>Content</div>
+        </Window>
+      </MockWindowProvider>,
+    );
+
+    await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
+
+    // Window should exist (open=true) even though visible=false
+    expect(getGlobalMockWindows().size).toBe(1);
+
+    // The visible prop should be sent
+    const mockWindows = getMockWindows();
+    expect(mockWindows[0].props.visible).toBe(false);
+  });
+});
+
 describe("<Window> timing and cancellation", () => {
   beforeEach(() => {
     resetMockWindows();

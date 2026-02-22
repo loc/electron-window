@@ -7,8 +7,9 @@ import {
   MockWindowProvider,
   resetMockWindows,
   getMockWindows,
+  simulateMockWindowEvent,
 } from "../../src/testing/index.js";
-import { resetMockWindowsGlobal } from "../setup.js";
+import { resetMockWindowsGlobal, getGlobalMockWindows } from "../setup.js";
 
 const STORAGE_PREFIX = "electron-window:bounds:";
 
@@ -185,6 +186,54 @@ describe("usePersistedBounds", () => {
     // Falls back to defaults without throwing
     expect(result.current.bounds.defaultWidth).toBe(600);
     expect(result.current.bounds.defaultHeight).toBe(400);
+  });
+
+  it("falls back to defaults when stored bounds have zero width", () => {
+    localStorage.setItem(
+      storageKey("zero-width"),
+      JSON.stringify({ x: 0, y: 0, width: 0, height: 600 }),
+    );
+
+    const { result } = renderHook(() =>
+      usePersistedBounds("zero-width", {
+        defaultWidth: 800,
+        defaultHeight: 600,
+      }),
+    );
+
+    expect(result.current.bounds.defaultWidth).toBe(800);
+    expect(result.current.bounds.defaultHeight).toBe(600);
+  });
+
+  it("falls back to defaults when stored bounds have zero height", () => {
+    localStorage.setItem(
+      storageKey("zero-height"),
+      JSON.stringify({ x: 0, y: 0, width: 800, height: 0 }),
+    );
+
+    const { result } = renderHook(() =>
+      usePersistedBounds("zero-height", {
+        defaultWidth: 800,
+        defaultHeight: 600,
+      }),
+    );
+
+    expect(result.current.bounds.defaultWidth).toBe(800);
+    expect(result.current.bounds.defaultHeight).toBe(600);
+  });
+
+  it("falls back to defaults when stored bounds have negative dimensions", () => {
+    localStorage.setItem(
+      storageKey("negative"),
+      JSON.stringify({ x: 0, y: 0, width: -100, height: -50 }),
+    );
+
+    const { result } = renderHook(() =>
+      usePersistedBounds("negative", { defaultWidth: 800, defaultHeight: 600 }),
+    );
+
+    expect(result.current.bounds.defaultWidth).toBe(800);
+    expect(result.current.bounds.defaultHeight).toBe(600);
   });
 });
 
@@ -387,6 +436,120 @@ describe("usePersistedBounds + <Window> integration pattern", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // <Window> persistence — conflicts with controlled bounds
 // ─────────────────────────────────────────────────────────────────────────────
+
+describe("<Window> built-in persistBounds save", () => {
+  beforeEach(() => {
+    resetMockWindows();
+    resetMockWindowsGlobal();
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it("saves bounds to localStorage when boundsChanged event fires", async () => {
+    render(
+      <MockWindowProvider>
+        <Window
+          open
+          persistBounds="save-test"
+          defaultWidth={400}
+          defaultHeight={300}
+        >
+          <div>Content</div>
+        </Window>
+      </MockWindowProvider>,
+    );
+
+    await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
+
+    const mockWindows = getMockWindows();
+
+    // Fire a boundsChanged event
+    simulateMockWindowEvent(mockWindows[0].id, {
+      type: "boundsChanged",
+      bounds: { x: 10, y: 20, width: 500, height: 400 },
+    });
+
+    // Wait for both debounces (100ms bounds + 500ms persistence)
+    await new Promise((resolve) => setTimeout(resolve, 700));
+
+    // Bounds should be saved to localStorage
+    const saved = localStorage.getItem("electron-window:bounds:save-test");
+    expect(saved).not.toBeNull();
+    const parsed = JSON.parse(saved!);
+    expect(parsed.width).toBe(500);
+    expect(parsed.height).toBe(400);
+    expect(parsed.x).toBe(10);
+    expect(parsed.y).toBe(20);
+  });
+});
+
+describe("<Window> built-in persistBounds restore", () => {
+  beforeEach(() => {
+    resetMockWindows();
+    resetMockWindowsGlobal();
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it("restores persisted bounds as default dimensions on open", async () => {
+    // Pre-populate localStorage
+    localStorage.setItem(
+      "electron-window:bounds:restore-test",
+      JSON.stringify({ x: 50, y: 75, width: 900, height: 700 }),
+    );
+
+    render(
+      <MockWindowProvider>
+        <Window
+          open
+          persistBounds="restore-test"
+          defaultWidth={400}
+          defaultHeight={300}
+        >
+          <div>Content</div>
+        </Window>
+      </MockWindowProvider>,
+    );
+
+    await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
+
+    // The persisted bounds should override the defaults
+    const mockWindows = getMockWindows();
+    expect(mockWindows[0].props.defaultWidth).toBe(900);
+    expect(mockWindows[0].props.defaultHeight).toBe(700);
+    expect(mockWindows[0].props.defaultX).toBe(50);
+    expect(mockWindows[0].props.defaultY).toBe(75);
+  });
+
+  it("uses defaults when no persisted bounds exist", async () => {
+    render(
+      <MockWindowProvider>
+        <Window
+          open
+          persistBounds="no-saved-key"
+          defaultWidth={400}
+          defaultHeight={300}
+        >
+          <div>Content</div>
+        </Window>
+      </MockWindowProvider>,
+    );
+
+    await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
+
+    const mockWindows = getMockWindows();
+    expect(mockWindows[0].props.defaultWidth).toBe(400);
+    expect(mockWindows[0].props.defaultHeight).toBe(300);
+  });
+});
 
 describe("<Window> persistBounds conflicts", () => {
   beforeEach(() => {

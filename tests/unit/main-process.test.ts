@@ -340,6 +340,38 @@ describe("filterAllowedProps (via WindowManager IPC implementation)", () => {
     } as never);
     expect(result).toBe(true);
   });
+
+  it("denies window.open with non-about:blank URL", () => {
+    const manager = new WindowManager({ devWarnings: false });
+    const parent = createMockParentWindow();
+    manager.setupForWindow(
+      parent as unknown as import("electron").BrowserWindow,
+    );
+    const impl = getLastImpl();
+
+    // Register a window
+    impl.RegisterWindow("url-test", { width: 800 } as never);
+
+    // Get the handler
+    const handler = parent.webContents.setWindowOpenHandler.mock
+      .calls[0]?.[0] as
+      | ((arg: { frameName: string; url: string }) => unknown)
+      | undefined;
+    expect(handler).toBeDefined();
+
+    // Try to open with an evil URL — should be denied even though frameName is registered
+    const result = handler!({
+      frameName: "url-test",
+      url: "https://evil.com",
+    }) as { action: string };
+    expect(result.action).toBe("deny");
+
+    // about:blank should be allowed
+    const result2 = handler!({ frameName: "url-test", url: "about:blank" }) as {
+      action: string;
+    };
+    expect(result2.action).toBe("allow");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -836,6 +868,23 @@ describe("WindowInstance updateProps — PROP_SETTERS dispatch", () => {
     instance.updateProps({ title: "new" });
     expect(bw.setBounds).not.toHaveBeenCalled();
   });
+
+  it("calls hide() when visible changes to false", () => {
+    const { instance, bw } = createWindowInstance();
+    instance.updateProps({ visible: false });
+    expect(bw.hide).toHaveBeenCalled();
+  });
+
+  it("calls show() when visible changes to true", () => {
+    const { instance, bw } = createWindowInstance();
+    // First hide so visible=false is established
+    instance.updateProps({ visible: false });
+    bw.hide.mockClear();
+    bw.show.mockClear();
+    // Now make visible again
+    instance.updateProps({ visible: true });
+    expect(bw.show).toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1038,6 +1087,50 @@ describe("WindowInstance action methods", () => {
   it("webContentsId returns the webContents id", () => {
     const { instance } = createWindowInstance();
     expect(instance.webContentsId).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: WindowManager — rate limits (maxPendingWindows / maxWindows)
+// ---------------------------------------------------------------------------
+
+describe("WindowManager rate limits", () => {
+  beforeEach(() => {
+    (globalThis as Record<string, unknown>).__lastImpl__ = undefined;
+  });
+
+  it("rejects RegisterWindow when maxPendingWindows is reached", () => {
+    const manager = new WindowManager({
+      devWarnings: false,
+      maxPendingWindows: 2,
+      maxWindows: 50,
+    });
+    const parent = createMockParentWindow();
+    manager.setupForWindow(
+      parent as unknown as import("electron").BrowserWindow,
+    );
+    const impl = getLastImpl();
+
+    expect(impl.RegisterWindow("w1", { width: 800 } as never)).toBe(true);
+    expect(impl.RegisterWindow("w2", { width: 800 } as never)).toBe(true);
+    // Third exceeds the limit
+    expect(impl.RegisterWindow("w3", { width: 800 } as never)).toBe(false);
+  });
+
+  it("rejects RegisterWindow when maxPendingWindows is 1", () => {
+    const manager = new WindowManager({
+      devWarnings: false,
+      maxPendingWindows: 1,
+      maxWindows: 50,
+    });
+    const parent = createMockParentWindow();
+    manager.setupForWindow(
+      parent as unknown as import("electron").BrowserWindow,
+    );
+    const impl = getLastImpl();
+
+    expect(impl.RegisterWindow("w1", { width: 800 } as never)).toBe(true);
+    expect(impl.RegisterWindow("w2", { width: 800 } as never)).toBe(false);
   });
 });
 

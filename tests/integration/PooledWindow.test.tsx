@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import React, { useState } from "react";
-import { render, waitFor, fireEvent, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  waitFor,
+  fireEvent,
+  act,
+} from "@testing-library/react";
 import {
   PooledWindow,
   createWindowPool,
@@ -297,7 +303,67 @@ describe("<PooledWindow>", () => {
     expect(getGlobalMockWindows().size).toBeLessThanOrEqual(3);
   });
 
-  // 7. Children portal into the pool window's document
+  // 6. On-demand creation when pool is exhausted (minIdle: 0)
+  it("acquires a window on-demand when pool is empty", async () => {
+    // Pool with 0 idle — forces on-demand creation rather than the pre-warm path
+    const emptyPool = createWindowPool({ transparent: true }, { minIdle: 0 });
+
+    function TestApp() {
+      const [open, setOpen] = useState(false);
+      return (
+        <MockWindowProvider>
+          <button onClick={() => setOpen(true)}>Open</button>
+          <PooledWindow pool={emptyPool} open={open}>
+            <div data-testid="pool-content">Content</div>
+          </PooledWindow>
+        </MockWindowProvider>
+      );
+    }
+
+    render(<TestApp />);
+
+    // No pre-warming with minIdle: 0
+    expect(getGlobalMockWindows().size).toBe(0);
+
+    fireEvent.click(screen.getByText("Open"));
+
+    await waitFor(() => {
+      expect(getGlobalMockWindows().size).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  // 7. Cancellation during acquire — open=true then immediately open=false
+  it("cancels acquire when open changes to false immediately", async () => {
+    const pool = createWindowPool({ transparent: true }, { minIdle: 0 });
+
+    function TestApp() {
+      const [open, setOpen] = useState(true);
+      // Close on the next tick, before the acquire can fully settle
+      React.useEffect(() => {
+        const t = setTimeout(() => setOpen(false), 0);
+        return () => clearTimeout(t);
+      }, []);
+      return (
+        <MockWindowProvider>
+          <PooledWindow pool={pool} open={open}>
+            <div>Content</div>
+          </PooledWindow>
+        </MockWindowProvider>
+      );
+    }
+
+    render(<TestApp />);
+
+    // Allow everything to settle — wrapping in act gives React a chance to flush
+    // the cancellation cleanup before jsdom tears down the portal container.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    });
+
+    // No active portal should remain; idle windows from the release are acceptable
+  });
+
+  // 8. Children portal into the pool window's document
   it("renders children into the pool window's document via createPortal", async () => {
     const pool = createWindowPool({ frame: false });
 
