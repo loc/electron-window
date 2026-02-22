@@ -1,0 +1,200 @@
+module electron_window
+
+// Security: validate origin and frame for all window APIs
+validator AppOrigin = {
+    production: AND(
+        is_main_frame is true
+    )
+    development: AND(
+        is_main_frame is true
+    )
+}
+
+// Subtypes for validation
+subtype WindowId = string(
+    minLength: 1
+)
+
+subtype PositiveNumber = number(
+    minValue: 0
+)
+
+// Enums
+enum AlwaysOnTopLevel {
+    Normal = "normal"
+    Floating = "floating"
+    TornOffMenu = "torn-off-menu"
+    ModalPanel = "modal-panel"
+    MainMenu = "main-menu"
+    Status = "status"
+    PopUpMenu = "pop-up-menu"
+    ScreenSaver = "screen-saver"
+}
+
+enum TitleBarStyle {
+    Default = "default"
+    Hidden = "hidden"
+    HiddenInset = "hiddenInset"
+    CustomButtonsOnHover = "customButtonsOnHover"
+}
+
+// Structures
+structure Bounds {
+    x: number
+    y: number
+    width: number
+    height: number
+}
+
+structure PartialBounds {
+    x?: number
+    y?: number
+    width?: number
+    height?: number
+}
+
+structure DisplayInfo {
+    id: number
+    bounds: Bounds
+    workArea: Bounds
+    scaleFactor: number
+}
+
+structure TitleBarOverlayOptions {
+    color?: string
+    symbolColor?: string
+    height?: number
+}
+
+structure TrafficLightPosition {
+    x: number
+    y: number
+}
+
+structure WindowState {
+    id: WindowId
+    isFocused: boolean
+    isVisible: boolean
+    isMaximized: boolean
+    isMinimized: boolean
+    isFullscreen: boolean
+    bounds: Bounds
+    title: string
+}
+
+structure WindowProps {
+    // Geometry - Initial values
+    defaultWidth?: number
+    defaultHeight?: number
+    defaultX?: number
+    defaultY?: number
+    // Geometry - Controlled
+    width?: number
+    height?: number
+    x?: number
+    y?: number
+    // Geometry - Constraints
+    minWidth?: number
+    maxWidth?: number
+    minHeight?: number
+    maxHeight?: number
+    center?: boolean
+    // Appearance
+    title?: string
+    transparent?: boolean
+    frame?: boolean
+    titleBarStyle?: string
+    vibrancy?: string
+    backgroundColor?: string
+    opacity?: number
+    // Behavior
+    resizable?: boolean
+    movable?: boolean
+    minimizable?: boolean
+    maximizable?: boolean
+    closable?: boolean
+    focusable?: boolean
+    alwaysOnTop?: boolean
+    skipTaskbar?: boolean
+    fullscreen?: boolean
+    fullscreenable?: boolean
+    // Visibility
+    showInactive?: boolean
+    ignoreMouseEvents?: boolean
+    visibleOnAllWorkspaces?: boolean
+    // Platform-specific
+    trafficLightPosition?: TrafficLightPosition
+    titleBarOverlay?: TitleBarOverlayOptions
+    // Advanced
+    name?: string
+    // Callback flags
+    hasOnBoundsChange?: boolean
+    hasOnUserClose?: boolean
+}
+
+// Window actions
+enum WindowActionType {
+    Focus = "focus"
+    Blur = "blur"
+    Minimize = "minimize"
+    Maximize = "maximize"
+    Unmaximize = "unmaximize"
+    Close = "close"
+    ForceClose = "forceClose"
+    SetBounds = "setBounds"
+    SetTitle = "setTitle"
+    EnterFullscreen = "enterFullscreen"
+    ExitFullscreen = "exitFullscreen"
+}
+
+structure WindowAction {
+    type: string
+    bounds?: PartialBounds
+    title?: string
+}
+
+// Window events
+enum WindowEventType {
+    Closed = "closed"
+    Focused = "focused"
+    Blurred = "blurred"
+    Maximized = "maximized"
+    Unmaximized = "unmaximized"
+    Minimized = "minimized"
+    Restored = "restored"
+    EnterFullscreen = "enterFullscreen"
+    LeaveFullscreen = "leaveFullscreen"
+    BoundsChanged = "boundsChanged"
+    UserCloseRequested = "userCloseRequested"
+    DisplayChanged = "displayChanged"
+    Ready = "ready"
+}
+
+structure WindowEvent {
+    type: string
+    id: WindowId
+    bounds?: Bounds
+    display?: DisplayInfo
+}
+
+// Main API interface
+[RendererAPI]
+[Validator=AppOrigin]
+[ContextBridge]
+interface WindowManager {
+    // Window lifecycle
+    RegisterWindow(id: WindowId, props: WindowProps) -> boolean
+    UnregisterWindow(id: WindowId) -> boolean
+    UpdateWindow(id: WindowId, props: WindowProps) -> boolean
+    DestroyWindow(id: WindowId) -> boolean
+
+    // Window actions
+    WindowAction(id: WindowId, action: WindowAction) -> boolean
+
+    // Queries
+    GetWindowState(id: WindowId) -> WindowState?
+
+    // Events from main to renderer
+    [Event]
+    WindowEvent(event: WindowEvent)
+}

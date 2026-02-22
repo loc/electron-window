@@ -1,0 +1,61 @@
+/**
+ * Renderer process entry point
+ * @module @loc/electron-window
+ */
+
+// Components
+export { Window, type WindowRef } from "./Window.js";
+export {
+  PooledWindow,
+  createWindowPoolDefinition,
+  type PooledWindowProps,
+  type WindowPoolDefinition,
+} from "./PooledWindow.js";
+export { WindowProvider, type WindowProviderProps } from "./WindowProvider.js";
+
+// Hooks
+export {
+  useCurrentWindow,
+  useWindowFocused,
+  useWindowVisible,
+  useWindowMaximized,
+  useWindowMinimized,
+  useWindowFullscreen,
+  useWindowBounds,
+  useWindowState,
+  useWindowDisplay,
+  usePersistedBounds,
+  clearPersistedBounds,
+  clearAllPersistedBounds,
+  type UsePersistedBoundsOptions,
+  type UsePersistedBoundsResult,
+} from "./hooks/index.js";
+
+// Context (for advanced use cases)
+export {
+  WindowContext,
+  WindowProviderContext,
+  useWindowContext,
+  useWindowProviderContext,
+  useIsInsideWindow,
+  type WindowContextValue,
+  type WindowProviderContextValue,
+} from "./context.js";
+
+// Re-export types
+export type {
+  WindowProps,
+  BaseWindowProps,
+  WindowHandle,
+  WindowState,
+  WindowId,
+  Bounds,
+  DisplayInfo,
+  TitleBarOverlayOptions,
+  AlwaysOnTopLevel,
+  TitleBarStyle,
+  InjectStylesMode,
+  TargetDisplay,
+  WindowPoolConfig,
+  WindowShape,
+} from "../shared/types.js";

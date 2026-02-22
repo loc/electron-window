@@ -1,0 +1,11 @@
+{
+  "name": "electron-window-test-app",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "node build.js",
+    "start": "electron ."
+  }
+}
