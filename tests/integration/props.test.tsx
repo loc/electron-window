@@ -401,16 +401,34 @@ describe("<Window> name prop", () => {
 });
 
 describe("<Window> injectStyles prop", () => {
+  let testStyle: HTMLStyleElement;
+  let testLink: HTMLLinkElement;
+
   beforeEach(() => {
     resetMockWindows();
     resetMockWindowsGlobal();
     vi.clearAllMocks();
+
+    // Add a <style> and <link rel="stylesheet"> to the parent document
+    // so we can verify they get cloned into the child window
+    testStyle = document.createElement("style");
+    testStyle.textContent = ".test-class { color: red; }";
+    testStyle.setAttribute("data-test", "injected-style");
+    document.head.appendChild(testStyle);
+
+    testLink = document.createElement("link");
+    testLink.rel = "stylesheet";
+    testLink.href = "https://example.com/test.css";
+    testLink.setAttribute("data-test", "injected-link");
+    document.head.appendChild(testLink);
   });
 
-  it("creates window with default style injection without error", async () => {
-    // Style injection ("auto") clones stylesheets from the parent document.
-    // In jsdom there are no stylesheets to clone, so we can only verify that
-    // the window is created successfully without throwing.
+  afterEach(() => {
+    testStyle.remove();
+    testLink.remove();
+  });
+
+  it("auto mode clones parent stylesheets into child window", async () => {
     render(
       <MockWindowProvider>
         <Window open>
@@ -422,11 +440,27 @@ describe("<Window> injectStyles prop", () => {
     await waitFor(() => {
       expect(getGlobalMockWindows().size).toBe(1);
     });
+
+    const mockWin = [...getGlobalMockWindows().values()][0] as {
+      document: Document;
+    };
+
+    // The <style> tag should be cloned into the child
+    const clonedStyle = mockWin.document.querySelector(
+      'style[data-test="injected-style"]',
+    );
+    expect(clonedStyle).not.toBeNull();
+    expect(clonedStyle?.textContent).toBe(".test-class { color: red; }");
+
+    // The <link> tag should be cloned into the child
+    const clonedLink = mockWin.document.querySelector(
+      'link[data-test="injected-link"]',
+    ) as HTMLLinkElement | null;
+    expect(clonedLink).not.toBeNull();
+    expect(clonedLink?.href).toBe("https://example.com/test.css");
   });
 
-  it("creates window with injectStyles=false without error", async () => {
-    // injectStyles=false skips all stylesheet cloning. Verify the window
-    // still opens successfully when style injection is disabled.
+  it("injectStyles=false does not copy stylesheets", async () => {
     render(
       <MockWindowProvider>
         <Window open injectStyles={false}>
@@ -438,10 +472,27 @@ describe("<Window> injectStyles prop", () => {
     await waitFor(() => {
       expect(getGlobalMockWindows().size).toBe(1);
     });
+
+    const mockWin = [...getGlobalMockWindows().values()][0] as {
+      document: Document;
+    };
+
+    // No styles should be cloned
+    expect(
+      mockWin.document.querySelector('style[data-test="injected-style"]'),
+    ).toBeNull();
+    expect(
+      mockWin.document.querySelector('link[data-test="injected-link"]'),
+    ).toBeNull();
   });
 
-  it("accepts custom injectStyles function", async () => {
-    const customInject = vi.fn();
+  it("custom injectStyles function receives the child document", async () => {
+    const customInject = vi.fn((doc: Document) => {
+      const el = doc.createElement("style");
+      el.textContent = ".custom { color: blue; }";
+      el.setAttribute("data-test", "custom-style");
+      doc.head.appendChild(el);
+    });
 
     render(
       <MockWindowProvider>
@@ -455,9 +506,24 @@ describe("<Window> injectStyles prop", () => {
       expect(getGlobalMockWindows().size).toBe(1);
     });
 
-    // Custom function should be called with the document
-    await waitFor(() => {
-      expect(customInject).toHaveBeenCalledWith(expect.any(Object));
-    });
+    // Custom function should have been called with the child document
+    expect(customInject).toHaveBeenCalledTimes(1);
+    const calledWithDoc = customInject.mock.calls[0][0];
+    expect(calledWithDoc).toBeInstanceOf(Document);
+
+    // Verify the custom function's work is visible in the child document
+    const mockWin = [...getGlobalMockWindows().values()][0] as {
+      document: Document;
+    };
+    const customStyle = mockWin.document.querySelector(
+      'style[data-test="custom-style"]',
+    );
+    expect(customStyle).not.toBeNull();
+    expect(customStyle?.textContent).toBe(".custom { color: blue; }");
+
+    // Auto-injection should NOT have run (custom replaces auto)
+    expect(
+      mockWin.document.querySelector('style[data-test="injected-style"]'),
+    ).toBeNull();
   });
 });
