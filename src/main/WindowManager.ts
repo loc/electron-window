@@ -17,8 +17,32 @@ const DEFAULT_WINDOW_HEIGHT = 600;
 
 type Dispatcher = { dispatchWindowEvent: (e: IPCWindowEvent) => void };
 
-/** Maps parent BrowserWindows to their IPC event dispatchers */
-const dispatchers = new WeakMap<BrowserWindow, Dispatcher>();
+/** Maps WebContents to their IPC event dispatchers */
+const dispatchers = new WeakMap<WebContents, Dispatcher>();
+
+/**
+ * Result returned by a window open handler.
+ * Matches Electron's setWindowOpenHandler return type.
+ */
+export type WindowOpenHandlerResult =
+  | { action: "deny" }
+  | {
+      action: "allow";
+      overrideBrowserWindowOptions?: Partial<Electron.BrowserWindowConstructorOptions>;
+    };
+
+/**
+ * Options for setupForWindow / setupForWebContents.
+ */
+export interface SetupOptions {
+  /**
+   * Called for window.open() calls that aren't managed by this library.
+   * If not provided, unmanaged window.open() calls are denied.
+   */
+  fallbackWindowOpenHandler?: (
+    details: Electron.HandlerDetails,
+  ) => WindowOpenHandlerResult;
+}
 
 /**
  * Filter props to only include allowed properties.
@@ -177,59 +201,90 @@ export class WindowManager {
   }
 
   /**
-   * Attach IPC handling and window.open interception to a parent BrowserWindow.
-   * Call this once per parent window (e.g., your main app window).
+   * Attach IPC handling and window.open interception to a WebContents.
+   * Works with BrowserWindow, WebContentsView, or any object with a webContents property.
+   *
+   * @example
+   * // BrowserWindow
+   * manager.setupForWindow(mainWindow);
+   *
+   * // WebContentsView (e.g., when the renderer is in a view, not the BrowserWindow itself)
+   * manager.setupForWindow(mainView);
+   *
+   * // With fallback handler for non-library window.open calls
+   * manager.setupForWindow(mainView, {
+   *   fallbackWindowOpenHandler: ({ url }) => {
+   *     if (isExternalURL(url)) { shell.openExternal(url); return { action: "deny" }; }
+   *     return { action: "allow" };
+   *   },
+   * });
    */
-  setupForWindow(parentBW: BrowserWindow): void {
-    const impl = this.createImplementation(parentBW.webContents);
+  setupForWindow(
+    target: BrowserWindow | { webContents: WebContents } | WebContents,
+    options?: SetupOptions,
+  ): void {
+    const webContents = "webContents" in target ? target.webContents : target;
+    const isDestroyed =
+      "isDestroyed" in target
+        ? () => (target as { isDestroyed: () => boolean }).isDestroyed()
+        : () => webContents.isDestroyed();
 
-    const dispatcher = WindowManagerIPC.for(
-      parentBW.webContents,
-    ).setImplementation(impl);
+    this.setupForWebContents(webContents, isDestroyed, options);
+  }
 
-    dispatchers.set(parentBW, dispatcher);
+  private setupForWebContents(
+    webContents: WebContents,
+    isDestroyed: () => boolean,
+    options?: SetupOptions,
+  ): void {
+    const impl = this.createImplementation(webContents);
 
-    parentBW.webContents.setWindowOpenHandler(({ frameName, url }) => {
-      // Security: only allow about:blank — the library hardcodes this URL.
-      // A compromised renderer trying to open an arbitrary URL would inherit
-      // the app's preload scripts, gaining access to privileged APIs.
-      if (url !== "about:blank") {
-        if (this.config.devWarnings) {
-          devWarning(
-            `window.open to "${url}" denied. Only "about:blank" is allowed.`,
-          );
-        }
-        return { action: "deny" };
-      }
+    const dispatcher =
+      WindowManagerIPC.for(webContents).setImplementation(impl);
 
-      const pending = this.pendingWindows.get(frameName);
-      if (!pending) {
-        return { action: "deny" };
-      }
+    dispatchers.set(webContents, dispatcher);
 
-      const constructorOptions = this.buildConstructorOptions(pending.props);
+    webContents.setWindowOpenHandler((details) => {
+      const { frameName, url } = details;
 
-      return {
-        action: "allow",
-        overrideBrowserWindowOptions: {
-          ...this.config.defaultWindowOptions,
-          ...constructorOptions,
-          webPreferences: {
-            ...this.config.defaultWindowOptions.webPreferences,
-            // Security: never use renderer-specified webPreferences
+      // Check if this is a library-managed window (about:blank + registered frameName)
+      if (url === "about:blank" && this.pendingWindows.has(frameName)) {
+        const pending = this.pendingWindows.get(frameName)!;
+        const constructorOptions = this.buildConstructorOptions(pending.props);
+
+        return {
+          action: "allow",
+          overrideBrowserWindowOptions: {
+            ...this.config.defaultWindowOptions,
+            ...constructorOptions,
+            webPreferences: {
+              ...this.config.defaultWindowOptions.webPreferences,
+            },
+            show: false,
           },
-          show: false, // WindowInstance controls visibility
-        },
-      };
+        };
+      }
+
+      // Not a library-managed window — delegate to fallback handler
+      if (options?.fallbackWindowOpenHandler) {
+        return options.fallbackWindowOpenHandler(details);
+      }
+
+      // No fallback handler — deny by default
+      if (this.config.devWarnings) {
+        devWarning(
+          `window.open to "${url}" denied. Not a managed window and no fallbackWindowOpenHandler provided.`,
+        );
+      }
+      return { action: "deny" };
     });
 
-    parentBW.webContents.on("did-create-window", (childBW, { frameName }) => {
+    webContents.on("did-create-window", (childBW, { frameName }) => {
       const windowId = frameName;
       const pending = this.pendingWindows.get(windowId);
       if (!pending) {
-        // Pending entry was removed (e.g., rapid RegisterWindow + DestroyWindow
-        // before window.open completed). Destroy the orphaned child window.
-        childBW.destroy();
+        // Not a library-managed window — could be from the fallback handler.
+        // Don't destroy it.
         return;
       }
 
@@ -243,8 +298,8 @@ export class WindowManager {
           "open" | "children"
         >,
         onEvent: (event) => {
-          if (parentBW.isDestroyed()) return;
-          this.dispatchEvent(parentBW.webContents, event);
+          if (isDestroyed()) return;
+          this.dispatchEvent(webContents, event);
         },
         showOnCreate: (pending.props as any).showOnCreate !== false,
       });
@@ -447,15 +502,14 @@ export class WindowManager {
 
   private dispatchEvent(sender: WebContents, event: IPCWindowEvent): void {
     try {
-      const win = BrowserWindow.fromWebContents(sender);
-      if (!win || win.isDestroyed()) return;
+      if (sender.isDestroyed()) return;
 
-      const dispatcher = dispatchers.get(win);
+      const dispatcher = dispatchers.get(sender);
       if (dispatcher) {
         dispatcher.dispatchWindowEvent(event);
       }
     } catch {
-      // Parent window may have been destroyed during shutdown
+      // Parent may have been destroyed during shutdown
     }
 
     if (event.type === WindowEventType.Closed) {

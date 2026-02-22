@@ -11,6 +11,8 @@ export {
 export type {
   WindowManagerConfig,
   SecurityValidator,
+  SetupOptions,
+  WindowOpenHandlerResult,
 } from "./WindowManager.js";
 export { WindowInstance } from "./WindowInstance.js";
 
