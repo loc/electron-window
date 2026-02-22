@@ -186,7 +186,18 @@ export class RendererWindowPool {
 
     this.active.delete(id);
 
+    // Hide first, then clean DOM. The hide gives React time to unmount
+    // the portal content before we clear the container.
     await this.windowAction(id, { type: "hide" });
+
+    // Clean the DOM to prevent data leakage between pool window uses.
+    // React unmounts portal content, but imperative DOM changes, global
+    // variables, and timers from the previous use could persist.
+    const doc = entry.childWindow.document;
+    const container = doc.getElementById("root");
+    if (container) {
+      container.innerHTML = "";
+    }
 
     if (this.idle.length < this.maxIdle) {
       this.idle.push(entry);

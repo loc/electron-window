@@ -144,6 +144,8 @@ export const RENDERER_ALLOWED_PROPS = new Set([
   "titleBarOverlay",
   // Advanced
   "targetDisplay",
+  // Pool support
+  "showOnCreate",
 ]) as ReadonlySet<string>;
 
 /**

@@ -228,7 +228,7 @@ describe("filterAllowedProps (via WindowManager IPC implementation)", () => {
       | undefined;
     expect(handler).toBeDefined();
 
-    const result = handler!({ frameName: "sec-win", url: "app://child" }) as {
+    const result = handler!({ frameName: "sec-win", url: "about:blank" }) as {
       action: string;
       overrideBrowserWindowOptions?: Record<string, unknown>;
     };
@@ -256,7 +256,7 @@ describe("filterAllowedProps (via WindowManager IPC implementation)", () => {
 
     const handler = parent.webContents.setWindowOpenHandler.mock
       .calls[0]?.[0] as (arg: { frameName: string; url: string }) => unknown;
-    const result = handler({ frameName: "unknown-win", url: "app://child" });
+    const result = handler({ frameName: "unknown-win", url: "about:blank" });
     expect(result).toEqual({ action: "deny" });
   });
 

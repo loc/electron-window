@@ -183,7 +183,19 @@ export class WindowManager {
 
     (parentBW as any).__dispatcher = dispatcher;
 
-    parentBW.webContents.setWindowOpenHandler(({ frameName, url: _url }) => {
+    parentBW.webContents.setWindowOpenHandler(({ frameName, url }) => {
+      // Security: only allow about:blank — the library hardcodes this URL.
+      // A compromised renderer trying to open an arbitrary URL would inherit
+      // the app's preload scripts, gaining access to privileged APIs.
+      if (url !== "about:blank") {
+        if (this.config.devWarnings) {
+          devWarning(
+            `window.open to "${url}" denied. Only "about:blank" is allowed.`,
+          );
+        }
+        return { action: "deny" };
+      }
+
       const pending = this.pendingWindows.get(frameName);
       if (!pending) {
         return { action: "deny" };
@@ -208,7 +220,12 @@ export class WindowManager {
     parentBW.webContents.on("did-create-window", (childBW, { frameName }) => {
       const windowId = frameName;
       const pending = this.pendingWindows.get(windowId);
-      if (!pending) return;
+      if (!pending) {
+        // Pending entry was removed (e.g., rapid RegisterWindow + DestroyWindow
+        // before window.open completed). Destroy the orphaned child window.
+        childBW.destroy();
+        return;
+      }
 
       this.pendingWindows.delete(windowId);
 
