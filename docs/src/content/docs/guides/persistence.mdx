@@ -1,0 +1,57 @@
+---
+title: "Bounds Persistence"
+description: "Save and restore window size and position across sessions."
+---
+
+## Simple persistence
+
+Add `persistBounds` with a unique key. Bounds save automatically to `localStorage` and restore on next open.
+
+```tsx
+<Window
+  open={show}
+  persistBounds="settings"
+  defaultWidth={600}
+  defaultHeight={400}
+>
+  <Settings />
+</Window>
+```
+
+First open uses the defaults. After the user resizes or moves the window, those bounds are saved. Next open restores them.
+
+The key should be unique per window. Use something stable and descriptive like `"settings"` or `"editor-main"`.
+
+## Manual control with `usePersistedBounds`
+
+For cases where you need to read bounds before rendering, reset them programmatically, or integrate with your own storage:
+
+```tsx
+import { usePersistedBounds } from "@loc/electron-window";
+
+function PersistentWindow({ children }) {
+  const { bounds, save, clear } = usePersistedBounds("my-window", {
+    defaultWidth: 800,
+    defaultHeight: 600,
+  });
+
+  return (
+    <Window open {...bounds} onBoundsChange={save}>
+      {children}
+      <button onClick={clear}>Reset Position</button>
+    </Window>
+  );
+}
+```
+
+### Return values
+
+| Value    | Type                  | Description                                   |
+| -------- | --------------------- | --------------------------------------------- |
+| `bounds` | `Partial<Bounds>`     | Saved bounds, or defaults if nothing is saved |
+| `save`   | `(bounds) => void`    | Persist new bounds (pass directly to `onBoundsChange`) |
+| `clear`  | `() => void`          | Remove saved bounds, revert to defaults       |
+
+## Storage
+
+Bounds are stored in `localStorage` under a namespaced key derived from the persistence key you provide. The stored value includes `x`, `y`, `width`, and `height`.

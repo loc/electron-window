@@ -1,0 +1,128 @@
+---
+title: "Common Patterns"
+description: "Recipes for typical window management scenarios."
+---
+
+## Unsaved changes — prevent close while dirty
+
+Set `closable={false}` when the user has unsaved changes. The X button becomes inert; your UI handles the prompt.
+
+```tsx
+<Window
+  open={showEditor}
+  closable={!hasUnsavedChanges}
+  onUserClose={() => setShowEditor(false)}
+>
+  <Editor />
+  {hasUnsavedChanges && <SavePrompt />}
+</Window>
+```
+
+## Imperative control from parent
+
+Use a ref to call window methods from outside the window's children.
+
+```tsx
+const ref = useRef<WindowRef>(null);
+
+<Window ref={ref} open={show}>
+  <Content />
+</Window>;
+
+// Later
+ref.current?.focus();
+ref.current?.setBounds({ width: 1024, height: 768 });
+```
+
+For control from inside the window's children, use [`useCurrentWindow()`](/electron-window/guides/hooks/) instead.
+
+## Multiple independent windows
+
+Each `<Window>` manages its own lifecycle independently.
+
+```tsx
+<Window open={showA} title="Window A">
+  <ContentA />
+</Window>
+<Window open={showB} title="Window B">
+  <ContentB />
+</Window>
+```
+
+## Hidden window with preserved state
+
+`open={true} visible={false}` creates the window and mounts content without showing it. State is fully initialized and preserved while hidden.
+
+```tsx
+<Window open={true} visible={showPanel}>
+  <ExpensivePanel />
+</Window>
+```
+
+Useful when you want content pre-initialized before the user opens it, or when toggling visibility without unmounting.
+
+## Controlled size with two-way sync
+
+Use the controlled `width`/`height` props with `onBoundsChange` to keep your state in sync with user resizing.
+
+```tsx
+const [size, setSize] = useState({ width: 800, height: 600 });
+
+<Window
+  open={show}
+  width={size.width}
+  height={size.height}
+  onBoundsChange={(bounds) => setSize({ width: bounds.width, height: bounds.height })}
+>
+  <Content />
+</Window>
+```
+
+For fire-and-forget sizing, use `defaultWidth` / `defaultHeight` instead. See [Props Reference](/electron-window/guides/props/#geometry) for the full geometry API.
+
+## Persistent overlay
+
+Combine pooling and persistence for overlays that remember their position.
+
+```tsx
+const hudPool = createWindowPool(
+  { transparent: true, frame: false },
+  { minIdle: 1 },
+);
+
+function HUD() {
+  const { bounds, save } = usePersistedBounds("hud", {
+    defaultWidth: 300,
+    defaultHeight: 200,
+  });
+
+  return (
+    <PooledWindow pool={hudPool} open={show} {...bounds} onBoundsChange={save}>
+      <HUDContent />
+    </PooledWindow>
+  );
+}
+```
+
+See [Pooling](/electron-window/guides/pooling/) and [Persistence](/electron-window/guides/persistence/) for details.
+
+## Frameless window with custom drag region
+
+```tsx
+<Window
+  open={show}
+  frame={false}
+  titleBarStyle="hidden"
+  defaultWidth={400}
+  defaultHeight={300}
+>
+  <div style={{ WebkitAppRegion: "drag", height: 32 }}>
+    {/* Drag handle */}
+  </div>
+  <div style={{ WebkitAppRegion: "no-drag" }}>
+    <Content />
+  </div>
+</Window>
+```
+
+`frame` and `titleBarStyle` are creation-only — set them once and don't change them. If you need to change them dynamically, use `recreateOnShapeChange`.

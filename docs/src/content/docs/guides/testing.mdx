@@ -1,0 +1,101 @@
+---
+title: "Testing"
+description: "MockWindowProvider, MockWindow, and event simulation for unit tests."
+---
+
+Import test utilities from `@loc/electron-window/testing` — this entry point has no Electron dependency, so it works in any Jest or Vitest environment.
+
+```tsx
+import {
+  MockWindowProvider,
+  MockWindow,
+  getMockWindows,
+  resetMockWindows,
+  simulateMockWindowEvent,
+} from "@loc/electron-window/testing";
+```
+
+## Testing window management
+
+Use `MockWindowProvider` in place of `WindowProvider`. Windows that open under it are tracked in memory instead of creating real `BrowserWindow` instances.
+
+```tsx
+test("opens settings window", async () => {
+  resetMockWindows();
+  render(
+    <MockWindowProvider>
+      <MyApp />
+    </MockWindowProvider>,
+  );
+
+  fireEvent.click(screen.getByText("Open Settings"));
+
+  await waitFor(() => {
+    expect(getMockWindows()).toHaveLength(1);
+    expect(getMockWindows()[0].props.title).toBe("Settings");
+  });
+});
+```
+
+### `getMockWindows()`
+
+Returns an array of all open mock windows. Each entry has:
+
+| Property | Type     | Description                   |
+| -------- | -------- | ----------------------------- |
+| `id`     | `string` | Unique window identifier      |
+| `props`  | `object` | The props passed to `<Window>` |
+
+### `resetMockWindows()`
+
+Clears all tracked windows. Call this in `beforeEach` or at the start of each test.
+
+## Testing components that use hooks
+
+Use `MockWindow` to wrap components that call `useCurrentWindow()`, `useWindowFocused()`, or other window hooks.
+
+```tsx
+test("shows focused indicator", () => {
+  render(
+    <MockWindow state={{ isFocused: true }}>
+      <StatusBar />
+    </MockWindow>,
+  );
+  expect(screen.getByText("Focused")).toBeInTheDocument();
+});
+```
+
+`MockWindow` accepts a `state` prop with any subset of `WindowState`. Unspecified values default to sensible initial values (not focused, not maximized, etc.).
+
+## Simulating events
+
+```tsx
+test("handles bounds change", async () => {
+  resetMockWindows();
+  render(
+    <MockWindowProvider>
+      <MyApp />
+    </MockWindowProvider>,
+  );
+
+  // ... trigger window open ...
+
+  simulateMockWindowEvent(getMockWindows()[0].id, {
+    type: "boundsChanged",
+    bounds: { x: 0, y: 0, width: 500, height: 400 },
+  });
+});
+```
+
+### Event types
+
+| `type`            | Additional fields             | Description                     |
+| ----------------- | ----------------------------- | ------------------------------- |
+| `"focus"`         | —                             | Window gained focus             |
+| `"blur"`          | —                             | Window lost focus               |
+| `"maximize"`      | —                             | Window maximized                |
+| `"unmaximize"`    | —                             | Window restored from maximized  |
+| `"minimize"`      | —                             | Window minimized                |
+| `"restore"`       | —                             | Window restored from minimized  |
+| `"boundsChanged"` | `bounds: { x, y, width, height }` | Window resized or moved    |
+| `"close"`         | —                             | Window closed by user           |

@@ -1,0 +1,50 @@
+---
+title: "Security"
+description: "How @loc/electron-window restricts renderer access to window creation."
+---
+
+Electron's security model requires that sensitive `BrowserWindow` options — particularly `webPreferences` — are never controllable from renderer code. This library enforces that boundary.
+
+## What the renderer cannot control
+
+- **`webPreferences`** — only configurable via `setupWindowManager` in the main process. Renderer-supplied props cannot override `nodeIntegration`, `contextIsolation`, `preload`, or any other `webPreferences` field.
+- **Arbitrary URLs** — child windows can only load `about:blank`. Any attempt to navigate to an arbitrary URL is rejected.
+
+## How it works
+
+All props sent from the renderer to the main process pass through an allowlist before reaching `BrowserWindow`. Props not on the allowlist are silently dropped. This means a compromised renderer cannot escalate privileges by sending unexpected window options.
+
+IPC messages are validated via schema with origin and frame checks on every call.
+
+## Rate limits
+
+Window creation is rate-limited to prevent runaway loops or denial-of-service from renderer code.
+
+| Option             | Default | Description                              |
+| ------------------ | ------- | ---------------------------------------- |
+| `maxPendingWindows` | —      | Max windows waiting to be created        |
+| `maxWindows`        | —      | Max total open windows at once           |
+
+Configure these via `setupWindowManager`:
+
+```ts
+const manager = setupWindowManager({
+  maxPendingWindows: 5,
+  maxWindows: 20,
+  defaultWindowOptions: {
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+    },
+  },
+});
+```
+
+## Summary
+
+| Threat                          | Mitigation                                      |
+| ------------------------------- | ----------------------------------------------- |
+| Renderer overrides webPreferences | Only configurable in main process             |
+| Arbitrary URL navigation        | Rejected — child windows only load about:blank  |
+| Unexpected IPC props            | Allowlist filtering before BrowserWindow        |
+| IPC spoofing                    | Origin and frame validation on every message    |
+| Runaway window creation         | Configurable rate limits                        |

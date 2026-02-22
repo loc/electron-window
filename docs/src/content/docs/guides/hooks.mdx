@@ -1,0 +1,82 @@
+---
+title: "Hooks"
+description: "Reactive hooks for window state and imperative control."
+---
+
+All hooks must be called inside a `<Window>`'s children.
+
+## `useCurrentWindow()`
+
+Returns a `WindowHandle` with stable imperative methods. References don't change identity across renders.
+
+```tsx
+function WindowContent() {
+  const win = useCurrentWindow();
+
+  win.focus();
+  win.close();
+  win.setBounds({ width: 800, height: 600 });
+}
+```
+
+### `WindowHandle` methods
+
+| Method                     | Description                       |
+| -------------------------- | --------------------------------- |
+| `focus()`                  | Focus the window                  |
+| `close()`                  | Close the window                  |
+| `minimize()`               | Minimize the window               |
+| `maximize()`               | Maximize the window               |
+| `unmaximize()`             | Restore from maximized            |
+| `setBounds(bounds)`        | Set `{ x, y, width, height }`     |
+| `setSize(width, height)`   | Resize the window                 |
+| `setPosition(x, y)`        | Move the window                   |
+| `setFullscreen(flag)`      | Enter or exit fullscreen          |
+| `setAlwaysOnTop(flag)`     | Pin or unpin above other windows  |
+
+## Reactive State Hooks
+
+Each hook re-renders only when its specific value changes.
+
+| Hook                  | Return Type                                          | Description                     |
+| --------------------- | ---------------------------------------------------- | ------------------------------- |
+| `useWindowFocused()`  | `boolean`                                            | Whether the window has focus    |
+| `useWindowMaximized()` | `boolean`                                           | Whether the window is maximized |
+| `useWindowMinimized()` | `boolean`                                           | Whether the window is minimized |
+| `useWindowFullscreen()` | `boolean`                                          | Whether in fullscreen mode      |
+| `useWindowVisible()`  | `boolean`                                            | Whether the window is visible   |
+| `useWindowBounds()`   | `{ x: number; y: number; width: number; height: number }` | Current bounds            |
+| `useWindowDisplay()`  | `{ id: number; bounds: Bounds; workArea: Bounds; scaleFactor: number }` | Current display |
+| `useWindowState()`    | `WindowState`                                        | Full window state object        |
+
+```tsx
+function WindowContent() {
+  const isFocused = useWindowFocused();
+  const isMaximized = useWindowMaximized();
+  const isMinimized = useWindowMinimized();
+  const isFullscreen = useWindowFullscreen();
+  const isVisible = useWindowVisible();
+  const bounds = useWindowBounds();     // { x, y, width, height }
+  const display = useWindowDisplay();   // { id, bounds, workArea, scaleFactor }
+  const state = useWindowState();       // full WindowState object
+}
+```
+
+Use the specific hooks (`useWindowFocused`, `useWindowBounds`, etc.) rather than `useWindowState` when possible — they avoid unnecessary re-renders.
+
+## `usePersistedBounds(key, defaults)`
+
+For manual bounds persistence. See [Persistence](/electron-window/guides/persistence/) for full usage.
+
+```tsx
+const { bounds, save, clear } = usePersistedBounds("my-window", {
+  defaultWidth: 800,
+  defaultHeight: 600,
+});
+```
+
+| Return value | Type         | Description                                 |
+| ------------ | ------------ | ------------------------------------------- |
+| `bounds`     | `Partial<Bounds>` | Saved bounds, or defaults if none saved |
+| `save`       | `(bounds) => void` | Persist current bounds               |
+| `clear`      | `() => void` | Remove saved bounds                         |

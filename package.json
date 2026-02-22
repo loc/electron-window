@@ -48,6 +48,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
+    "docs:dev": "cd docs && yarn dev",
+    "docs:build": "cd docs && yarn build",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run build"
   },

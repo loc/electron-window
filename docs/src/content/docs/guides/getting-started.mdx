@@ -1,0 +1,84 @@
+---
+title: "Getting Started"
+description: "Install @loc/electron-window and wire up the three required files."
+---
+
+## Install
+
+```bash
+npm install @loc/electron-window
+```
+
+## Setup
+
+Three files — one per Electron process.
+
+### Main process
+
+```ts
+// main.ts
+import { setupWindowManager } from "@loc/electron-window/main";
+
+const manager = setupWindowManager({
+  defaultWindowOptions: {
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+    },
+  },
+});
+manager.setupForWindow(mainWindow);
+```
+
+`setupWindowManager` is the only place where `webPreferences` can be configured. The renderer cannot override them. See [Security](/electron-window/guides/security/) for details.
+
+### Preload script
+
+```ts
+// preload.ts — must be bundled (esbuild, webpack, etc.)
+import "@loc/electron-window/preload";
+```
+
+This sets up the IPC bridge between the main and renderer processes.
+
+### Renderer
+
+```tsx
+// renderer
+import { WindowProvider, Window } from "@loc/electron-window";
+
+function App() {
+  const [showSettings, setShowSettings] = useState(false);
+
+  return (
+    <WindowProvider>
+      <button onClick={() => setShowSettings(true)}>Settings</button>
+      <Window
+        open={showSettings}
+        onUserClose={() => setShowSettings(false)}
+        title="Settings"
+        defaultWidth={600}
+        defaultHeight={400}
+      >
+        <SettingsPanel />
+      </Window>
+    </WindowProvider>
+  );
+}
+```
+
+`WindowProvider` must wrap all `<Window>` usage. Children of `<Window>` live in the parent React tree — Redux stores, theme providers, routers, and context all work inside child windows without extra wiring.
+
+## Entry Points
+
+| Import                         | Use                                 |
+| ------------------------------ | ----------------------------------- |
+| `@loc/electron-window`         | Components and hooks (renderer)     |
+| `@loc/electron-window/main`    | `setupWindowManager` (main process) |
+| `@loc/electron-window/preload` | IPC bridge (preload script)         |
+| `@loc/electron-window/testing` | Mocks for unit tests                |
+
+## Next Steps
+
+- [Props Reference](/electron-window/guides/props/) — all `<Window>` props
+- [Hooks](/electron-window/guides/hooks/) — reactive window state
+- [Patterns](/electron-window/guides/patterns/) — common recipes

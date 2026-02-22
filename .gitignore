@@ -41,6 +41,7 @@ yarn-error.log*
 # Temporary files
 *.tmp
 *.temp
+.astro/
 
 # Generated code
 src/generated-ipc/

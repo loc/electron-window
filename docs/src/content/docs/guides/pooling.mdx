@@ -1,0 +1,65 @@
+---
+title: "Window Pooling"
+description: "Pre-warm hidden windows for instant display using PooledWindow and createWindowPool."
+---
+
+For windows that appear and disappear frequently — overlays, HUDs, menus — pooling pre-warms hidden windows so display is instant.
+
+Without pooling, each `open={true}` creates a new `BrowserWindow` and loads its content. With pooling, a window is ready before you need it.
+
+## Setup
+
+```tsx
+import { PooledWindow, createWindowPool } from "@loc/electron-window";
+
+// Create once at module level
+const overlayPool = createWindowPool(
+  { transparent: true, frame: false }, // shape — creation-only props
+  { minIdle: 1, maxIdle: 3, idleTimeout: 5000 }, // pool config
+);
+
+function App() {
+  const [show, setShow] = useState(false);
+  return (
+    <PooledWindow pool={overlayPool} open={show} alwaysOnTop>
+      <Overlay />
+    </PooledWindow>
+  );
+}
+```
+
+On `open={true}`: acquires a pre-warmed window from the pool instantly. On `open={false}`: hides and returns to pool — no destroy/recreate cost.
+
+## `createWindowPool(shape, config)`
+
+### Shape (creation-only props)
+
+Shape props are fixed for the lifetime of the pool. All windows in the pool share the same shape.
+
+| Prop            | Description                     |
+| --------------- | ------------------------------- |
+| `transparent`   | Transparent background          |
+| `frame`         | Window chrome                   |
+| `titleBarStyle` | Title bar appearance            |
+| `vibrancy`      | macOS vibrancy effect           |
+
+Changing these after pool creation has no effect — recreate the pool instead.
+
+### Pool config
+
+| Option        | Type     | Default | Description                                          |
+| ------------- | -------- | ------- | ---------------------------------------------------- |
+| `minIdle`     | `number` | `1`     | Minimum windows to keep warm in the pool             |
+| `maxIdle`     | `number` | `3`     | Maximum idle windows to retain                       |
+| `idleTimeout` | `number` | `5000`  | Milliseconds before excess idle windows are destroyed |
+
+## `<PooledWindow>` Props
+
+`PooledWindow` accepts all the same props as `<Window>` except creation-only shape props (those are fixed by the pool). All other props — `alwaysOnTop`, `title`, event handlers, etc. — can vary per use.
+
+| Prop   | Type         | Description                     |
+| ------ | ------------ | ------------------------------- |
+| `pool` | `WindowPool` | Pool created by `createWindowPool` |
+| `open` | `boolean`    | Acquire or release from pool    |
+
+All other [`<Window>` props](/electron-window/guides/props/) are supported except the shape props set on the pool.

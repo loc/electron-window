@@ -1,0 +1,49 @@
+---
+title: "@loc/electron-window"
+description: "Declarative React components for Electron window management"
+template: splash
+hero:
+  tagline: "Manage Electron windows with React components. Children render via portals — your providers, themes, and state work inside child windows automatically."
+  actions:
+    - text: Get Started
+      link: /electron-window/guides/getting-started/
+      icon: right-arrow
+    - text: API Reference
+      link: /electron-window/api/
+      variant: minimal
+---
+
+import { CardGrid, Card } from '@astrojs/starlight/components';
+
+<CardGrid>
+  <Card title="Getting Started" icon="rocket">
+    Install the package and wire up the three required files — main, preload, and renderer.
+
+    [Install & Setup →](/electron-window/guides/getting-started/)
+  </Card>
+  <Card title="Props Reference" icon="document">
+    Every `<Window>` prop: lifecycle, geometry, appearance, behavior, events, platform, and advanced.
+
+    [Browse Props →](/electron-window/guides/props/)
+  </Card>
+  <Card title="Hooks" icon="puzzle">
+    Reactive hooks for window state. Use `useCurrentWindow()` for imperative control.
+
+    [View Hooks →](/electron-window/guides/hooks/)
+  </Card>
+  <Card title="Window Pooling" icon="rocket">
+    Pre-warm hidden windows for instant display. Ideal for overlays, HUDs, and menus.
+
+    [Learn Pooling →](/electron-window/guides/pooling/)
+  </Card>
+  <Card title="Persistence" icon="setting">
+    Save and restore window bounds across sessions with a single prop.
+
+    [View Persistence →](/electron-window/guides/persistence/)
+  </Card>
+  <Card title="Testing" icon="approve-check">
+    Mock providers, mock windows, and event simulation for unit tests.
+
+    [Testing Guide →](/electron-window/guides/testing/)
+  </Card>
+</CardGrid>
