@@ -104,8 +104,10 @@ type PoolShapeProps = "transparent" | "frame" | "titleBarStyle" | "vibrancy";
 // Props that don't apply to pooled windows
 type PoolExcludedProps = PoolShapeProps | "recreateOnShapeChange";
 
-export interface PooledWindowProps
-  extends Omit<BaseWindowProps, PoolExcludedProps> {
+export interface PooledWindowProps extends Omit<
+  BaseWindowProps,
+  PoolExcludedProps
+> {
   /** Pool to acquire windows from */
   pool: WindowPoolDefinition;
   /** Content to render inside the window */
@@ -183,9 +185,13 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
       childWindow: globalThis.Window;
     } | null>(null);
 
+    // Ref for latest callback value (avoids stale closure in debounce)
+    const onBoundsChangeRef = useRef(onBoundsChange);
+    onBoundsChangeRef.current = onBoundsChange;
+
     const debouncedBoundsChange = useRef(
       debounce((bounds: Bounds) => {
-        onBoundsChange?.(bounds);
+        onBoundsChangeRef.current?.(bounds);
       }, 100),
     );
 

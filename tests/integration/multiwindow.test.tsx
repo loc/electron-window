@@ -7,8 +7,9 @@ import {
   resetMockWindows,
   getMockWindows,
   getMockWindowByName,
+  simulateMockWindowEvent,
 } from "../../src/testing/index.js";
-import { resetMockWindowsGlobal, simulateUserClose } from "../setup.js";
+import { resetMockWindowsGlobal } from "../setup.js";
 
 // Get mock windows from global mock
 function getGlobalMockWindows(): Map<string, unknown> {
@@ -161,10 +162,10 @@ describe("Multiple windows", () => {
       expect(getGlobalMockWindows().size).toBe(2);
     });
 
-    // Close window A via unload event
+    // Simulate user close via IPC event (the real path in Electron)
     const windowA = getMockWindowByName("window-a");
     if (windowA) {
-      simulateUserClose(windowA.id);
+      simulateMockWindowEvent(windowA.id, { type: "userCloseRequested" });
     }
 
     await waitFor(() => {

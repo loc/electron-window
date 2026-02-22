@@ -72,6 +72,12 @@ export interface WindowManagerConfig {
    * Return true to allow, false to reject.
    */
   validator?: SecurityValidator;
+
+  /** Maximum pending window registrations. Default: 100. */
+  maxPendingWindows?: number;
+
+  /** Maximum active windows. Default: 50. */
+  maxWindows?: number;
 }
 
 interface ResolvedConfig {
@@ -80,6 +86,8 @@ interface ResolvedConfig {
   allowedOrigins: string[] | undefined;
   allowIframes: boolean;
   validator: SecurityValidator | undefined;
+  maxPendingWindows: number;
+  maxWindows: number;
 }
 
 type Dispatcher = { dispatchWindowEvent: (e: IPCWindowEvent) => void };
@@ -102,6 +110,8 @@ export class WindowManager {
       allowedOrigins: config.allowedOrigins,
       allowIframes: config.allowIframes ?? false,
       validator: config.validator,
+      maxPendingWindows: config.maxPendingWindows ?? 100,
+      maxWindows: config.maxWindows ?? 50,
     };
   }
 
@@ -128,9 +138,15 @@ export class WindowManager {
 
       const frameUrl = frame.url;
       try {
-        const origin = new URL(frameUrl).origin;
+        const parsedOrigin = new URL(frameUrl).origin;
+        // For non-standard protocols (file://, app://), origin is "null".
+        // Fall back to protocol + host matching for these cases.
+        const origin =
+          parsedOrigin !== "null"
+            ? parsedOrigin
+            : new URL(frameUrl).protocol + "//" + new URL(frameUrl).host;
         const allowed = this.config.allowedOrigins.some(
-          (o) => origin === o || frameUrl.startsWith(o),
+          (allowedOrigin) => origin === allowedOrigin,
         );
 
         if (!allowed && this.config.devWarnings) {
@@ -143,6 +159,12 @@ export class WindowManager {
       } catch {
         return false;
       }
+    }
+
+    if (this.config.devWarnings) {
+      devWarning(
+        `IPC call from "${frame.url}" allowed by default. Set allowedOrigins in WindowManagerConfig for stricter security.`,
+      );
     }
 
     return true;
@@ -278,6 +300,22 @@ export class WindowManager {
     return {
       RegisterWindow: (id: WindowId, props: IPCWindowProps) => {
         return withValidation(() => {
+          if (this.pendingWindows.size >= this.config.maxPendingWindows) {
+            if (this.config.devWarnings) {
+              devWarning(
+                "Maximum pending windows reached. Registration rejected.",
+              );
+            }
+            return false;
+          }
+          if (this.windows.size >= this.config.maxWindows) {
+            if (this.config.devWarnings) {
+              devWarning(
+                "Maximum active windows reached. Registration rejected.",
+              );
+            }
+            return false;
+          }
           const filteredProps = filterAllowedProps(
             props,
             this.config.devWarnings,

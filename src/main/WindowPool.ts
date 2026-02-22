@@ -1,4 +1,3 @@
-import type { BrowserWindowConstructorOptions } from "electron";
 import type { WindowShape, WindowPoolConfig } from "../shared/types.js";
 import { generateWindowId } from "../shared/utils.js";
 
@@ -253,7 +252,7 @@ export class WindowPool {
   constructor(
     shape: WindowShape,
     createWindow: () => { destroy: () => void },
-    config: WindowPoolConfig = {}
+    config: WindowPoolConfig = {},
   ) {
     this.shape = shape;
 
@@ -264,32 +263,6 @@ export class WindowPool {
       maxIdle: config.maxIdle ?? 3,
       idleTimeout: config.idleTimeout ?? 30000,
     });
-  }
-
-  /**
-   * Check if this pool can handle a window with given options
-   */
-  matches(options: Partial<BrowserWindowConstructorOptions>): boolean {
-    // Check if creation-only props match
-    const shape = this.shape;
-
-    if (options.transparent !== undefined && options.transparent !== shape.transparent) {
-      return false;
-    }
-    if (options.frame !== undefined && options.frame !== shape.frame) {
-      return false;
-    }
-    if (options.titleBarStyle !== undefined && options.titleBarStyle !== shape.titleBarStyle) {
-      return false;
-    }
-    if (options.type !== undefined && options.type !== shape.type) {
-      return false;
-    }
-    if (options.vibrancy !== undefined && options.vibrancy !== shape.vibrancy) {
-      return false;
-    }
-
-    return true;
   }
 
   acquire(): PoolResource<{ destroy: () => void }> {
@@ -323,7 +296,7 @@ export class WindowPool {
 export function createWindowPool(
   shape: WindowShape,
   createWindow: () => { destroy: () => void },
-  config?: WindowPoolConfig
+  config?: WindowPoolConfig,
 ): WindowPool {
   return new WindowPool(shape, createWindow, config);
 }

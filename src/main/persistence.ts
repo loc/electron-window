@@ -1,9 +1,16 @@
 import { app, screen } from "electron";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { Bounds, PersistenceAdapter } from "../shared/types.js";
+import type { Bounds } from "../shared/types.js";
 
 const STORE_FILE_NAME = "electron-window-bounds.json";
+
+interface PersistenceAdapter {
+  get(key: string): Promise<Bounds | null>;
+  set(key: string, bounds: Bounds): Promise<void>;
+  delete(key: string): Promise<void>;
+  clear(): Promise<void>;
+}
 
 /**
  * Default file-based persistence adapter
@@ -15,7 +22,8 @@ export class FilePersistenceAdapter implements PersistenceAdapter {
   private isLoaded = false;
 
   constructor(storePath?: string) {
-    this.storePath = storePath ?? path.join(app.getPath("userData"), STORE_FILE_NAME);
+    this.storePath =
+      storePath ?? path.join(app.getPath("userData"), STORE_FILE_NAME);
   }
 
   private ensureLoaded(): void {
@@ -106,7 +114,7 @@ export function constrainBounds(
     maxWidth?: number;
     minHeight?: number;
     maxHeight?: number;
-  }
+  },
 ): Bounds {
   let { width, height } = bounds;
 

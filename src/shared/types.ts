@@ -465,23 +465,6 @@ export interface WindowHandle {
 }
 
 /**
- * IPC channel names
- */
-export const IPC_CHANNELS = {
-  // Renderer -> Main
-  REGISTER_WINDOW: "electron-window:register",
-  UNREGISTER_WINDOW: "electron-window:unregister",
-  UPDATE_WINDOW: "electron-window:update",
-  DESTROY_WINDOW: "electron-window:destroy",
-  WINDOW_ACTION: "electron-window:action",
-  GET_WINDOW_STATE: "electron-window:get-state",
-
-  // Main -> Renderer
-  WINDOW_EVENT: "electron-window:event",
-  WINDOW_STATE_UPDATE: "electron-window:state-update",
-} as const;
-
-/**
  * Window action types
  */
 export type WindowAction =
@@ -541,17 +524,3 @@ export type WindowShape = Pick<
 
 // WindowManagerConfig is defined in src/main/WindowManager.ts
 // It includes all security options (allowedOrigins, allowIframes, validator)
-
-/**
- * Check if a prop is creation-only
- */
-export function isCreationOnlyProp(prop: string): boolean {
-  return CREATION_ONLY_PROPS.has(prop);
-}
-
-/**
- * Check if a prop is allowed from renderer
- */
-export function isRendererAllowedProp(prop: string): boolean {
-  return RENDERER_ALLOWED_PROPS.has(prop);
-}

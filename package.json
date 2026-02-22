@@ -27,6 +27,15 @@
     "dist",
     "LICENSE"
   ],
+  "sideEffects": [
+    "./dist/preload/index.js",
+    "./src/preload/index.ts",
+    "./src/generated-ipc/preload/electron_window.ts",
+    "./src/generated-ipc/_internal/preload/electron_window.ts"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "generate:ipc": "generate-ipc schemas src/generated-ipc",
     "prebuild": "yarn generate:ipc",
@@ -35,6 +44,7 @@
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
+    "pretest:e2e": "yarn build && node tests/e2e/fixtures/test-app/build.js",
     "test:e2e": "playwright test",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
@@ -47,7 +57,19 @@
     "react": ">=18.0.0",
     "react-dom": ">=18.0.0"
   },
+  "peerDependenciesMeta": {
+    "electron": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@marshallofsound/ipc": "^2.6.0",
     "@playwright/test": "^1.40.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^14.1.0",
@@ -76,8 +98,5 @@
     "declarative"
   ],
   "author": "Andy Locascio",
-  "license": "MIT",
-  "dependencies": {
-    "@marshallofsound/ipc": "^2.6.0"
-  }
+  "license": "MIT"
 }

@@ -181,11 +181,19 @@ export const Window = forwardRef<WindowRef, WindowProps>(
     const prevPropsRef = useRef<Omit<WindowProps, "children"> | null>(null);
     const initialShapeRef = useRef<Record<string, unknown> | null>(null);
 
+    // Refs for latest callback values (avoids stale closures in debounce)
+    const onBoundsChangeRef = useRef(onBoundsChange);
+    onBoundsChangeRef.current = onBoundsChange;
+    const persistBoundsRef = useRef(persistBounds);
+    persistBoundsRef.current = persistBounds;
+    const persistenceRef = useRef(persistence);
+    persistenceRef.current = persistence;
+
     const debouncedBoundsChange = useRef(
       debounce((bounds: Bounds) => {
-        onBoundsChange?.(bounds);
-        if (persistBounds) {
-          persistence.save(bounds);
+        onBoundsChangeRef.current?.(bounds);
+        if (persistBoundsRef.current) {
+          persistenceRef.current.save(bounds);
         }
       }, 100),
     );
@@ -294,7 +302,9 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         // 5. Handle user closing the window via OS chrome (X button)
         win.addEventListener("unload", () => {
           if (!cancelled) {
-            onUserClose?.();
+            // Don't call onUserClose here — the IPC "userCloseRequested" event
+            // from the main process is the authoritative source for user-initiated closes.
+            // This handler only cleans up renderer-side state.
             childWindowRef.current = null;
             setPortalTarget(null);
             setIsReady(false);

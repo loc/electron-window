@@ -28,13 +28,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'yarn'
+          cache: "yarn"
 
       - name: Install dependencies
         run: yarn install --immutable
 
       - name: Build
         run: yarn build
+
+      - name: Test
+        run: yarn test
 
       - name: Release
         env:

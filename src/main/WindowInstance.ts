@@ -124,6 +124,7 @@ export class WindowInstance {
   private readonly onEvent: (event: WindowEvent) => void;
   private currentProps: Omit<BaseWindowProps, "open" | "children">;
   private isDestroyed = false;
+  private _forceClosing = false;
   private lastDisplay: DisplayInfo | null = null;
 
   private readonly emitBoundsChange: ReturnType<typeof debounce>;
@@ -196,8 +197,9 @@ export class WindowInstance {
         event.preventDefault();
         return;
       }
-      if (!this.isDestroyed)
+      if (!this.isDestroyed && !this._forceClosing) {
         this.onEvent({ type: "userCloseRequested", id: this.id });
+      }
     });
 
     win.on("focus", () => {
@@ -386,11 +388,12 @@ export class WindowInstance {
 
   forceClose(): void {
     if (this.browserWindow && !this.isDestroyed) {
-      // Temporarily allow close to bypass the closable=false guard in the event listener
+      this._forceClosing = true;
       const wasClosable = this.currentProps.closable;
       this.currentProps.closable = true;
       this.browserWindow.close();
       this.currentProps.closable = wasClosable;
+      this._forceClosing = false;
     }
   }
 

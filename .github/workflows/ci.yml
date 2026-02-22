@@ -14,7 +14,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'yarn'
+          cache: "yarn"
       - run: yarn install --immutable
       - run: yarn typecheck
       - run: yarn lint
@@ -26,7 +26,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'yarn'
+          cache: "yarn"
       - run: yarn install --immutable
       - run: yarn test
 
@@ -37,7 +37,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'yarn'
+          cache: "yarn"
       - run: yarn install --immutable
       - run: yarn build
 
@@ -52,11 +52,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'yarn'
+          cache: "yarn"
       - run: yarn install --immutable
-      - name: Install Playwright Browsers
-        run: yarn playwright install --with-deps
-      - name: Run E2E tests
+      - name: Build library
+        run: yarn build
+      - name: Build E2E test app
+        run: node tests/e2e/fixtures/test-app/build.js
+      - name: Install Playwright
+        run: npx playwright install --with-deps
+      - name: Run E2E tests (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum yarn test:e2e
+      - name: Run E2E tests (macOS/Windows)
+        if: runner.os != 'Linux'
         run: yarn test:e2e
       - uses: actions/upload-artifact@v4
         if: failure()
@@ -70,17 +78,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        electron: ['30', '31', '32', '33']
+        electron: ["30", "31", "32", "33"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'yarn'
+          cache: "yarn"
       - run: yarn install --immutable
       - name: Install Electron ${{ matrix.electron }}
         run: yarn add -D electron@${{ matrix.electron }}
-      - name: Install Playwright Browsers
-        run: yarn playwright install --with-deps
+      - name: Build library
+        run: yarn build
+      - name: Build E2E test app
+        run: node tests/e2e/fixtures/test-app/build.js
+      - name: Install Playwright
+        run: npx playwright install --with-deps
       - name: Run E2E tests
-        run: yarn test:e2e
+        run: xvfb-run --auto-servernum yarn test:e2e

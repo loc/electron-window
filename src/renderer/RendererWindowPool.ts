@@ -114,6 +114,11 @@ export class RendererWindowPool {
 
     const entry = this.initDocument(id, childWindow);
     this.idle.push(entry);
+
+    // Handle external destruction (e.g., main process shutdown or DestroyWindow IPC)
+    childWindow.addEventListener("unload", () => {
+      this.handleWindowDestroyed(id);
+    });
   }
 
   /**
@@ -162,6 +167,12 @@ export class RendererWindowPool {
 
     const newEntry = this.initDocument(id, childWindow);
     this.active.set(id, newEntry);
+
+    // Handle external destruction for on-the-fly windows too
+    childWindow.addEventListener("unload", () => {
+      this.handleWindowDestroyed(id);
+    });
+
     return newEntry;
   }
 
@@ -245,6 +256,23 @@ export class RendererWindowPool {
   }
 
   /**
+   * Remove a window from idle/active tracking when it's destroyed externally
+   * (e.g., main process shutdown, DestroyWindow IPC).
+   */
+  private handleWindowDestroyed(id: string): void {
+    const idleIndex = this.idle.findIndex((e) => e.id === id);
+    if (idleIndex !== -1) {
+      this.idle.splice(idleIndex, 1);
+      const timer = this.idleTimers.get(id);
+      if (timer) {
+        clearTimeout(timer);
+        this.idleTimers.delete(id);
+      }
+    }
+    this.active.delete(id);
+  }
+
+  /**
    * Prepare the child window's document for portal rendering and return a PoolEntry.
    */
   private initDocument(id: string, childWindow: globalThis.Window): PoolEntry {
@@ -255,6 +283,12 @@ export class RendererWindowPool {
     const base = doc.createElement("base");
     base.href = window.location.origin;
     doc.head.appendChild(base);
+
+    // Copy stylesheets from parent so pool windows render with the correct styles
+    const sheets = document.querySelectorAll('style, link[rel="stylesheet"]');
+    for (const sheet of sheets) {
+      doc.head.appendChild(sheet.cloneNode(true));
+    }
 
     const container = doc.createElement("div");
     container.id = "root";

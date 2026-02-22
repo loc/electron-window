@@ -6,9 +6,10 @@ import {
   MockWindowProvider,
   resetMockWindows,
   getMockWindows,
+  simulateMockWindowEvent,
 } from "../../src/testing/index.js";
 import type { Bounds } from "../../src/shared/types.js";
-import { resetMockWindowsGlobal, simulateUserClose } from "../setup.js";
+import { resetMockWindowsGlobal } from "../setup.js";
 
 // Get mock windows from global mock
 function getGlobalMockWindows(): Map<string, unknown> {
@@ -232,9 +233,9 @@ describe("<Window> user interactions", () => {
       expect(getGlobalMockWindows().size).toBe(1);
     });
 
-    // Simulate user closing the window via unload event
+    // Simulate user close via IPC event (the real path in Electron)
     const mockWindows = getMockWindows();
-    simulateUserClose(mockWindows[0].id);
+    simulateMockWindowEvent(mockWindows[0].id, { type: "userCloseRequested" });
 
     await waitFor(() => {
       expect(onUserClose).toHaveBeenCalled();
@@ -771,9 +772,9 @@ describe("<Window> user interactions - imperative methods", () => {
       expect(getGlobalMockWindows().size).toBe(1);
     });
 
-    // Simulate user closing the window via unload event
+    // Simulate user close via IPC event (the real path in Electron)
     const mockWindows = getMockWindows();
-    simulateUserClose(mockWindows[0].id);
+    simulateMockWindowEvent(mockWindows[0].id, { type: "userCloseRequested" });
 
     await waitFor(() => {
       expect(onUserClose).toHaveBeenCalled();

@@ -4,10 +4,6 @@ import {
   generateWindowId,
   debounce,
   sleep,
-  diffProps,
-  shallowEqual,
-  pick,
-  omit,
 } from "../../src/shared/utils.js";
 
 describe("createDeferred", () => {
@@ -125,78 +121,5 @@ describe("sleep", () => {
     expect(resolved).toBe(true);
 
     vi.useRealTimers();
-  });
-});
-
-describe("diffProps", () => {
-  it("returns empty object for identical objects", () => {
-    const obj = { a: 1, b: 2 };
-    expect(diffProps(obj, obj)).toEqual({});
-  });
-
-  it("returns changed properties", () => {
-    const prev = { a: 1, b: 2 };
-    const next = { a: 1, b: 3 };
-    expect(diffProps(prev, next)).toEqual({ b: 3 });
-  });
-
-  it("includes new properties", () => {
-    const prev = { a: 1 };
-    const next = { a: 1, b: 2 };
-    expect(diffProps(prev, next)).toEqual({ b: 2 });
-  });
-
-  it("handles undefined prev", () => {
-    const next = { a: 1, b: 2 };
-    expect(diffProps(undefined, next)).toEqual({ a: 1, b: 2 });
-  });
-});
-
-describe("shallowEqual", () => {
-  it("returns true for identical objects", () => {
-    const obj = { a: 1, b: 2 };
-    expect(shallowEqual(obj, obj)).toBe(true);
-  });
-
-  it("returns true for equal objects", () => {
-    expect(shallowEqual({ a: 1, b: 2 }, { a: 1, b: 2 })).toBe(true);
-  });
-
-  it("returns false for different values", () => {
-    expect(shallowEqual({ a: 1 }, { a: 2 })).toBe(false);
-  });
-
-  it("returns false for different keys", () => {
-    expect(shallowEqual({ a: 1 }, { b: 1 })).toBe(false);
-  });
-
-  it("handles null and undefined", () => {
-    expect(shallowEqual(null, null)).toBe(true);
-    expect(shallowEqual(null, { a: 1 })).toBe(false);
-    expect(shallowEqual({ a: 1 }, null)).toBe(false);
-  });
-});
-
-describe("pick", () => {
-  it("picks specified keys", () => {
-    const obj = { a: 1, b: 2, c: 3 };
-    expect(pick(obj, ["a", "c"])).toEqual({ a: 1, c: 3 });
-  });
-
-  it("ignores missing keys", () => {
-    const obj = { a: 1 };
-    expect(pick(obj, ["a", "b" as keyof typeof obj])).toEqual({ a: 1 });
-  });
-});
-
-describe("omit", () => {
-  it("omits specified keys", () => {
-    const obj = { a: 1, b: 2, c: 3 };
-    expect(omit(obj, ["b"])).toEqual({ a: 1, c: 3 });
-  });
-
-  it("handles missing keys", () => {
-    const obj = { a: 1, b: 2 };
-    expect(omit(obj, ["c" as keyof typeof obj])).toEqual({ a: 1, b: 2 });
   });
 });

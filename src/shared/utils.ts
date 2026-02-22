@@ -50,7 +50,7 @@ export function generateWindowId(): string {
  */
 export function debounce<T extends (...args: never[]) => void>(
   fn: T,
-  ms: number
+  ms: number,
 ): T & { cancel: () => void } {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
@@ -82,16 +82,10 @@ export function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Get current platform
- */
-export function getPlatform(): "darwin" | "win32" | "linux" {
-  return process.platform as "darwin" | "win32" | "linux";
-}
-
-/**
  * Check if running on macOS
  */
 export function isMac(): boolean {
+  if (typeof process === "undefined") return false;
   return process.platform === "darwin";
 }
 
@@ -99,6 +93,7 @@ export function isMac(): boolean {
  * Check if running on Windows
  */
 export function isWindows(): boolean {
+  if (typeof process === "undefined") return false;
   return process.platform === "win32";
 }
 
@@ -106,6 +101,7 @@ export function isWindows(): boolean {
  * Check if running on Linux
  */
 export function isLinux(): boolean {
+  if (typeof process === "undefined") return false;
   return process.platform === "linux";
 }
 
@@ -113,7 +109,10 @@ export function isLinux(): boolean {
  * Check if running in development mode
  */
 export function isDev(): boolean {
-  return process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
+  if (typeof process === "undefined") return false;
+  return (
+    process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test"
+  );
 }
 
 /**
@@ -123,81 +122,4 @@ export function devWarning(message: string): void {
   if (isDev()) {
     console.warn(`[electron-window] ${message}`);
   }
-}
-
-/**
- * Compare two objects for shallow equality
- */
-export function shallowEqual<T extends Record<string, unknown>>(
-  a: T | undefined | null,
-  b: T | undefined | null
-): boolean {
-  if (a === b) return true;
-  if (!a || !b) return false;
-
-  const keysA = Object.keys(a);
-  const keysB = Object.keys(b);
-
-  if (keysA.length !== keysB.length) return false;
-
-  for (const key of keysA) {
-    if (a[key] !== b[key]) return false;
-  }
-
-  return true;
-}
-
-/**
- * Diff two prop objects and return changed keys with their new values
- */
-export function diffProps<T extends Record<string, unknown>>(
-  prev: T | undefined,
-  next: T
-): Partial<T> {
-  const changes: Partial<T> = {};
-
-  for (const key of Object.keys(next) as (keyof T)[]) {
-    if (prev?.[key] !== next[key]) {
-      changes[key] = next[key];
-    }
-  }
-
-  return changes;
-}
-
-/**
- * Pick specific keys from an object
- */
-export function pick<T extends Record<string, unknown>, K extends keyof T>(
-  obj: T,
-  keys: K[]
-): Pick<T, K> {
-  const result = {} as Pick<T, K>;
-  for (const key of keys) {
-    if (key in obj) {
-      result[key] = obj[key];
-    }
-  }
-  return result;
-}
-
-/**
- * Omit specific keys from an object
- */
-export function omit<T extends Record<string, unknown>, K extends keyof T>(
-  obj: T,
-  keys: K[]
-): Omit<T, K> {
-  const result = { ...obj };
-  for (const key of keys) {
-    delete result[key];
-  }
-  return result as Omit<T, K>;
-}
-
-/**
- * Noop function
- */
-export function noop(): void {
-  // intentionally empty
 }
