@@ -2,37 +2,20 @@ import {
   useEffect,
   useRef,
   useState,
-  useCallback,
-  useMemo,
   forwardRef,
   useImperativeHandle,
 } from "react";
 import { createPortal } from "react-dom";
-import {
-  WindowContext,
-  useWindowProviderContext,
-  type WindowContextValue,
-} from "./context.js";
-import type {
-  WindowId,
-  WindowState,
-  WindowProps,
-  WindowHandle,
-  Bounds,
-  DisplayInfo,
-  InjectStylesMode,
-} from "../shared/types.js";
+import { WindowContext, useWindowProviderContext } from "./context.js";
+import type { WindowId, WindowProps, WindowHandle } from "../shared/types.js";
 import {
   CREATION_ONLY_PROPS,
   RENDERER_ALLOWED_PROPS,
 } from "../shared/types.js";
 import { usePersistedBounds } from "./hooks/usePersistedBounds.js";
-import {
-  devWarning,
-  debounce,
-  generateWindowId,
-  sleep,
-} from "../shared/utils.js";
+import { devWarning, generateWindowId } from "../shared/utils.js";
+import { waitForWindowReady, initWindowDocument } from "./windowUtils.js";
+import { useWindowLifecycle, NOT_READY_HANDLE } from "./useWindowLifecycle.js";
 
 /**
  * Changeable behavior props that can be updated after window creation via IPC
@@ -91,35 +74,6 @@ function extractIPCProps(
   return ipcProps;
 }
 
-/**
- * Copy styles from parent document into child window document
- */
-function handleStyleInjection(doc: Document, mode: InjectStylesMode): void {
-  if (mode === false) return;
-  if (typeof mode === "function") {
-    mode(doc);
-    return;
-  }
-  // "auto" — clone all style/link elements from parent
-  const sheets = document.querySelectorAll('style, link[rel="stylesheet"]');
-  for (const sheet of sheets) {
-    doc.head.appendChild(sheet.cloneNode(true));
-  }
-}
-
-/**
- * Wait until the child window document is accessible and has non-zero dimensions
- */
-async function waitForWindowReady(win: globalThis.Window): Promise<void> {
-  const deadline = Date.now() + 4000;
-  while (!win.document?.body || !win.innerWidth) {
-    if (Date.now() > deadline) {
-      throw new Error("Timed out waiting for child window to be ready");
-    }
-    await sleep(1);
-  }
-}
-
 // WindowRef is the same as WindowHandle — consumers get the same API via ref or hook
 export type WindowRef = WindowHandle;
 
@@ -174,29 +128,41 @@ export const Window = forwardRef<WindowRef, WindowProps>(
     const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
 
     const [isReady, setIsReady] = useState(false);
-    const [windowState, setWindowState] = useState<WindowState | null>(null);
-    const [displayInfo, setDisplayInfo] = useState<DisplayInfo | null>(null);
 
     const childWindowRef = useRef<globalThis.Window | null>(null);
     const prevPropsRef = useRef<Omit<WindowProps, "children"> | null>(null);
     const initialShapeRef = useRef<Record<string, unknown> | null>(null);
-
-    // Refs for latest callback values (avoids stale closures in debounce)
-    const onBoundsChangeRef = useRef(onBoundsChange);
-    onBoundsChangeRef.current = onBoundsChange;
-    const persistBoundsRef = useRef(persistBounds);
-    persistBoundsRef.current = persistBounds;
     const persistenceRef = useRef(persistence);
     persistenceRef.current = persistence;
 
-    const debouncedBoundsChange = useRef(
-      debounce((bounds: Bounds) => {
-        onBoundsChangeRef.current?.(bounds);
-        if (persistBoundsRef.current) {
-          persistenceRef.current.save(bounds);
-        }
-      }, 100),
-    );
+    const lifecycle = useWindowLifecycle({
+      windowId: isReady ? windowId : null,
+      isReady,
+      provider,
+      childWindowRef,
+      onBoundsChange,
+      onUserClose,
+      onFocus,
+      onBlur,
+      onClose,
+      onMaximize,
+      onUnmaximize,
+      onMinimize,
+      onRestore,
+      onEnterFullscreen,
+      onExitFullscreen,
+      onDisplayChange,
+      persistBoundsKey: persistBounds,
+      persistenceSave: persistBounds
+        ? (bounds) => persistenceRef.current.save(bounds)
+        : undefined,
+      onWindowClosedSetState: () => {
+        childWindowRef.current = null;
+        setPortalTarget(null);
+        setIsReady(false);
+        // Hook resets its own windowState internally via the 'closed' case
+      },
+    });
 
     // Warn about controlled bounds without onBoundsChange
     const hasWarnedAboutControlledBoundsRef = useRef(false);
@@ -226,7 +192,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         childWindowRef.current = null;
         setPortalTarget(null);
         setIsReady(false);
-        setWindowState(null);
+        lifecycle.setWindowState(null);
         void provider.unregisterWindow(windowId);
         return;
       }
@@ -268,7 +234,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(
 
         // 3. Wait for the child window document to be accessible
         try {
-          await waitForWindowReady(win);
+          await waitForWindowReady(win, () => cancelled);
         } catch (err) {
           devWarning(`[electron-window] ${(err as Error).message}`);
           win.close();
@@ -281,23 +247,10 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         }
 
         // 4. Set up document for portal rendering
-        const doc = win.document;
-        doc.head.innerHTML = "";
-        doc.body.innerHTML = "";
-
-        const base = doc.createElement("base");
-        base.href = window.location.origin;
-        doc.head.appendChild(base);
-
-        handleStyleInjection(doc, injectStyles);
-
-        if (title) {
-          doc.title = title;
-        }
-
-        const container = doc.createElement("div");
-        container.id = "root";
-        doc.body.appendChild(container);
+        const container = initWindowDocument(win.document, {
+          injectStyles,
+          title,
+        });
 
         // 5. Handle user closing the window via OS chrome (X button)
         win.addEventListener("unload", () => {
@@ -308,7 +261,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(
             childWindowRef.current = null;
             setPortalTarget(null);
             setIsReady(false);
-            setWindowState(null);
+            lifecycle.setWindowState(null);
           }
         });
 
@@ -316,7 +269,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         initialShapeRef.current = getWindowShape(props);
         prevPropsRef.current = props;
 
-        setWindowState({
+        lifecycle.setWindowState({
           id: windowId,
           isFocused: false,
           isVisible: true,
@@ -371,7 +324,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(
             childWindowRef.current = null;
             setPortalTarget(null);
             setIsReady(false);
-            setWindowState(null);
+            lifecycle.setWindowState(null);
             setWindowId(generateWindowId());
             initialShapeRef.current = null;
             prevPropsRef.current = null;
@@ -430,109 +383,10 @@ export const Window = forwardRef<WindowRef, WindowProps>(
       prevPropsRef.current = props;
     }, [props, isReady, recreateOnShapeChange, provider, windowId]);
 
-    // Subscribe to window events from main process
-    useEffect(() => {
-      if (!isReady || !windowId) return;
-
-      const unsubscribe = provider.subscribeToEvents(windowId, (event) => {
-        switch (event.type) {
-          case "focused":
-            setWindowState((prev) =>
-              prev ? { ...prev, isFocused: true } : prev,
-            );
-            onFocus?.();
-            break;
-          case "blurred":
-            setWindowState((prev) =>
-              prev ? { ...prev, isFocused: false } : prev,
-            );
-            onBlur?.();
-            break;
-          case "maximized":
-            setWindowState((prev) =>
-              prev ? { ...prev, isMaximized: true } : prev,
-            );
-            onMaximize?.();
-            break;
-          case "unmaximized":
-            setWindowState((prev) =>
-              prev ? { ...prev, isMaximized: false } : prev,
-            );
-            onUnmaximize?.();
-            break;
-          case "minimized":
-            setWindowState((prev) =>
-              prev ? { ...prev, isMinimized: true } : prev,
-            );
-            onMinimize?.();
-            break;
-          case "restored":
-            setWindowState((prev) =>
-              prev ? { ...prev, isMinimized: false } : prev,
-            );
-            onRestore?.();
-            break;
-          case "enterFullscreen":
-            setWindowState((prev) =>
-              prev ? { ...prev, isFullscreen: true } : prev,
-            );
-            onEnterFullscreen?.();
-            break;
-          case "leaveFullscreen":
-            setWindowState((prev) =>
-              prev ? { ...prev, isFullscreen: false } : prev,
-            );
-            onExitFullscreen?.();
-            break;
-          case "boundsChanged":
-            if (event.bounds) {
-              const bounds = event.bounds as Bounds;
-              setWindowState((prev) => (prev ? { ...prev, bounds } : prev));
-              debouncedBoundsChange.current(bounds);
-            }
-            break;
-          case "displayChanged":
-            if (event.display) {
-              const display = event.display as DisplayInfo;
-              setDisplayInfo(display);
-              onDisplayChange?.(display);
-            }
-            break;
-          case "userCloseRequested":
-            onUserClose?.();
-            break;
-          case "closed":
-            setPortalTarget(null);
-            setIsReady(false);
-            setWindowState(null);
-            childWindowRef.current = null;
-            onClose?.();
-            break;
-        }
-      });
-
-      return unsubscribe;
-    }, [
-      isReady,
-      windowId,
-      provider,
-      onFocus,
-      onBlur,
-      onClose,
-      onMaximize,
-      onUnmaximize,
-      onMinimize,
-      onRestore,
-      onEnterFullscreen,
-      onExitFullscreen,
-      onDisplayChange,
-      onUserClose,
-    ]);
-
     // Cleanup on unmount
     useEffect(() => {
       return () => {
-        debouncedBoundsChange.current.cancel();
+        lifecycle.debouncedBoundsChange.current.cancel();
         if (childWindowRef.current && !childWindowRef.current.closed) {
           childWindowRef.current.close();
         }
@@ -541,119 +395,15 @@ export const Window = forwardRef<WindowRef, WindowProps>(
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [windowId]);
 
-    // State subscription for useSyncExternalStore in child hooks
-    const stateListeners = useRef<Set<() => void>>(new Set());
-
-    const subscribe = useCallback((listener: () => void) => {
-      stateListeners.current.add(listener);
-      return () => {
-        stateListeners.current.delete(listener);
-      };
-    }, []);
-
-    const getSnapshot = useCallback(() => windowState, [windowState]);
-    const getDisplaySnapshot = useCallback(() => displayInfo, [displayInfo]);
-
-    // Notify useSyncExternalStore subscribers on state change
-    useEffect(() => {
-      for (const listener of stateListeners.current) {
-        listener();
-      }
-    }, [windowState, displayInfo]);
-
-    // Window handle for the imperative ref
-    const handle = useMemo<WindowHandle | null>(() => {
-      if (!isReady) return null;
-
-      return {
-        id: windowId,
-        isReady: true,
-        isFocused: windowState?.isFocused ?? false,
-        isMaximized: windowState?.isMaximized ?? false,
-        isMinimized: windowState?.isMinimized ?? false,
-        isFullscreen: windowState?.isFullscreen ?? false,
-        bounds: windowState?.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
-        focus: () => void provider.windowAction(windowId, { type: "focus" }),
-        blur: () => void provider.windowAction(windowId, { type: "blur" }),
-        minimize: () =>
-          void provider.windowAction(windowId, { type: "minimize" }),
-        maximize: () =>
-          void provider.windowAction(windowId, { type: "maximize" }),
-        unmaximize: () =>
-          void provider.windowAction(windowId, { type: "unmaximize" }),
-        toggleMaximize: () =>
-          void provider.windowAction(windowId, {
-            type: windowState?.isMaximized ? "unmaximize" : "maximize",
-          }),
-        close: () => void provider.windowAction(windowId, { type: "close" }),
-        forceClose: () =>
-          void provider.windowAction(windowId, { type: "forceClose" }),
-        setBounds: (bounds) =>
-          void provider.windowAction(windowId, { type: "setBounds", bounds }),
-        setTitle: (t) => {
-          if (childWindowRef.current) childWindowRef.current.document.title = t;
-          void provider.windowAction(windowId, { type: "setTitle", title: t });
-        },
-        enterFullscreen: () =>
-          void provider.windowAction(windowId, { type: "enterFullscreen" }),
-        exitFullscreen: () =>
-          void provider.windowAction(windowId, { type: "exitFullscreen" }),
-      };
-    }, [windowId, isReady, windowState, provider]);
-
-    useImperativeHandle(
-      ref,
-      () =>
-        handle ?? {
-          id: windowId,
-          isReady: false,
-          isFocused: false,
-          isMaximized: false,
-          isMinimized: false,
-          isFullscreen: false,
-          bounds: { x: 0, y: 0, width: 0, height: 0 },
-          focus: () => {},
-          blur: () => {},
-          minimize: () => {},
-          maximize: () => {},
-          unmaximize: () => {},
-          toggleMaximize: () => {},
-          close: () => {},
-          forceClose: () => {},
-          setBounds: () => {},
-          setTitle: () => {},
-          enterFullscreen: () => {},
-          exitFullscreen: () => {},
-        },
-      [handle, windowId],
-    );
-
-    const contextValue = useMemo<WindowContextValue>(
-      () => ({
-        windowId,
-        state: windowState,
-        display: displayInfo,
-        handle,
-        subscribe,
-        getSnapshot,
-        getDisplaySnapshot,
-      }),
-      [
-        windowId,
-        windowState,
-        displayInfo,
-        handle,
-        subscribe,
-        getSnapshot,
-        getDisplaySnapshot,
-      ],
-    );
+    useImperativeHandle(ref, () => lifecycle.handle ?? NOT_READY_HANDLE, [
+      lifecycle.handle,
+    ]);
 
     // Portal keeps children in the parent React tree while rendering into the child window DOM
     if (!portalTarget) return null;
 
     return createPortal(
-      <WindowContext.Provider value={contextValue}>
+      <WindowContext.Provider value={lifecycle.contextValue}>
         {children}
       </WindowContext.Provider>,
       portalTarget,

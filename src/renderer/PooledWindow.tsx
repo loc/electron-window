@@ -2,29 +2,21 @@ import {
   useEffect,
   useRef,
   useState,
-  useCallback,
   useMemo,
   forwardRef,
   useImperativeHandle,
 } from "react";
 import { createPortal } from "react-dom";
-import {
-  WindowContext,
-  useWindowProviderContext,
-  type WindowContextValue,
-} from "./context.js";
+import { WindowContext, useWindowProviderContext } from "./context.js";
 import { RendererWindowPool, type PoolShape } from "./RendererWindowPool.js";
 import type {
   WindowId,
-  WindowState,
   WindowHandle,
-  Bounds,
-  DisplayInfo,
   WindowPoolConfig,
   BaseWindowProps,
 } from "../shared/types.js";
 import { CREATION_ONLY_PROPS } from "../shared/types.js";
-import { debounce } from "../shared/utils.js";
+import { useWindowLifecycle, NOT_READY_HANDLE } from "./useWindowLifecycle.js";
 
 // Props excluded when forwarding to the window — either owned by the pool
 // (shape props) or lifecycle-only (callbacks, meta).
@@ -175,8 +167,6 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
 
     const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
     const [windowId, setWindowId] = useState<WindowId | null>(null);
-    const [windowState, setWindowState] = useState<WindowState | null>(null);
-    const [displayInfo, setDisplayInfo] = useState<DisplayInfo | null>(null);
     const [isReady, setIsReady] = useState(false);
 
     // Tracks the currently-acquired pool entry so release() has the right id
@@ -184,16 +174,35 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
       id: string;
       childWindow: globalThis.Window;
     } | null>(null);
+    // Mirrors entryRef.current?.childWindow as a ref object for useWindowLifecycle
+    const childWindowRef = useRef<globalThis.Window | null>(null);
 
-    // Ref for latest callback value (avoids stale closure in debounce)
-    const onBoundsChangeRef = useRef(onBoundsChange);
-    onBoundsChangeRef.current = onBoundsChange;
-
-    const debouncedBoundsChange = useRef(
-      debounce((bounds: Bounds) => {
-        onBoundsChangeRef.current?.(bounds);
-      }, 100),
-    );
+    const lifecycle = useWindowLifecycle({
+      windowId,
+      isReady,
+      provider,
+      childWindowRef,
+      onBoundsChange,
+      onUserClose,
+      onFocus,
+      onBlur,
+      onClose,
+      onMaximize,
+      onUnmaximize,
+      onMinimize,
+      onRestore,
+      onEnterFullscreen,
+      onExitFullscreen,
+      onDisplayChange,
+      onWindowClosedSetState: () => {
+        entryRef.current = null;
+        childWindowRef.current = null;
+        setPortalTarget(null);
+        setWindowId(null);
+        setIsReady(false);
+        // Hook resets its own windowState internally via the 'closed' case
+      },
+    });
 
     // Acquire on open=true, release on open=false
     useEffect(() => {
@@ -201,10 +210,11 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
         if (entryRef.current) {
           const idToRelease = entryRef.current.id;
           entryRef.current = null;
+          childWindowRef.current = null;
           setPortalTarget(null);
           setWindowId(null);
           setIsReady(false);
-          setWindowState(null);
+          lifecycle.setWindowState(null);
           void pool.release(idToRelease);
         }
         return;
@@ -220,6 +230,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
         }
 
         entryRef.current = entry;
+        childWindowRef.current = entry.childWindow;
 
         // Forward changeable (non-shape, non-lifecycle) props via IPC
         const changeableProps: Record<string, unknown> = {};
@@ -248,7 +259,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
         }
 
         setWindowId(entry.id);
-        setWindowState({
+        lifecycle.setWindowState({
           id: entry.id,
           isFocused: false,
           isVisible: true,
@@ -276,120 +287,10 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open]);
 
-    // Subscribe to main-process window events
-    useEffect(() => {
-      if (!isReady || !windowId) return;
-
-      const unsubscribe = provider.subscribeToEvents(windowId, (event) => {
-        switch (event.type) {
-          case "focused":
-            setWindowState((prev) =>
-              prev ? { ...prev, isFocused: true } : prev,
-            );
-            onFocus?.();
-            break;
-          case "blurred":
-            setWindowState((prev) =>
-              prev ? { ...prev, isFocused: false } : prev,
-            );
-            onBlur?.();
-            break;
-          case "maximized":
-            setWindowState((prev) =>
-              prev ? { ...prev, isMaximized: true } : prev,
-            );
-            onMaximize?.();
-            break;
-          case "unmaximized":
-            setWindowState((prev) =>
-              prev ? { ...prev, isMaximized: false } : prev,
-            );
-            onUnmaximize?.();
-            break;
-          case "minimized":
-            setWindowState((prev) =>
-              prev ? { ...prev, isMinimized: true } : prev,
-            );
-            onMinimize?.();
-            break;
-          case "restored":
-            setWindowState((prev) =>
-              prev ? { ...prev, isMinimized: false } : prev,
-            );
-            onRestore?.();
-            break;
-          case "enterFullscreen":
-            setWindowState((prev) =>
-              prev ? { ...prev, isFullscreen: true } : prev,
-            );
-            onEnterFullscreen?.();
-            break;
-          case "leaveFullscreen":
-            setWindowState((prev) =>
-              prev ? { ...prev, isFullscreen: false } : prev,
-            );
-            onExitFullscreen?.();
-            break;
-          case "boundsChanged":
-            if (event.bounds) {
-              const bounds = event.bounds as Bounds;
-              setWindowState((prev) => (prev ? { ...prev, bounds } : prev));
-              debouncedBoundsChange.current(bounds);
-            }
-            break;
-          case "displayChanged":
-            if (event.display) {
-              const display = event.display as DisplayInfo;
-              setDisplayInfo(display);
-              onDisplayChange?.(display);
-            }
-            break;
-          case "userCloseRequested":
-            onUserClose?.();
-            break;
-          case "closed":
-            // Window was destroyed externally (e.g., OS close button)
-            entryRef.current = null;
-            setPortalTarget(null);
-            setWindowId(null);
-            setIsReady(false);
-            setWindowState(null);
-            onClose?.();
-            break;
-        }
-      });
-
-      return unsubscribe;
-    }, [
-      isReady,
-      windowId,
-      provider,
-      onFocus,
-      onBlur,
-      onClose,
-      onMaximize,
-      onUnmaximize,
-      onMinimize,
-      onRestore,
-      onEnterFullscreen,
-      onExitFullscreen,
-      onDisplayChange,
-      onUserClose,
-    ]);
-
-    // Notify useSyncExternalStore subscribers in child hooks on state change
-    const stateListeners = useRef<Set<() => void>>(new Set());
-
-    useEffect(() => {
-      for (const listener of stateListeners.current) {
-        listener();
-      }
-    }, [windowState, displayInfo]);
-
     // Release and cancel debounce on unmount
     useEffect(() => {
       return () => {
-        debouncedBoundsChange.current.cancel();
+        lifecycle.debouncedBoundsChange.current.cancel();
         if (entryRef.current) {
           void pool.release(entryRef.current.id);
           entryRef.current = null;
@@ -398,109 +299,14 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
       };
     }, [pool]);
 
-    const subscribe = useCallback((listener: () => void) => {
-      stateListeners.current.add(listener);
-      return () => {
-        stateListeners.current.delete(listener);
-      };
-    }, []);
-
-    const getSnapshot = useCallback(() => windowState, [windowState]);
-    const getDisplaySnapshot = useCallback(() => displayInfo, [displayInfo]);
-
-    const handle = useMemo<WindowHandle | null>(() => {
-      if (!isReady || !windowId) return null;
-
-      return {
-        id: windowId,
-        isReady: true,
-        isFocused: windowState?.isFocused ?? false,
-        isMaximized: windowState?.isMaximized ?? false,
-        isMinimized: windowState?.isMinimized ?? false,
-        isFullscreen: windowState?.isFullscreen ?? false,
-        bounds: windowState?.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
-        focus: () => void provider.windowAction(windowId, { type: "focus" }),
-        blur: () => void provider.windowAction(windowId, { type: "blur" }),
-        minimize: () =>
-          void provider.windowAction(windowId, { type: "minimize" }),
-        maximize: () =>
-          void provider.windowAction(windowId, { type: "maximize" }),
-        unmaximize: () =>
-          void provider.windowAction(windowId, { type: "unmaximize" }),
-        toggleMaximize: () =>
-          void provider.windowAction(windowId, {
-            type: windowState?.isMaximized ? "unmaximize" : "maximize",
-          }),
-        close: () => void provider.windowAction(windowId, { type: "close" }),
-        forceClose: () =>
-          void provider.windowAction(windowId, { type: "forceClose" }),
-        setBounds: (bounds) =>
-          void provider.windowAction(windowId, { type: "setBounds", bounds }),
-        setTitle: (t) => {
-          if (entryRef.current?.childWindow) {
-            entryRef.current.childWindow.document.title = t;
-          }
-          void provider.windowAction(windowId, { type: "setTitle", title: t });
-        },
-        enterFullscreen: () =>
-          void provider.windowAction(windowId, { type: "enterFullscreen" }),
-        exitFullscreen: () =>
-          void provider.windowAction(windowId, { type: "exitFullscreen" }),
-      };
-    }, [windowId, isReady, windowState, provider]);
-
-    useImperativeHandle(
-      ref,
-      () =>
-        handle ?? {
-          id: windowId ?? "",
-          isReady: false,
-          isFocused: false,
-          isMaximized: false,
-          isMinimized: false,
-          isFullscreen: false,
-          bounds: { x: 0, y: 0, width: 0, height: 0 },
-          focus: () => {},
-          blur: () => {},
-          minimize: () => {},
-          maximize: () => {},
-          unmaximize: () => {},
-          toggleMaximize: () => {},
-          close: () => {},
-          forceClose: () => {},
-          setBounds: () => {},
-          setTitle: () => {},
-          enterFullscreen: () => {},
-          exitFullscreen: () => {},
-        },
-      [handle, windowId],
-    );
-
-    const contextValue = useMemo<WindowContextValue>(
-      () => ({
-        windowId,
-        state: windowState,
-        display: displayInfo,
-        handle,
-        subscribe,
-        getSnapshot,
-        getDisplaySnapshot,
-      }),
-      [
-        windowId,
-        windowState,
-        displayInfo,
-        handle,
-        subscribe,
-        getSnapshot,
-        getDisplaySnapshot,
-      ],
-    );
+    useImperativeHandle(ref, () => lifecycle.handle ?? NOT_READY_HANDLE, [
+      lifecycle.handle,
+    ]);
 
     if (!portalTarget) return null;
 
     return createPortal(
-      <WindowContext.Provider value={contextValue}>
+      <WindowContext.Provider value={lifecycle.contextValue}>
         {children}
       </WindowContext.Provider>,
       portalTarget,

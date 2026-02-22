@@ -7,15 +7,7 @@ import {
   resetMockWindows,
   getMockWindows,
 } from "../../src/testing/index.js";
-import { resetMockWindowsGlobal } from "../setup.js";
-
-// Get mock windows from global mock
-function getGlobalMockWindows(): Map<string, unknown> {
-  return (
-    (globalThis as unknown as Record<string, Map<string, unknown>>)
-      .__mockWindows__ ?? new Map()
-  );
-}
+import { resetMockWindowsGlobal, getGlobalMockWindows } from "../setup.js";
 
 describe("<Window> creation-only props", () => {
   beforeEach(() => {

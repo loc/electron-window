@@ -87,6 +87,11 @@ window.open = vi.fn((url?: string, target?: string, features?: string) => {
 (globalThis as unknown as Record<string, unknown>).__mockWindows__ =
   mockWindows;
 
+/** Get the global map of mock windows created by window.open */
+export function getGlobalMockWindows(): Map<string, unknown> {
+  return mockWindows as Map<string, unknown>;
+}
+
 // Helper to reset mock windows between tests
 export function resetMockWindowsGlobal() {
   for (const win of mockWindows.values()) {

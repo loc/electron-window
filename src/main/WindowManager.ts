@@ -12,6 +12,14 @@ import {
   WindowEventType,
 } from "../generated-ipc/browser/electron_window.js";
 
+const DEFAULT_WINDOW_WIDTH = 800;
+const DEFAULT_WINDOW_HEIGHT = 600;
+
+type Dispatcher = { dispatchWindowEvent: (e: IPCWindowEvent) => void };
+
+/** Maps parent BrowserWindows to their IPC event dispatchers */
+const dispatchers = new WeakMap<BrowserWindow, Dispatcher>();
+
 /**
  * Filter props to only include allowed properties.
  * Provides a runtime security boundary against renderer-supplied dangerous options.
@@ -89,8 +97,6 @@ interface ResolvedConfig {
   maxPendingWindows: number;
   maxWindows: number;
 }
-
-type Dispatcher = { dispatchWindowEvent: (e: IPCWindowEvent) => void };
 
 /**
  * Main process window manager.
@@ -181,7 +187,7 @@ export class WindowManager {
       parentBW.webContents,
     ).setImplementation(impl);
 
-    (parentBW as any).__dispatcher = dispatcher;
+    dispatchers.set(parentBW, dispatcher);
 
     parentBW.webContents.setWindowOpenHandler(({ frameName, url }) => {
       // Security: only allow about:blank — the library hardcodes this URL.
@@ -256,8 +262,8 @@ export class WindowManager {
   ): Partial<Electron.BrowserWindowConstructorOptions> {
     let x = props.x ?? props.defaultX;
     let y = props.y ?? props.defaultY;
-    const width = props.width ?? props.defaultWidth ?? 800;
-    const height = props.height ?? props.defaultHeight ?? 600;
+    const width = props.width ?? props.defaultWidth ?? DEFAULT_WINDOW_WIDTH;
+    const height = props.height ?? props.defaultHeight ?? DEFAULT_WINDOW_HEIGHT;
 
     // targetDisplay isn't in IPCWindowProps, so centering falls back to Electron's default
     const shouldCenter =
@@ -444,7 +450,7 @@ export class WindowManager {
       const win = BrowserWindow.fromWebContents(sender);
       if (!win || win.isDestroyed()) return;
 
-      const dispatcher = (win as any).__dispatcher as Dispatcher | undefined;
+      const dispatcher = dispatchers.get(win);
       if (dispatcher) {
         dispatcher.dispatchWindowEvent(event);
       }

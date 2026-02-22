@@ -204,23 +204,29 @@ export class WindowInstance {
     });
 
     win.on("focus", () => {
-      if (!this.isDestroyed) this.onEvent({ type: WindowEventType.Focused, id: this.id });
+      if (!this.isDestroyed)
+        this.onEvent({ type: WindowEventType.Focused, id: this.id });
     });
     win.on("blur", () => {
-      if (!this.isDestroyed) this.onEvent({ type: WindowEventType.Blurred, id: this.id });
+      if (!this.isDestroyed)
+        this.onEvent({ type: WindowEventType.Blurred, id: this.id });
     });
 
     win.on("maximize", () => {
-      if (!this.isDestroyed) this.onEvent({ type: WindowEventType.Maximized, id: this.id });
+      if (!this.isDestroyed)
+        this.onEvent({ type: WindowEventType.Maximized, id: this.id });
     });
     win.on("unmaximize", () => {
-      if (!this.isDestroyed) this.onEvent({ type: WindowEventType.Unmaximized, id: this.id });
+      if (!this.isDestroyed)
+        this.onEvent({ type: WindowEventType.Unmaximized, id: this.id });
     });
     win.on("minimize", () => {
-      if (!this.isDestroyed) this.onEvent({ type: WindowEventType.Minimized, id: this.id });
+      if (!this.isDestroyed)
+        this.onEvent({ type: WindowEventType.Minimized, id: this.id });
     });
     win.on("restore", () => {
-      if (!this.isDestroyed) this.onEvent({ type: WindowEventType.Restored, id: this.id });
+      if (!this.isDestroyed)
+        this.onEvent({ type: WindowEventType.Restored, id: this.id });
     });
 
     win.on("enter-full-screen", () => {
@@ -242,11 +248,10 @@ export class WindowInstance {
       if (!this.isDestroyed) this.emitBoundsChange();
     });
     win.on("moved", () => {
-      if (!this.isDestroyed) this.emitBoundsChange();
-    });
-
-    win.on("moved", () => {
-      if (!this.isDestroyed) this.checkDisplayChange();
+      if (!this.isDestroyed) {
+        this.emitBoundsChange();
+        this.checkDisplayChange();
+      }
     });
   }
 
@@ -390,11 +395,9 @@ export class WindowInstance {
   forceClose(): void {
     if (this.browserWindow && !this.isDestroyed) {
       this._forceClosing = true;
-      const wasClosable = this.currentProps.closable;
       this.currentProps.closable = true;
       this.browserWindow.close();
-      this.currentProps.closable = wasClosable;
-      this._forceClosing = false;
+      // _forceClosing and closable don't need resetting — the window is now destroyed
     }
   }
 

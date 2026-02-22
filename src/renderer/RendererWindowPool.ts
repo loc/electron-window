@@ -1,5 +1,6 @@
-import { generateWindowId, sleep } from "../shared/utils.js";
+import { generateWindowId } from "../shared/utils.js";
 import type { WindowPoolConfig } from "../shared/types.js";
+import { waitForWindowReady, initWindowDocument } from "./windowUtils.js";
 
 /**
  * The immutable creation-only props that define a pool's window shape.
@@ -98,13 +99,11 @@ export class RendererWindowPool {
     const childWindow = window.open("about:blank", id, "");
     if (!childWindow) return;
 
-    const deadline = Date.now() + 4000;
-    while (!childWindow.document?.body || !childWindow.innerWidth) {
-      if (Date.now() > deadline || this.isDestroyed) {
-        childWindow.close();
-        return;
-      }
-      await sleep(1);
+    try {
+      await waitForWindowReady(childWindow, () => this.isDestroyed);
+    } catch {
+      childWindow.close();
+      return;
     }
 
     if (this.isDestroyed) {
@@ -112,7 +111,8 @@ export class RendererWindowPool {
       return;
     }
 
-    const entry = this.initDocument(id, childWindow);
+    const portalTarget = initWindowDocument(childWindow.document);
+    const entry: PoolEntry = { id, childWindow, portalTarget };
     this.idle.push(entry);
 
     // Handle external destruction (e.g., main process shutdown or DestroyWindow IPC)
@@ -157,15 +157,14 @@ export class RendererWindowPool {
     const childWindow = window.open("about:blank", id, "");
     if (!childWindow) throw new Error("window.open returned null");
 
-    const deadline = Date.now() + 4000;
-    while (!childWindow.document?.body || !childWindow.innerWidth) {
-      if (Date.now() > deadline) {
-        throw new Error("Timed out waiting for pool window to be ready");
-      }
-      await sleep(1);
+    try {
+      await waitForWindowReady(childWindow);
+    } catch {
+      throw new Error("Timed out waiting for pool window to be ready");
     }
 
-    const newEntry = this.initDocument(id, childWindow);
+    const portalTarget = initWindowDocument(childWindow.document);
+    const newEntry: PoolEntry = { id, childWindow, portalTarget };
     this.active.set(id, newEntry);
 
     // Handle external destruction for on-the-fly windows too
@@ -281,30 +280,5 @@ export class RendererWindowPool {
       }
     }
     this.active.delete(id);
-  }
-
-  /**
-   * Prepare the child window's document for portal rendering and return a PoolEntry.
-   */
-  private initDocument(id: string, childWindow: globalThis.Window): PoolEntry {
-    const doc = childWindow.document;
-    doc.head.innerHTML = "";
-    doc.body.innerHTML = "";
-
-    const base = doc.createElement("base");
-    base.href = window.location.origin;
-    doc.head.appendChild(base);
-
-    // Copy stylesheets from parent so pool windows render with the correct styles
-    const sheets = document.querySelectorAll('style, link[rel="stylesheet"]');
-    for (const sheet of sheets) {
-      doc.head.appendChild(sheet.cloneNode(true));
-    }
-
-    const container = doc.createElement("div");
-    container.id = "root";
-    doc.body.appendChild(container);
-
-    return { id, childWindow, portalTarget: container };
   }
 }

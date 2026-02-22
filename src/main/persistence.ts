@@ -13,8 +13,11 @@ interface PersistenceAdapter {
 }
 
 /**
- * Default file-based persistence adapter
- * Stores bounds in app.getPath('userData')
+ * @experimental File-based persistence adapter for window bounds.
+ * Not used by the library's default localStorage persistence,
+ * but available for consumers who need main-process file storage.
+ *
+ * Stores bounds in app.getPath('userData').
  */
 export class FilePersistenceAdapter implements PersistenceAdapter {
   private storePath: string;
@@ -80,8 +83,8 @@ export class FilePersistenceAdapter implements PersistenceAdapter {
 }
 
 /**
- * Validate that bounds are on-screen
- * Returns null if bounds would be completely off-screen
+ * @experimental Validate that bounds are on-screen.
+ * Returns null if bounds would be completely off-screen.
  */
 export function validateBoundsOnScreen(bounds: Bounds): Bounds | null {
   const displays = screen.getAllDisplays();
@@ -105,7 +108,7 @@ export function validateBoundsOnScreen(bounds: Bounds): Bounds | null {
 }
 
 /**
- * Ensure bounds are within constraints
+ * @experimental Ensure bounds are within constraints.
  */
 export function constrainBounds(
   bounds: Bounds,
