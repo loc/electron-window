@@ -110,7 +110,13 @@ export function App() {
         <div style={{ marginBottom: 20 }}>
           <button
             data-testid="open-window"
-            onClick={() => setState((prev) => ({ ...prev, windowOpen: true }))}
+            onClick={() =>
+              setState((prev) => ({
+                ...prev,
+                windowOpen: true,
+                scenario: prev.scenario || "basic",
+              }))
+            }
           >
             Open Window
           </button>
