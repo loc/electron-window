@@ -1,4 +1,4 @@
-import { BrowserWindow, type WebContents } from "electron";
+import { BrowserWindow, screen, type WebContents } from "electron";
 import type { WindowId, WindowState } from "../shared/types.js";
 import { RENDERER_ALLOWED_PROPS } from "../shared/types.js";
 import { devWarning, isMac, isWindows } from "../shared/utils.js";
@@ -260,7 +260,10 @@ export class WindowManager {
       // Check if this is a library-managed window (about:blank + registered frameName)
       if (url === "about:blank" && this.pendingWindows.has(frameName)) {
         const pending = this.pendingWindows.get(frameName)!;
-        const constructorOptions = this.buildConstructorOptions(pending.props);
+        const constructorOptions = this.buildConstructorOptions(
+          pending.props,
+          webContents,
+        );
 
         const defaultWindowOptions = this.getDefaultWindowOptions();
         return {
@@ -325,22 +328,41 @@ export class WindowManager {
    */
   private buildConstructorOptions(
     props: IPCWindowProps,
+    parentWebContents?: WebContents,
   ): Partial<Electron.BrowserWindowConstructorOptions> {
     let x = props.x ?? props.defaultX;
     let y = props.y ?? props.defaultY;
     const width = props.width ?? props.defaultWidth ?? DEFAULT_WINDOW_WIDTH;
     const height = props.height ?? props.defaultHeight ?? DEFAULT_WINDOW_HEIGHT;
 
-    // targetDisplay isn't in IPCWindowProps, so centering falls back to Electron's default
     const shouldCenter =
       props.center !== false && x === undefined && y === undefined;
+
+    // Default: center on the same display as the parent window
+    if (shouldCenter && parentWebContents) {
+      try {
+        const parentWin = BrowserWindow.fromWebContents(parentWebContents);
+        const parentBounds = parentWin?.getBounds();
+        if (parentBounds) {
+          const display = screen.getDisplayMatching(parentBounds);
+          x =
+            display.workArea.x +
+            Math.round((display.workArea.width - width) / 2);
+          y =
+            display.workArea.y +
+            Math.round((display.workArea.height - height) / 2);
+        }
+      } catch {
+        // Fall through to Electron's default centering
+      }
+    }
 
     const result = {
       width,
       height,
       x,
       y,
-      center: shouldCenter,
+      center: shouldCenter && x === undefined && y === undefined,
       minWidth: props.minWidth,
       maxWidth: props.maxWidth,
       minHeight: props.minHeight,
