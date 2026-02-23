@@ -526,4 +526,80 @@ describe("<Window> injectStyles prop", () => {
       mockWin.document.querySelector('style[data-test="injected-style"]'),
     ).toBeNull();
   });
+
+  it("auto mode syncs dynamically added styles to child window", async () => {
+    render(
+      <MockWindowProvider>
+        <Window open>
+          <div>Content</div>
+        </Window>
+      </MockWindowProvider>,
+    );
+
+    await waitFor(() => {
+      expect(getGlobalMockWindows().size).toBe(1);
+    });
+
+    const mockWin = [...getGlobalMockWindows().values()][0] as {
+      document: Document;
+    };
+
+    // Dynamically add a new style to the parent AFTER the window opened
+    const dynamicStyle = document.createElement("style");
+    dynamicStyle.textContent = ".dynamic { color: green; }";
+    dynamicStyle.setAttribute("data-test", "dynamic-style");
+    document.head.appendChild(dynamicStyle);
+
+    // MutationObserver is async — wait for it to fire
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // The dynamic style should be cloned into the child
+    const cloned = mockWin.document.querySelector(
+      'style[data-test="dynamic-style"]',
+    );
+    expect(cloned).not.toBeNull();
+    expect(cloned?.textContent).toBe(".dynamic { color: green; }");
+
+    // Cleanup
+    dynamicStyle.remove();
+  });
+
+  it("auto mode removes styles from child when removed from parent", async () => {
+    render(
+      <MockWindowProvider>
+        <Window open>
+          <div>Content</div>
+        </Window>
+      </MockWindowProvider>,
+    );
+
+    await waitFor(() => {
+      expect(getGlobalMockWindows().size).toBe(1);
+    });
+
+    const mockWin = [...getGlobalMockWindows().values()][0] as {
+      document: Document;
+    };
+
+    // The testStyle from beforeEach should be in the child
+    expect(
+      mockWin.document.querySelector('style[data-test="injected-style"]'),
+    ).not.toBeNull();
+
+    // Remove it from the parent
+    testStyle.remove();
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Should be removed from the child too
+    expect(
+      mockWin.document.querySelector('style[data-test="injected-style"]'),
+    ).toBeNull();
+
+    // Re-add for afterEach cleanup (it expects testStyle to be in DOM)
+    testStyle = document.createElement("style");
+    testStyle.textContent = ".test-class { color: red; }";
+    testStyle.setAttribute("data-test", "injected-style");
+    document.head.appendChild(testStyle);
+  });
 });

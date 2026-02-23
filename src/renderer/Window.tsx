@@ -247,17 +247,15 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         }
 
         // 4. Set up document for portal rendering
-        const container = initWindowDocument(win.document, {
-          injectStyles,
-          title,
-        });
+        const { container, cleanup: styleCleanup } = initWindowDocument(
+          win.document,
+          { injectStyles, title },
+        );
 
         // 5. Handle user closing the window via OS chrome (X button)
         win.addEventListener("unload", () => {
+          styleCleanup();
           if (!cancelled) {
-            // Don't call onUserClose here — the IPC "userCloseRequested" event
-            // from the main process is the authoritative source for user-initiated closes.
-            // This handler only cleans up renderer-side state.
             childWindowRef.current = null;
             setPortalTarget(null);
             setIsReady(false);

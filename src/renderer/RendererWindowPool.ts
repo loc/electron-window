@@ -17,6 +17,7 @@ interface PoolEntry {
   id: string;
   childWindow: globalThis.Window;
   portalTarget: HTMLElement;
+  styleCleanup: () => void;
 }
 
 export interface RendererWindowPoolOptions {
@@ -111,12 +112,14 @@ export class RendererWindowPool {
       return;
     }
 
-    const portalTarget = initWindowDocument(childWindow.document);
-    const entry: PoolEntry = { id, childWindow, portalTarget };
+    const { container: portalTarget, cleanup: styleCleanup } =
+      initWindowDocument(childWindow.document);
+    const entry: PoolEntry = { id, childWindow, portalTarget, styleCleanup };
     this.idle.push(entry);
 
     // Handle external destruction (e.g., main process shutdown or DestroyWindow IPC)
     childWindow.addEventListener("unload", () => {
+      styleCleanup();
       this.handleWindowDestroyed(id);
     });
   }
@@ -163,12 +166,14 @@ export class RendererWindowPool {
       throw new Error("Timed out waiting for pool window to be ready");
     }
 
-    const portalTarget = initWindowDocument(childWindow.document);
-    const newEntry: PoolEntry = { id, childWindow, portalTarget };
+    const { container: portalTarget, cleanup: styleCleanup } =
+      initWindowDocument(childWindow.document);
+    const newEntry: PoolEntry = { id, childWindow, portalTarget, styleCleanup };
     this.active.set(id, newEntry);
 
     // Handle external destruction for on-the-fly windows too
     childWindow.addEventListener("unload", () => {
+      styleCleanup();
       this.handleWindowDestroyed(id);
     });
 
@@ -245,12 +250,14 @@ export class RendererWindowPool {
     this.idleTimers.clear();
 
     for (const entry of this.idle) {
+      entry.styleCleanup();
       entry.childWindow.close();
       void this.unregisterWindow(entry.id);
     }
     this.idle.length = 0;
 
     for (const entry of this.active.values()) {
+      entry.styleCleanup();
       entry.childWindow.close();
       void this.unregisterWindow(entry.id);
     }
