@@ -602,4 +602,42 @@ describe("<Window> injectStyles prop", () => {
     testStyle.setAttribute("data-test", "injected-style");
     document.head.appendChild(testStyle);
   });
+
+  it("auto mode syncs modified style textContent to child window", async () => {
+    render(
+      <MockWindowProvider>
+        <Window open>
+          <div>Content</div>
+        </Window>
+      </MockWindowProvider>,
+    );
+
+    await waitFor(() => {
+      expect(getGlobalMockWindows().size).toBe(1);
+    });
+
+    const mockWin = [...getGlobalMockWindows().values()][0] as {
+      document: Document;
+    };
+
+    // The testStyle from beforeEach should be cloned in the child
+    const clonedBefore = mockWin.document.querySelector(
+      'style[data-test="injected-style"]',
+    );
+    expect(clonedBefore?.textContent).toBe(".test-class { color: red; }");
+
+    // Modify the parent style's textContent
+    testStyle.textContent = ".test-class { color: blue; font-size: 16px; }";
+
+    // Wait for MutationObserver
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // The child clone should have the updated content
+    const clonedAfter = mockWin.document.querySelector(
+      'style[data-test="injected-style"]',
+    );
+    expect(clonedAfter?.textContent).toBe(
+      ".test-class { color: blue; font-size: 16px; }",
+    );
+  });
 });
