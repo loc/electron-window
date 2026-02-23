@@ -439,6 +439,7 @@ export function MockWindow({
     subscribe: (_listener) => () => {},
     getSnapshot: () => fullState,
     getDisplaySnapshot: () => null,
+    document: null,
   };
 
   return React.createElement(

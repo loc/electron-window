@@ -81,8 +81,10 @@ function filterAllowedProps(
 export type SecurityValidator = (frame: Electron.WebFrameMain) => boolean;
 
 export interface WindowManagerConfig {
-  /** Default options applied to all windows */
-  defaultWindowOptions?: Partial<Electron.BrowserWindowConstructorOptions>;
+  /** Default options applied to all windows. Can be a function for dynamic values (e.g., theme-aware backgroundColor). */
+  defaultWindowOptions?:
+    | Partial<Electron.BrowserWindowConstructorOptions>
+    | (() => Partial<Electron.BrowserWindowConstructorOptions>);
 
   /** Enable development warnings */
   devWarnings?: boolean;
@@ -113,7 +115,9 @@ export interface WindowManagerConfig {
 }
 
 interface ResolvedConfig {
-  defaultWindowOptions: Partial<Electron.BrowserWindowConstructorOptions>;
+  defaultWindowOptions:
+    | Partial<Electron.BrowserWindowConstructorOptions>
+    | (() => Partial<Electron.BrowserWindowConstructorOptions>);
   devWarnings: boolean;
   allowedOrigins: string[] | undefined;
   allowIframes: boolean;
@@ -135,7 +139,7 @@ export class WindowManager {
 
   constructor(config: WindowManagerConfig = {}) {
     this.config = {
-      defaultWindowOptions: config.defaultWindowOptions ?? {},
+      defaultWindowOptions: config.defaultWindowOptions ?? (() => ({})),
       devWarnings: config.devWarnings ?? process.env.NODE_ENV === "development",
       allowedOrigins: config.allowedOrigins,
       allowIframes: config.allowIframes ?? false,
@@ -143,6 +147,12 @@ export class WindowManager {
       maxPendingWindows: config.maxPendingWindows ?? 100,
       maxWindows: config.maxWindows ?? 50,
     };
+  }
+
+  private getDefaultWindowOptions(): Partial<Electron.BrowserWindowConstructorOptions> {
+    return typeof this.config.defaultWindowOptions === "function"
+      ? this.config.defaultWindowOptions()
+      : this.config.defaultWindowOptions;
   }
 
   private validateFrame(frame: Electron.WebFrameMain): boolean {
@@ -252,13 +262,14 @@ export class WindowManager {
         const pending = this.pendingWindows.get(frameName)!;
         const constructorOptions = this.buildConstructorOptions(pending.props);
 
+        const defaultWindowOptions = this.getDefaultWindowOptions();
         return {
           action: "allow",
           overrideBrowserWindowOptions: {
-            ...this.config.defaultWindowOptions,
+            ...defaultWindowOptions,
             ...constructorOptions,
             webPreferences: {
-              ...this.config.defaultWindowOptions.webPreferences,
+              ...defaultWindowOptions.webPreferences,
             },
             show: false,
           },
@@ -324,7 +335,7 @@ export class WindowManager {
     const shouldCenter =
       props.center !== false && x === undefined && y === undefined;
 
-    return {
+    const result = {
       width,
       height,
       x,
@@ -360,6 +371,11 @@ export class WindowManager {
       trafficLightPosition: isMac() ? props.trafficLightPosition : undefined,
       titleBarOverlay: isWindows() ? props.titleBarOverlay : undefined,
     };
+
+    // Strip undefined values so they don't overwrite defaultWindowOptions when spread
+    return Object.fromEntries(
+      Object.entries(result).filter(([, v]) => v !== undefined),
+    ) as Partial<Electron.BrowserWindowConstructorOptions>;
   }
 
   private createImplementation(sender: WebContents): IWindowManagerImpl {

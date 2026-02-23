@@ -26,6 +26,7 @@ export {
   useWindowFullscreen,
   useWindowBounds,
   useWindowState,
+  useWindowDocument,
   useWindowDisplay,
   usePersistedBounds,
   clearPersistedBounds,

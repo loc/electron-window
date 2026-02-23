@@ -166,6 +166,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
     }, [poolDef]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+    const [childDocument, setChildDocument] = useState<Document | null>(null);
     const [windowId, setWindowId] = useState<WindowId | null>(null);
     const [isReady, setIsReady] = useState(false);
 
@@ -182,6 +183,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
       isReady,
       provider,
       childWindowRef,
+      childDocument,
       onBoundsChange,
       onUserClose,
       onFocus,
@@ -198,6 +200,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
         entryRef.current = null;
         childWindowRef.current = null;
         setPortalTarget(null);
+        setChildDocument(null);
         setWindowId(null);
         setIsReady(false);
         // Hook resets its own windowState internally via the 'closed' case
@@ -212,6 +215,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
           entryRef.current = null;
           childWindowRef.current = null;
           setPortalTarget(null);
+          setChildDocument(null);
           setWindowId(null);
           setIsReady(false);
           lifecycle.setWindowState(null);
@@ -275,6 +279,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
           title: title ?? "",
         });
         setPortalTarget(entry.portalTarget);
+        setChildDocument(entry.childWindow.document);
         setIsReady(true);
         onReady?.();
       }

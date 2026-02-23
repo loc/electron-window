@@ -126,6 +126,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(
 
     // The DOM element in the child window that React portals into
     const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+    const [childDocument, setChildDocument] = useState<Document | null>(null);
 
     const [isReady, setIsReady] = useState(false);
 
@@ -140,6 +141,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(
       isReady,
       provider,
       childWindowRef,
+      childDocument,
       onBoundsChange,
       onUserClose,
       onFocus,
@@ -159,6 +161,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(
       onWindowClosedSetState: () => {
         childWindowRef.current = null;
         setPortalTarget(null);
+        setChildDocument(null);
         setIsReady(false);
         // Hook resets its own windowState internally via the 'closed' case
       },
@@ -191,6 +194,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         }
         childWindowRef.current = null;
         setPortalTarget(null);
+        setChildDocument(null);
         setIsReady(false);
         lifecycle.setWindowState(null);
         void provider.unregisterWindow(windowId);
@@ -258,6 +262,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(
           if (!cancelled) {
             childWindowRef.current = null;
             setPortalTarget(null);
+            setChildDocument(null);
             setIsReady(false);
             lifecycle.setWindowState(null);
           }
@@ -284,6 +289,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         });
 
         setPortalTarget(container);
+        setChildDocument(win.document);
         setIsReady(true);
         onReady?.();
       }
@@ -321,6 +327,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(
             }
             childWindowRef.current = null;
             setPortalTarget(null);
+            setChildDocument(null);
             setIsReady(false);
             lifecycle.setWindowState(null);
             setWindowId(generateWindowId());

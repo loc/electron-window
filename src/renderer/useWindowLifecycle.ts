@@ -42,6 +42,8 @@ export interface WindowLifecycleOptions {
   provider: WindowProviderContextValue;
   /** Ref to the child window (for setTitle via document.title) */
   childWindowRef?: React.RefObject<globalThis.Window | null>;
+  /** The child window's Document, for portaling UI library overlays */
+  childDocument?: Document | null;
   /** Callbacks — all optional */
   onBoundsChange?: (bounds: Bounds) => void;
   onUserClose?: () => void;
@@ -279,6 +281,7 @@ export function useWindowLifecycle(
       subscribe,
       getSnapshot,
       getDisplaySnapshot,
+      document: opts.childDocument ?? null,
     }),
     [
       windowId,
@@ -288,6 +291,7 @@ export function useWindowLifecycle(
       subscribe,
       getSnapshot,
       getDisplaySnapshot,
+      opts.childDocument,
     ],
   );
 

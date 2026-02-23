@@ -7,6 +7,7 @@ export {
   useWindowFullscreen,
   useWindowBounds,
   useWindowState,
+  useWindowDocument,
 } from "./useWindowState.js";
 export { useWindowDisplay } from "./useWindowDisplay.js";
 export {

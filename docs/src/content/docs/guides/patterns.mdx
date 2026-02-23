@@ -106,6 +106,117 @@ function HUD() {
 
 See [Pooling](/electron-window/guides/pooling/) and [Persistence](/electron-window/guides/persistence/) for details.
 
+## Integration Notes
+
+### UI Library Portals (Radix UI, Base UI)
+
+Radix UI and Base UI portal overlays (dropdowns, dialogs, tooltips) to `document.body` by default. Inside a `<Window>`, this means they'll render in the **parent** window's body — invisible to the user in the child window.
+
+Fix this by passing the child window's `document.body` as the portal container:
+
+```tsx
+import { useWindowDocument } from "@loc/electron-window";
+
+function WindowContent({ children }) {
+  const doc = useWindowDocument();
+  return (
+    // Radix UI example — use whichever container prop your library provides
+    <DropdownMenu.Root>
+      <DropdownMenu.Portal container={doc.body}>
+        <DropdownMenu.Content>...</DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
+}
+```
+
+For a library-wide fix, wrap your window content in a provider that sets the default container:
+
+```tsx
+function WindowShell({ children }) {
+  const doc = useWindowDocument();
+  // Base UI example
+  return (
+    <PortalContext.Provider value={doc.body}>
+      {children}
+    </PortalContext.Provider>
+  );
+}
+
+<Window open={show}>
+  <WindowShell>
+    <AppContent />
+  </WindowShell>
+</Window>
+```
+
+`useWindowDocument()` throws if called outside an open window, so it's safe to use without null-checking — the window is open by the time children render.
+
+### Theme Attributes on Child Document
+
+The child window starts with a blank `<html>` element — no theme class, no `data-theme` attribute. Copy them from the parent:
+
+```tsx
+import { useWindowDocument } from "@loc/electron-window";
+import { useEffect } from "react";
+
+function ThemeSync({ children }) {
+  const doc = useWindowDocument();
+
+  useEffect(() => {
+    const parentHtml = window.document.documentElement;
+    const childHtml = doc.documentElement;
+
+    // Initial sync
+    childHtml.className = parentHtml.className;
+    childHtml.setAttribute("data-theme", parentHtml.getAttribute("data-theme") ?? "");
+
+    // Keep in sync as theme changes
+    const observer = new MutationObserver(() => {
+      childHtml.className = parentHtml.className;
+      childHtml.setAttribute("data-theme", parentHtml.getAttribute("data-theme") ?? "");
+    });
+    observer.observe(parentHtml, { attributes: true, attributeFilter: ["class", "data-theme"] });
+    return () => observer.disconnect();
+  }, [doc]);
+
+  return <>{children}</>;
+}
+```
+
+### Framer Motion
+
+Framer Motion uses `window.performance` and `document.timeline` for animation scheduling. Because `window.open` creates a new browsing context, the child window has its own independent timeline. Animations that coordinate across windows (e.g., shared layout transitions) will not synchronize — this is a [known upstream limitation](https://github.com/framer/motion/issues/1722).
+
+For animations contained entirely within one window this is not an issue.
+
+### Window Dimensions
+
+`window.innerWidth` / `window.innerHeight` resolve to the **parent** window's dimensions inside child window content, because `window` in the React render context is the opener. Use the element's own document to get the correct dimensions:
+
+```tsx
+// Avoid — reads the parent window's viewport
+const { innerWidth, innerHeight } = window;
+
+// Correct — reads the child window's viewport
+const win = element.ownerDocument.defaultView;
+const { innerWidth, innerHeight } = win ?? {};
+```
+
+For layout-driven sizing, prefer `ResizeObserver` on the scroll container rather than reading `innerHeight` at all:
+
+```tsx
+useEffect(() => {
+  const container = scrollContainerRef.current;
+  if (!container) return;
+  const ro = new ResizeObserver(([entry]) => {
+    setHeight(entry.contentRect.height);
+  });
+  ro.observe(container);
+  return () => ro.disconnect();
+}, []);
+```
+
 ## Frameless window with custom drag region
 
 ```tsx

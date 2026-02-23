@@ -30,6 +30,12 @@ export interface WindowContextValue {
 
   /** Get current display snapshot */
   getDisplaySnapshot: () => DisplayInfo | null;
+
+  /**
+   * The child window's Document object.
+   * Use this to portal overlays (Radix, Base UI, etc.) to the correct document.
+   */
+  document: Document | null;
 }
 
 /**

@@ -48,6 +48,7 @@ Each hook re-renders only when its specific value changes.
 | `useWindowBounds()`   | `{ x: number; y: number; width: number; height: number }` | Current bounds            |
 | `useWindowDisplay()`  | `{ id: number; bounds: Bounds; workArea: Bounds; scaleFactor: number }` | Current display |
 | `useWindowState()`    | `WindowState`                                        | Full window state object        |
+| `useWindowDocument()` | `Document`                                           | The child window's Document (see [Integration Notes](/electron-window/guides/patterns/#integration-notes)) |
 
 ```tsx
 function WindowContent() {
