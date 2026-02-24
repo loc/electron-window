@@ -257,13 +257,9 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
           entry.childWindow.document.title = title;
         }
 
-        await provider.windowAction(entry.id, { type: "show" });
-
-        if (cancelled) {
-          void pool.release(entry.id);
-          return;
-        }
-
+        // Set portal target BEFORE showing the window — React starts rendering
+        // immediately so content is already in the DOM when the window appears.
+        // This eliminates the blank-window flash on acquire.
         setWindowId(entry.id);
         lifecycle.setWindowState({
           id: entry.id,
@@ -283,6 +279,11 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
         setPortalTarget(entry.portalTarget);
         setChildDocument(entry.childWindow.document);
         setIsReady(true);
+
+        // Show fires after portal target is set — by the time the window
+        // becomes visible, React has already started rendering content into it.
+        void provider.windowAction(entry.id, { type: "show" });
+
         onReady?.();
       }
 
