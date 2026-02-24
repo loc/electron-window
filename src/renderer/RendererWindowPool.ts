@@ -106,7 +106,7 @@ export class RendererWindowPool {
     await this.registerWindow(id, {
       ...this.shape,
       showOnCreate: false,
-      closable: false,
+      hideOnClose: true,
     });
 
     if (this.isDestroyed) return;
@@ -173,7 +173,7 @@ export class RendererWindowPool {
     await this.registerWindow(id, {
       ...this.shape,
       showOnCreate: false,
-      closable: false,
+      hideOnClose: true,
     });
 
     const childWindow = window.open("about:blank", id, "");

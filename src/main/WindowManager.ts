@@ -60,7 +60,8 @@ function filterAllowedProps(
       RENDERER_ALLOWED_PROPS.has(key) ||
       key === "hasOnBoundsChange" ||
       key === "hasOnUserClose" ||
-      key === "name"
+      key === "name" ||
+      key === "hideOnClose"
     ) {
       filtered[key] = value;
     } else {
@@ -332,6 +333,7 @@ export class WindowManager {
           this.dispatchEvent(webContents, event);
         },
         showOnCreate: (pending.props as any).showOnCreate !== false,
+        hideOnClose: (pending.props as any).hideOnClose === true,
       });
 
       this.windows.set(windowId, instance);

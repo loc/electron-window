@@ -113,6 +113,8 @@ export interface WindowInstanceOptions {
   props: Omit<BaseWindowProps, "open" | "children">;
   onEvent: (event: WindowEvent) => void;
   showOnCreate?: boolean; // default true
+  /** When true, clicking X hides the window instead of closing it. Used by pool windows. */
+  hideOnClose?: boolean;
 }
 
 /**
@@ -126,6 +128,7 @@ export class WindowInstance {
   private currentProps: Omit<BaseWindowProps, "open" | "children">;
   private isDestroyed = false;
   private _forceClosing = false;
+  private readonly hideOnClose: boolean;
   private lastDisplay: DisplayInfo | null = null;
 
   private readonly emitBoundsChange: ReturnType<typeof debounce>;
@@ -135,6 +138,7 @@ export class WindowInstance {
     this.onEvent = options.onEvent;
     this.currentProps = { ...options.props };
     this.browserWindow = options.browserWindow;
+    this.hideOnClose = options.hideOnClose ?? false;
 
     this.emitBoundsChange = debounce(() => {
       if (this.browserWindow && !this.isDestroyed) {
@@ -196,6 +200,23 @@ export class WindowInstance {
     win.on("close", (event) => {
       if (this.currentProps.closable === false) {
         event.preventDefault();
+        return;
+      }
+      // Pool windows: hide instead of close. The close button stays enabled
+      // but clicking it hides the window and notifies the renderer to release.
+      if (this.hideOnClose && !this._forceClosing) {
+        try {
+          event.preventDefault();
+          if (this.browserWindow && !this.browserWindow.isDestroyed()) {
+            this.browserWindow.hide();
+          }
+          this.onEvent({
+            type: WindowEventType.UserCloseRequested,
+            id: this.id,
+          });
+        } catch {
+          // Window may be partially destroyed during app shutdown — let close proceed
+        }
         return;
       }
       if (!this.isDestroyed && !this._forceClosing) {

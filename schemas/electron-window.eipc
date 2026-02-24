@@ -124,6 +124,7 @@ structure WindowProps {
     visibleOnAllWorkspaces?: boolean
     // Pool support
     showOnCreate?: boolean
+    hideOnClose?: boolean
     visible?: boolean
     // Platform-specific
     trafficLightPosition?: TrafficLightPosition
