@@ -234,21 +234,33 @@ export class RendererWindowPool {
       container.innerHTML = "";
     }
 
-    if (this.idle.length < this.maxIdle) {
-      this.idle.push(entry);
-      this.debugLog("released to idle", id);
-
-      // Only start an eviction timer for windows above the minimum floor
-      if (this.idle.length > this.minIdle && this.idleTimeoutMs > 0) {
-        const timer = setTimeout(() => {
-          this.evictIdle(id);
-        }, this.idleTimeoutMs);
-        this.idleTimers.set(id, timer);
+    // Always recycle the released window. If idle is at capacity (e.g., due to
+    // a concurrent-acquire race creating an extra replenishment window), evict
+    // the oldest idle window to make room. The released window is preferred
+    // because it was just in active use (warm, validated).
+    if (this.idle.length >= this.maxIdle) {
+      const evicted = this.idle.shift();
+      if (evicted) {
+        this.debugLog("evicting oldest idle to make room", evicted.id);
+        evicted.styleCleanup();
+        evicted.childWindow.close();
+        void this.unregisterWindow(evicted.id);
+        const timer = this.idleTimers.get(evicted.id);
+        if (timer) {
+          clearTimeout(timer);
+          this.idleTimers.delete(evicted.id);
+        }
       }
-    } else {
-      this.debugLog("pool full, destroying", id);
-      entry.childWindow.close();
-      void this.unregisterWindow(id);
+    }
+
+    this.idle.push(entry);
+    this.debugLog("released to idle", id);
+
+    if (this.idle.length > this.minIdle && this.idleTimeoutMs > 0) {
+      const timer = setTimeout(() => {
+        this.evictIdle(id);
+      }, this.idleTimeoutMs);
+      this.idleTimers.set(id, timer);
     }
   }
 
