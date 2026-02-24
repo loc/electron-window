@@ -132,11 +132,15 @@ export class RendererWindowPool {
     this.idle.push(entry);
     this.debugLog("idle window ready", id);
 
-    // Handle external destruction (e.g., main process shutdown or DestroyWindow IPC)
+    // Handle external destruction (e.g., main process shutdown or DestroyWindow IPC).
+    // Note: 'unload' can also fire on hide() in some Electron versions — only
+    // treat it as destruction if the window is actually closed.
     childWindow.addEventListener("unload", () => {
-      styleCleanup();
-      this.debugLog("window destroyed externally", id);
-      this.handleWindowDestroyed(id);
+      if (childWindow.closed) {
+        styleCleanup();
+        this.debugLog("window destroyed externally", id);
+        this.handleWindowDestroyed(id);
+      }
     });
   }
 
@@ -192,8 +196,10 @@ export class RendererWindowPool {
 
     // Handle external destruction for on-the-fly windows too
     childWindow.addEventListener("unload", () => {
-      styleCleanup();
-      this.handleWindowDestroyed(id);
+      if (childWindow.closed) {
+        styleCleanup();
+        this.handleWindowDestroyed(id);
+      }
     });
 
     return newEntry;

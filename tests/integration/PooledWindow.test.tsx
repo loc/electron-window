@@ -381,4 +381,73 @@ describe("<PooledWindow>", () => {
       expect(el?.textContent).toBe("Hello from pool");
     });
   });
+
+  // 9. Close→reopen cycle reuses the same pool window (not destroyed + recreated)
+  it("reuses the same window after close and reopen", async () => {
+    const pool = createWindowPool(
+      { transparent: true },
+      { minIdle: 1, maxIdle: 2 },
+    );
+
+    function TestApp() {
+      const [open, setOpen] = useState(false);
+      return (
+        <MockWindowProvider>
+          <button data-testid="open" onClick={() => setOpen(true)}>
+            Open
+          </button>
+          <button data-testid="close" onClick={() => setOpen(false)}>
+            Close
+          </button>
+          <PooledWindow pool={pool} open={open}>
+            <div data-testid="reuse-content">Content</div>
+          </PooledWindow>
+        </MockWindowProvider>
+      );
+    }
+
+    render(<TestApp />);
+
+    // Wait for warmup
+    await waitFor(() => {
+      expect(getMockWindows().length).toBeGreaterThanOrEqual(1);
+    });
+
+    // Open — acquires from pool
+    fireEvent.click(document.querySelector('[data-testid="open"]')!);
+    await waitFor(() => {
+      expect(
+        queryInPoolWindows('[data-testid="reuse-content"]'),
+      ).not.toBeNull();
+    });
+
+    // Wait for any background replenishment to settle
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Record total window.open calls after first acquire + replenishment
+    const openCallsAfterFirstAcquire = (window.open as ReturnType<typeof vi.fn>)
+      .mock.calls.length;
+
+    // Close — should release back to pool (not destroy)
+    fireEvent.click(document.querySelector('[data-testid="close"]')!);
+    await waitFor(() => {
+      expect(queryInPoolWindows('[data-testid="reuse-content"]')).toBeNull();
+    });
+
+    // The window should still exist (hidden, not destroyed)
+    expect(getGlobalMockWindows().size).toBeGreaterThanOrEqual(1);
+
+    // Reopen — should reuse the same pool window (no new window.open)
+    fireEvent.click(document.querySelector('[data-testid="open"]')!);
+    await waitFor(() => {
+      expect(
+        queryInPoolWindows('[data-testid="reuse-content"]'),
+      ).not.toBeNull();
+    });
+
+    // No new window.open calls for the reopen — pool reuses existing idle window
+    const openCallsAfterReopen = (window.open as ReturnType<typeof vi.fn>).mock
+      .calls.length;
+    expect(openCallsAfterReopen).toBe(openCallsAfterFirstAcquire);
+  });
 });
