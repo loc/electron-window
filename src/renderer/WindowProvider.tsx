@@ -13,13 +13,18 @@ import {
 
 export interface WindowProviderProps {
   children: ReactNode;
+  /** Log all IPC calls from the renderer with stack traces. Default: false. */
+  debug?: boolean;
 }
 
 /**
  * Root provider for window management.
  * Must wrap the entire app to enable Window components.
  */
-export function WindowProvider({ children }: WindowProviderProps): JSX.Element {
+export function WindowProvider({
+  children,
+  debug = false,
+}: WindowProviderProps): JSX.Element {
   const eventListeners = useRef<
     Map<WindowId, Set<(event: WindowEvent) => void>>
   >(new Map());
@@ -59,10 +64,13 @@ export function WindowProvider({ children }: WindowProviderProps): JSX.Element {
 
   const unregisterWindow = useCallback(
     async (id: WindowId) => {
+      if (debug) {
+        console.trace(`[electron-window] UnregisterWindow "${id}"`);
+      }
       await api?.UnregisterWindow?.(id);
       eventListeners.current.delete(id);
     },
-    [api],
+    [api, debug],
   );
 
   const updateWindow = useCallback(
