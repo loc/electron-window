@@ -218,6 +218,10 @@ export const Window = forwardRef<WindowRef, WindowProps>(
           if (persistence.bounds.defaultY !== undefined)
             ipcProps.defaultY = persistence.bounds.defaultY;
         }
+        // showOnCreate: false prevents the main process from showing the window
+        // before React has rendered content into it. We show it ourselves after
+        // setting the portal target, eliminating the blank-window flash.
+        ipcProps.showOnCreate = false;
         await provider.registerWindow(windowId, ipcProps);
         if (cancelled) return;
 
@@ -291,6 +295,11 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         setPortalTarget(container);
         setChildDocument(win.document);
         setIsReady(true);
+
+        // Show after portal target is set — React starts rendering before the
+        // window becomes visible, so content is already in the DOM.
+        void provider.windowAction(windowId, { type: "show" });
+
         onReady?.();
       }
 
