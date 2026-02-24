@@ -535,4 +535,52 @@ describe("<PooledWindow>", () => {
       .calls.length;
     expect(openCallsAfterReopen).toBe(openCallsAfterAcquire);
   });
+
+  // 11. Regression: replenishment shouldn't prevent release from recycling.
+  // Tests the RendererWindowPool directly for precise timing control.
+  it("recycles window even when replenishment filled idle to maxIdle", async () => {
+    const { RendererWindowPool } =
+      await import("../../src/renderer/RendererWindowPool.js");
+
+    const unregisterWindow = vi.fn(async () => {});
+    const windowAction = vi.fn(async () => {});
+    const registerWindow = vi.fn(async () => {});
+
+    const pool = new RendererWindowPool({
+      shape: { transparent: true },
+      config: { minIdle: 1, maxIdle: 1 },
+      registerWindow,
+      unregisterWindow,
+      windowAction,
+    });
+
+    // Warm up — creates 1 idle window
+    await pool.warmUp();
+    expect(pool.getIdleCount()).toBe(1);
+
+    // Acquire — pulls from idle, triggers replenishment in background
+    const entry = await pool.acquire();
+    expect(pool.getIdleCount()).toBe(0);
+    expect(pool.getActiveCount()).toBe(1);
+
+    // Wait for replenishment to complete
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // With the fix: replenishment is skipped (idle(0)+active(1) >= maxIdle(1)).
+    // Without the fix: replenishment runs, idle=1=maxIdle, causing release to destroy.
+    expect(pool.getActiveCount()).toBe(1);
+
+    // Release the active window — this MUST recycle, not destroy.
+    // The released window should replace the replenished one or both should fit.
+    unregisterWindow.mockClear();
+    await pool.release(entry.id);
+
+    // The released window MUST be recycled (kept in idle), NOT destroyed.
+    // Bug: with unguarded replenishment, idle=1 >= maxIdle=1 → destroy path
+    // Fix: replenishment skipped when idle+active >= maxIdle
+    expect(unregisterWindow).not.toHaveBeenCalled();
+    expect(pool.getActiveCount()).toBe(0);
+
+    pool.destroy();
+  });
 });

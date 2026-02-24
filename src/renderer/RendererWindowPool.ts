@@ -162,8 +162,14 @@ export class RendererWindowPool {
       this.active.set(entry.id, entry);
       this.debugLog("acquired from idle", entry.id);
 
-      // Replenish below minIdle in the background
-      if (this.idle.length < this.minIdle) {
+      // Replenish below minIdle in the background, but only if there's room
+      // in the pool. Without this check, replenishment fills idle back to
+      // minIdle, and when the active window is released, idle is already at
+      // maxIdle — causing the released window to be destroyed instead of recycled.
+      if (
+        this.idle.length < this.minIdle &&
+        this.idle.length + this.active.size < this.maxIdle
+      ) {
         this.debugLog("replenishing");
         void this.createIdleWindow();
       }
