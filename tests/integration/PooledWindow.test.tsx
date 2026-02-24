@@ -450,4 +450,89 @@ describe("<PooledWindow>", () => {
       .calls.length;
     expect(openCallsAfterReopen).toBe(openCallsAfterFirstAcquire);
   });
+
+  // 10. Regression: hide() firing unload shouldn't destroy pool windows
+  it("survives unload events triggered by hide (Electron quirk)", async () => {
+    const pool = createWindowPool(
+      { transparent: true },
+      { minIdle: 1, maxIdle: 2 },
+    );
+
+    function TestApp() {
+      const [open, setOpen] = useState(false);
+      return (
+        <MockWindowProvider>
+          <button data-testid="open" onClick={() => setOpen(true)}>
+            Open
+          </button>
+          <button data-testid="close" onClick={() => setOpen(false)}>
+            Close
+          </button>
+          <PooledWindow pool={pool} open={open}>
+            <div data-testid="survive-content">Content</div>
+          </PooledWindow>
+        </MockWindowProvider>
+      );
+    }
+
+    render(<TestApp />);
+
+    await waitFor(() => {
+      expect(getMockWindows().length).toBeGreaterThanOrEqual(1);
+    });
+
+    // Open
+    fireEvent.click(document.querySelector('[data-testid="open"]')!);
+    await waitFor(() => {
+      expect(
+        queryInPoolWindows('[data-testid="survive-content"]'),
+      ).not.toBeNull();
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const openCallsAfterAcquire = (window.open as ReturnType<typeof vi.fn>).mock
+      .calls.length;
+
+    // Close — triggers pool.release() which calls windowAction("hide")
+    fireEvent.click(document.querySelector('[data-testid="close"]')!);
+    await waitFor(() => {
+      expect(queryInPoolWindows('[data-testid="survive-content"]')).toBeNull();
+    });
+
+    // Simulate Electron's quirk: hide() fires unload on the child window.
+    // The pool's unload handler should ignore this because childWindow.closed
+    // is still false (the window was hidden, not closed).
+    for (const mockWin of getGlobalMockWindows().values()) {
+      const win = mockWin as { simulateUnload?: () => void; closed: boolean };
+      // Fire unload but DON'T set closed=true (simulating hide, not close)
+      if (win.simulateUnload) {
+        // Manually fire just the unload event without closing
+        const listeners = (mockWin as any)._eventListeners?.get("unload");
+        if (listeners) {
+          for (const listener of listeners) {
+            if (typeof listener === "function") {
+              listener(new Event("unload"));
+            }
+          }
+        }
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // The window should NOT have been destroyed by the unload
+    expect(getGlobalMockWindows().size).toBeGreaterThanOrEqual(1);
+
+    // Reopen — should still reuse (no new window.open)
+    fireEvent.click(document.querySelector('[data-testid="open"]')!);
+    await waitFor(() => {
+      expect(
+        queryInPoolWindows('[data-testid="survive-content"]'),
+      ).not.toBeNull();
+    });
+
+    const openCallsAfterReopen = (window.open as ReturnType<typeof vi.fn>).mock
+      .calls.length;
+    expect(openCallsAfterReopen).toBe(openCallsAfterAcquire);
+  });
 });
