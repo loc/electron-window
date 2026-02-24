@@ -23,6 +23,7 @@ interface PoolEntry {
 export interface RendererWindowPoolOptions {
   shape: PoolShape;
   config?: WindowPoolConfig;
+  debug?: boolean;
   // Injected by PooledWindow from WindowProviderContext
   registerWindow: (id: string, props: Record<string, unknown>) => Promise<void>;
   unregisterWindow: (id: string) => Promise<void>;
@@ -54,6 +55,7 @@ export class RendererWindowPool {
   private readonly registerWindow: RendererWindowPoolOptions["registerWindow"];
   private readonly unregisterWindow: RendererWindowPoolOptions["unregisterWindow"];
   private readonly windowAction: RendererWindowPoolOptions["windowAction"];
+  private readonly debug: boolean;
 
   private isDestroyed = false;
 
@@ -65,6 +67,15 @@ export class RendererWindowPool {
     this.registerWindow = options.registerWindow;
     this.unregisterWindow = options.unregisterWindow;
     this.windowAction = options.windowAction;
+    this.debug = options.debug ?? false;
+  }
+
+  private debugLog(msg: string, id?: string): void {
+    if (!this.debug) return;
+    const idStr = id ? ` (id=${id})` : "";
+    console.log(
+      `[electron-window] Pool: ${msg}${idStr} idle=${this.idle.length}/${this.maxIdle} active=${this.active.size}`,
+    );
   }
 
   /**
@@ -72,6 +83,7 @@ export class RendererWindowPool {
    * Fire-and-forget: doesn't block first render.
    */
   async warmUp(): Promise<void> {
+    this.debugLog(`warming up (minIdle=${this.minIdle})`);
     const needed = this.minIdle - this.idle.length;
     const promises: Promise<void>[] = [];
     for (let i = 0; i < needed; i++) {
@@ -88,11 +100,13 @@ export class RendererWindowPool {
 
     const id = generateWindowId();
 
-    // showOnCreate: false keeps the BrowserWindow hidden until we explicitly show it
+    // showOnCreate: false keeps the BrowserWindow hidden until we explicitly show it.
+    // closable: false prevents the main process from destroying the window when the
+    // user clicks X — the renderer handles close by releasing back to the pool.
     await this.registerWindow(id, {
       ...this.shape,
       showOnCreate: false,
-      show: false,
+      closable: false,
     });
 
     if (this.isDestroyed) return;
@@ -116,10 +130,12 @@ export class RendererWindowPool {
       initWindowDocument(childWindow.document);
     const entry: PoolEntry = { id, childWindow, portalTarget, styleCleanup };
     this.idle.push(entry);
+    this.debugLog("idle window ready", id);
 
     // Handle external destruction (e.g., main process shutdown or DestroyWindow IPC)
     childWindow.addEventListener("unload", () => {
       styleCleanup();
+      this.debugLog("window destroyed externally", id);
       this.handleWindowDestroyed(id);
     });
   }
@@ -140,9 +156,11 @@ export class RendererWindowPool {
       }
 
       this.active.set(entry.id, entry);
+      this.debugLog("acquired from idle", entry.id);
 
       // Replenish below minIdle in the background
       if (this.idle.length < this.minIdle) {
+        this.debugLog("replenishing");
         void this.createIdleWindow();
       }
 
@@ -150,11 +168,12 @@ export class RendererWindowPool {
     }
 
     // Pool exhausted — create on the fly (slower path)
+    this.debugLog("exhausted, creating on-the-fly");
     const id = generateWindowId();
     await this.registerWindow(id, {
       ...this.shape,
       showOnCreate: false,
-      show: false,
+      closable: false,
     });
 
     const childWindow = window.open("about:blank", id, "");
@@ -205,6 +224,7 @@ export class RendererWindowPool {
 
     if (this.idle.length < this.maxIdle) {
       this.idle.push(entry);
+      this.debugLog("released to idle", id);
 
       // Only start an eviction timer for windows above the minimum floor
       if (this.idle.length > this.minIdle && this.idleTimeoutMs > 0) {
@@ -214,7 +234,7 @@ export class RendererWindowPool {
         this.idleTimers.set(id, timer);
       }
     } else {
-      // Pool full — tear down this window rather than accumulate more
+      this.debugLog("pool full, destroying", id);
       entry.childWindow.close();
       void this.unregisterWindow(id);
     }

@@ -56,6 +56,7 @@ const EXCLUDED_ON_ACQUIRE = new Set([
 export interface WindowPoolDefinition {
   shape: PoolShape;
   config?: WindowPoolConfig;
+  debug?: boolean;
 }
 
 // Singleton pool instances keyed by pool definition. Pools outlive individual
@@ -155,6 +156,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
         instance = new RendererWindowPool({
           shape: poolDef.shape,
           config: poolDef.config,
+          debug: poolDef.debug,
           registerWindow: provider.registerWindow,
           unregisterWindow: provider.unregisterWindow,
           windowAction: provider.windowAction,
