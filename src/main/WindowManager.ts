@@ -112,6 +112,9 @@ export interface WindowManagerConfig {
 
   /** Maximum active windows. Default: 50. */
   maxWindows?: number;
+
+  /** Log all IPC calls and events to the console. Default: false. */
+  debug?: boolean;
 }
 
 interface ResolvedConfig {
@@ -124,6 +127,7 @@ interface ResolvedConfig {
   validator: SecurityValidator | undefined;
   maxPendingWindows: number;
   maxWindows: number;
+  debug: boolean;
 }
 
 /**
@@ -146,7 +150,19 @@ export class WindowManager {
       validator: config.validator,
       maxPendingWindows: config.maxPendingWindows ?? 100,
       maxWindows: config.maxWindows ?? 50,
+      debug: config.debug ?? false,
     };
+  }
+
+  private debugLog(
+    direction: "←" | "→",
+    method: string,
+    id: string,
+    data?: unknown,
+  ): void {
+    if (!this.config.debug) return;
+    const payload = data ? ` ${JSON.stringify(data)}` : "";
+    console.log(`[electron-window] ${direction} ${method} "${id}"${payload}`);
   }
 
   private getDefaultWindowOptions(): Partial<Electron.BrowserWindowConstructorOptions> {
@@ -415,6 +431,7 @@ export class WindowManager {
 
     return {
       RegisterWindow: (id: WindowId, props: IPCWindowProps) => {
+        this.debugLog("←", "RegisterWindow", id, props);
         return withValidation(() => {
           if (this.pendingWindows.size >= this.config.maxPendingWindows) {
             if (this.config.devWarnings) {
@@ -442,6 +459,7 @@ export class WindowManager {
       },
 
       UnregisterWindow: (id: WindowId) => {
+        this.debugLog("←", "UnregisterWindow", id);
         return withValidation(() => {
           this.pendingWindows.delete(id);
           const instance = this.windows.get(id);
@@ -454,6 +472,7 @@ export class WindowManager {
       },
 
       UpdateWindow: (id: WindowId, props: IPCWindowProps) => {
+        this.debugLog("←", "UpdateWindow", id, props);
         return withValidation(() => {
           const instance = this.windows.get(id);
           if (!instance) return false;
@@ -471,6 +490,7 @@ export class WindowManager {
       },
 
       DestroyWindow: (id: WindowId) => {
+        this.debugLog("←", "DestroyWindow", id);
         return withValidation(() => {
           const instance = this.windows.get(id);
           if (!instance) return false;
@@ -481,6 +501,7 @@ export class WindowManager {
       },
 
       WindowAction: (id: WindowId, action: IPCWindowAction) => {
+        this.debugLog("←", "WindowAction", id, action);
         return withValidation(() => {
           const instance = this.windows.get(id);
           if (!instance) return false;
@@ -531,6 +552,7 @@ export class WindowManager {
       },
 
       GetWindowState: (id: WindowId) => {
+        this.debugLog("←", "GetWindowState", id);
         return withValidation(() => {
           return this.windows.get(id)?.getState() ?? null;
         }, null);
@@ -539,6 +561,7 @@ export class WindowManager {
   }
 
   private dispatchEvent(sender: WebContents, event: IPCWindowEvent): void {
+    this.debugLog("→", event.type, event.id, event.bounds ?? event.display);
     try {
       if (sender.isDestroyed()) return;
 
