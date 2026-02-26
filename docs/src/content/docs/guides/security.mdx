@@ -20,10 +20,10 @@ IPC messages are validated via schema with origin and frame checks on every call
 
 Window creation is rate-limited to prevent runaway loops or denial-of-service from renderer code.
 
-| Option             | Default | Description                              |
-| ------------------ | ------- | ---------------------------------------- |
-| `maxPendingWindows` | —      | Max windows waiting to be created        |
-| `maxWindows`        | —      | Max total open windows at once           |
+| Option              | Default | Description                              |
+| ------------------- | ------- | ---------------------------------------- |
+| `maxPendingWindows` | `100`   | Max windows waiting to be created        |
+| `maxWindows`        | `50`    | Max total open windows at once           |
 
 Configure these via `setupWindowManager`:
 

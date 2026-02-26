@@ -47,21 +47,22 @@ The `default*` / controlled split follows React's `defaultValue` / `value` patte
 
 ## Behavior
 
-| Prop                     | Type      | Default |
-| ------------------------ | --------- | ------- |
-| `resizable`              | `boolean` | `true`  |
-| `movable`                | `boolean` | `true`  |
-| `minimizable`            | `boolean` | `true`  |
-| `maximizable`            | `boolean` | `true`  |
-| `focusable`              | `boolean` | `true`  |
-| `alwaysOnTop`            | `boolean` | `false` |
-| `skipTaskbar`            | `boolean` | `false` |
-| `fullscreen`             | `boolean` | `false` |
-| `fullscreenable`         | `boolean` | `true`  |
-| `showInactive`           | `boolean` | `false` |
-| `ignoreMouseEvents`      | `boolean` | `false` |
-| `visibleOnAllWorkspaces` | `boolean` | `false` |
+| Prop                     | Type                          | Default |
+| ------------------------ | ----------------------------- | ------- |
+| `resizable`              | `boolean`                     | `true`  |
+| `movable`                | `boolean`                     | `true`  |
+| `minimizable`            | `boolean`                     | `true`  |
+| `maximizable`            | `boolean`                     | `true`  |
+| `focusable`              | `boolean`                     | `true`  |
+| `alwaysOnTop`            | `boolean \| AlwaysOnTopLevel` | `false` |
+| `skipTaskbar`            | `boolean`                     | `false` |
+| `fullscreen`             | `boolean`                     | `false` |
+| `fullscreenable`         | `boolean`                     | `true`  |
+| `showInactive`           | `boolean`                     | `false` |
+| `ignoreMouseEvents`      | `boolean`                     | `false` |
+| `visibleOnAllWorkspaces` | `boolean`                     | `false` |
 
+`AlwaysOnTopLevel` is a string union: `"normal" | "floating" | "torn-off-menu" | "modal-panel" | "main-menu" | "status" | "pop-up-menu" | "screen-saver"`. Higher levels float above lower ones. `true` is equivalent to `"floating"`.
 ## Events
 
 | Prop                                     | Fires when                          |
@@ -80,7 +81,7 @@ The `default*` / controlled split follows React's `defaultValue` / `value` patte
 | ---------------------- | -------- | ---------------------------------------------- |
 | `trafficLightPosition` | macOS    | `{ x, y }` for close/minimize/maximize buttons |
 | `titleBarOverlay`      | Windows  | `{ color, symbolColor, height }`               |
-| `targetDisplay`        | all      | `"primary"`, `"cursor"`, or display index      |
+| `targetDisplay`        | all      | `"primary"`, `"cursor"`, or display index. Centers the window on that display when no explicit `x`/`y`. |
 
 ## Advanced
 

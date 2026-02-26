@@ -2,6 +2,8 @@
 
 Declarative React components for Electron window management. Opens native windows with `<Window open>`, renders children via portals so your React context (providers, themes, state) works inside child windows without any extra wiring.
 
+**[Full documentation →](https://loc.github.io/electron-window/)**
+
 ## Install
 
 ```bash
@@ -25,6 +27,16 @@ const manager = setupWindowManager({
 });
 manager.setupForWindow(mainWindow);
 ```
+
+### `setupWindowManager` options
+
+| Option                 | Type                                                                       | Default       | Description                                                                                            |
+| ---------------------- | -------------------------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------ |
+| `defaultWindowOptions` | `BrowserWindowConstructorOptions \| () => BrowserWindowConstructorOptions` | `{}`          | Applied to every child window. Use a function for dynamic values (e.g. theme-aware `backgroundColor`). |
+| `devWarnings`          | `boolean`                                                                  | `true` in dev | Log warnings for misuse (blocked props, shape changes, etc.).                                          |
+| `maxPendingWindows`    | `number`                                                                   | `100`         | Max windows awaiting creation. Prevents runaway open loops.                                            |
+| `maxWindows`           | `number`                                                                   | `50`          | Max total open windows. Registrations beyond this are rejected.                                        |
+| `debug`                | `boolean`                                                                  | `false`       | Log every IPC call and event to the console.                                                           |
 
 ```ts
 // preload.ts — must be bundled (esbuild, webpack, etc.)
@@ -103,20 +115,22 @@ The `default*` / controlled split follows React's `defaultValue` / `value` patte
 
 ### Behavior
 
-| Prop                     | Type      | Default |
-| ------------------------ | --------- | ------- |
-| `resizable`              | `boolean` | `true`  |
-| `movable`                | `boolean` | `true`  |
-| `minimizable`            | `boolean` | `true`  |
-| `maximizable`            | `boolean` | `true`  |
-| `focusable`              | `boolean` | `true`  |
-| `alwaysOnTop`            | `boolean` | `false` |
-| `skipTaskbar`            | `boolean` | `false` |
-| `fullscreen`             | `boolean` | `false` |
-| `fullscreenable`         | `boolean` | `true`  |
-| `showInactive`           | `boolean` | `false` |
-| `ignoreMouseEvents`      | `boolean` | `false` |
-| `visibleOnAllWorkspaces` | `boolean` | `false` |
+| Prop                     | Type                          | Default |
+| ------------------------ | ----------------------------- | ------- |
+| `resizable`              | `boolean`                     | `true`  |
+| `movable`                | `boolean`                     | `true`  |
+| `minimizable`            | `boolean`                     | `true`  |
+| `maximizable`            | `boolean`                     | `true`  |
+| `focusable`              | `boolean`                     | `true`  |
+| `alwaysOnTop`            | `boolean \| AlwaysOnTopLevel` | `false` |
+| `skipTaskbar`            | `boolean`                     | `false` |
+| `fullscreen`             | `boolean`                     | `false` |
+| `fullscreenable`         | `boolean`                     | `true`  |
+| `showInactive`           | `boolean`                     | `false` |
+| `ignoreMouseEvents`      | `boolean`                     | `false` |
+| `visibleOnAllWorkspaces` | `boolean`                     | `false` |
+
+`AlwaysOnTopLevel`: `"normal" | "floating" | "torn-off-menu" | "modal-panel" | "main-menu" | "status" | "pop-up-menu" | "screen-saver"`. Higher levels float above lower ones. `true` behaves like `"floating"`.
 
 ### Events
 
@@ -168,6 +182,7 @@ function WindowContent() {
   const bounds = useWindowBounds(); // { x, y, width, height }
   const display = useWindowDisplay(); // { id, bounds, workArea, scaleFactor }
   const state = useWindowState(); // full WindowState object
+  const doc = useWindowDocument(); // child window's Document — for UI lib portal containers
 }
 ```
 

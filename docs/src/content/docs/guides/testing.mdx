@@ -89,13 +89,18 @@ test("handles bounds change", async () => {
 
 ### Event types
 
-| `type`            | Additional fields             | Description                     |
-| ----------------- | ----------------------------- | ------------------------------- |
-| `"focus"`         | —                             | Window gained focus             |
-| `"blur"`          | —                             | Window lost focus               |
-| `"maximize"`      | —                             | Window maximized                |
-| `"unmaximize"`    | —                             | Window restored from maximized  |
-| `"minimize"`      | —                             | Window minimized                |
-| `"restore"`       | —                             | Window restored from minimized  |
-| `"boundsChanged"` | `bounds: { x, y, width, height }` | Window resized or moved    |
-| `"close"`         | —                             | Window closed by user           |
+| `type`                 | Additional fields                 | Description                      |
+| ---------------------- | --------------------------------- | -------------------------------- |
+| `"focused"`            | —                                 | Window gained focus              |
+| `"blurred"`            | —                                 | Window lost focus                |
+| `"maximized"`          | —                                 | Window maximized                 |
+| `"unmaximized"`        | —                                 | Window restored from maximized   |
+| `"minimized"`          | —                                 | Window minimized                 |
+| `"restored"`           | —                                 | Window restored from minimized   |
+| `"enterFullscreen"`    | —                                 | Window entered fullscreen        |
+| `"leaveFullscreen"`    | —                                 | Window exited fullscreen         |
+| `"boundsChanged"`      | `bounds: { x, y, width, height }` | Window resized or moved          |
+| `"userCloseRequested"` | —                                 | User clicked the close button    |
+| `"displayChanged"`     | `display: DisplayInfo`            | Window moved to another monitor  |
+| `"closed"`             | —                                 | Window was destroyed             |
+| `"ready"`              | —                                 | Window ready and content mounted |

@@ -30,7 +30,7 @@ function App() {
 
 On `open={true}`: acquires a pre-warmed window from the pool instantly. On `open={false}`: hides and returns to pool — no destroy/recreate cost.
 
-## `createWindowPool(shape, config)`
+## `createWindowPool(shape, config?, options?)`
 
 ### Shape (creation-only props)
 
@@ -53,13 +53,29 @@ Changing these after pool creation has no effect — recreate the pool instead.
 | `maxIdle`     | `number` | `3`     | Maximum idle windows to retain                       |
 | `idleTimeout` | `number` | `5000`  | Milliseconds before excess idle windows are destroyed |
 
+### Style injection (`options.injectStyles`)
+
+The third argument to `createWindowPool` is an options object:
+
+| Option         | Type                                   | Default    | Description                                                             |
+| -------------- | -------------------------------------- | ---------- | ----------------------------------------------------------------------- |
+| `injectStyles` | `"auto" \| false \| (doc) => void` | `"auto"` | How to copy styles into pool windows. `false` for CSS-in-JS frameworks. |
+
+```ts
+const overlayPool = createWindowPool(
+  { transparent: true, frame: false },
+  { minIdle: 1, maxIdle: 3 },
+  { injectStyles: false }, // CSS-in-JS: runtime handles injection
+);
+```
+
 ## `<PooledWindow>` Props
 
 `PooledWindow` accepts all the same props as `<Window>` except creation-only shape props (those are fixed by the pool). All other props — `alwaysOnTop`, `title`, event handlers, etc. — can vary per use.
 
 | Prop   | Type         | Description                     |
 | ------ | ------------ | ------------------------------- |
-| `pool` | `WindowPool` | Pool created by `createWindowPool` |
+| `pool` | `WindowPoolDefinition` | Pool created by `createWindowPool` |
 | `open` | `boolean`    | Acquire or release from pool    |
 
 All other [`<Window>` props](/electron-window/guides/props/) are supported except the shape props set on the pool.

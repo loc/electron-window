@@ -550,6 +550,21 @@ export class WindowManager {
 
 let managerInstance: WindowManager | null = null;
 
+/**
+ * Create and initialize the WindowManager. Call once in your main process.
+ *
+ * Calling this a second time returns the existing instance with a dev warning.
+ *
+ * @example
+ * ```ts
+ * const manager = setupWindowManager({
+ *   defaultWindowOptions: {
+ *     webPreferences: { preload: path.join(__dirname, "preload.js") },
+ *   },
+ * });
+ * manager.setupForWindow(mainWindow);
+ * ```
+ */
 export function setupWindowManager(
   config?: WindowManagerConfig,
 ): WindowManager {

@@ -21,18 +21,20 @@ function WindowContent() {
 
 ### `WindowHandle` methods
 
-| Method                     | Description                       |
-| -------------------------- | --------------------------------- |
-| `focus()`                  | Focus the window                  |
-| `close()`                  | Close the window                  |
-| `minimize()`               | Minimize the window               |
-| `maximize()`               | Maximize the window               |
-| `unmaximize()`             | Restore from maximized            |
-| `setBounds(bounds)`        | Set `{ x, y, width, height }`     |
-| `setSize(width, height)`   | Resize the window                 |
-| `setPosition(x, y)`        | Move the window                   |
-| `setFullscreen(flag)`      | Enter or exit fullscreen          |
-| `setAlwaysOnTop(flag)`     | Pin or unpin above other windows  |
+| Method                     | Description                            |
+| -------------------------- | -------------------------------------- |
+| `focus()`                  | Focus the window                       |
+| `blur()`                   | Unfocus the window                     |
+| `close()`                  | Close the window (respects `closable`) |
+| `forceClose()`             | Force close (bypasses `closable`)      |
+| `minimize()`               | Minimize the window                    |
+| `maximize()`               | Maximize the window                    |
+| `unmaximize()`             | Restore from maximized                 |
+| `toggleMaximize()`         | Toggle maximize state                  |
+| `setBounds(bounds)`        | Set `{ x, y, width, height }`          |
+| `setTitle(title)`          | Set the window title                   |
+| `enterFullscreen()`        | Enter fullscreen mode                  |
+| `exitFullscreen()`         | Exit fullscreen mode                   |
 
 ## Reactive State Hooks
 
