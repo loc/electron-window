@@ -1,5 +1,5 @@
 import { generateWindowId } from "../shared/utils.js";
-import type { WindowPoolConfig } from "../shared/types.js";
+import type { WindowPoolConfig, InjectStylesMode } from "../shared/types.js";
 import { waitForWindowReady, initWindowDocument } from "./windowUtils.js";
 
 /**
@@ -24,6 +24,7 @@ export interface RendererWindowPoolOptions {
   shape: PoolShape;
   config?: WindowPoolConfig;
   debug?: boolean;
+  injectStyles?: InjectStylesMode;
   // Injected by PooledWindow from WindowProviderContext
   registerWindow: (id: string, props: Record<string, unknown>) => Promise<void>;
   unregisterWindow: (id: string) => Promise<void>;
@@ -56,6 +57,7 @@ export class RendererWindowPool {
   private readonly unregisterWindow: RendererWindowPoolOptions["unregisterWindow"];
   private readonly windowAction: RendererWindowPoolOptions["windowAction"];
   private readonly debug: boolean;
+  private readonly injectStyles: InjectStylesMode;
 
   private isDestroyed = false;
 
@@ -68,6 +70,7 @@ export class RendererWindowPool {
     this.unregisterWindow = options.unregisterWindow;
     this.windowAction = options.windowAction;
     this.debug = options.debug ?? false;
+    this.injectStyles = options.injectStyles ?? "auto";
   }
 
   private debugLog(msg: string, id?: string): void {
@@ -127,7 +130,9 @@ export class RendererWindowPool {
     }
 
     const { container: portalTarget, cleanup: styleCleanup } =
-      initWindowDocument(childWindow.document);
+      initWindowDocument(childWindow.document, {
+        injectStyles: this.injectStyles,
+      });
     const entry: PoolEntry = { id, childWindow, portalTarget, styleCleanup };
     this.idle.push(entry);
     this.debugLog("idle window ready", id);
@@ -196,7 +201,9 @@ export class RendererWindowPool {
     }
 
     const { container: portalTarget, cleanup: styleCleanup } =
-      initWindowDocument(childWindow.document);
+      initWindowDocument(childWindow.document, {
+        injectStyles: this.injectStyles,
+      });
     const newEntry: PoolEntry = { id, childWindow, portalTarget, styleCleanup };
     this.active.set(id, newEntry);
 

@@ -583,4 +583,109 @@ describe("<PooledWindow>", () => {
 
     pool.destroy();
   });
+
+  // B4. Prop-diff: changing alwaysOnTop while open sends updateWindow
+  it("sends updateWindow when a changeable prop changes while open (B4)", async () => {
+    const pool = createWindowPool({}, { minIdle: 0 });
+
+    function TestApp() {
+      const [alwaysOnTop, setAlwaysOnTop] = useState(false);
+      return (
+        <MockWindowProvider>
+          <button data-testid="toggle" onClick={() => setAlwaysOnTop(true)}>
+            Toggle
+          </button>
+          <PooledWindow pool={pool} open alwaysOnTop={alwaysOnTop}>
+            <div data-testid="b4-content">Content</div>
+          </PooledWindow>
+        </MockWindowProvider>
+      );
+    }
+
+    render(<TestApp />);
+
+    // Wait for portal to appear
+    await waitFor(() => {
+      expect(queryInPoolWindows('[data-testid="b4-content"]')).not.toBeNull();
+    });
+
+    // Flush effects so prevPropsRef is initialized
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    fireEvent.click(document.querySelector('[data-testid="toggle"]')!);
+
+    // updateWindow merges into mock window props — check alwaysOnTop is now true
+    await waitFor(() => {
+      expect(getMockWindows().some((w) => w.props.alwaysOnTop === true)).toBe(
+        true,
+      );
+    });
+  });
+
+  // B5. defaultWidth/defaultHeight applies initial size via setBounds on acquire
+  it("applies defaultWidth/defaultHeight via setBounds on acquire (B5)", async () => {
+    const pool = createWindowPool({}, { minIdle: 0 });
+
+    render(
+      <MockWindowProvider>
+        <PooledWindow pool={pool} open defaultWidth={300} defaultHeight={200}>
+          <div data-testid="b5-content">Content</div>
+        </PooledWindow>
+      </MockWindowProvider>,
+    );
+
+    await waitFor(() => {
+      expect(queryInPoolWindows('[data-testid="b5-content"]')).not.toBeNull();
+    });
+
+    // Give setBounds windowAction time to fire and update state.bounds
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // MockWindowProvider.windowAction("setBounds") fires boundsChanged which
+    // updates window.state.bounds — verify the size was applied.
+    await waitFor(() => {
+      const wins = getMockWindows();
+      return wins.some(
+        (w) => w.state.bounds.width === 300 && w.state.bounds.height === 200,
+      );
+    });
+
+    const wins = getMockWindows();
+    const sized = wins.find(
+      (w) => w.state.bounds.width === 300 && w.state.bounds.height === 200,
+    );
+    expect(sized).toBeDefined();
+  });
+
+  // B6. injectStyles: false in pool definition suppresses style injection
+  it("respects injectStyles: false from pool definition (B6)", async () => {
+    const pool = createWindowPool({}, { minIdle: 0 }, { injectStyles: false });
+
+    render(
+      <MockWindowProvider>
+        <PooledWindow pool={pool} open>
+          <div data-testid="b6-content">Content</div>
+        </PooledWindow>
+      </MockWindowProvider>,
+    );
+
+    await waitFor(() => {
+      expect(queryInPoolWindows('[data-testid="b6-content"]')).not.toBeNull();
+    });
+
+    // With injectStyles: false, no <style> or <link rel="stylesheet"> should
+    // be injected into the pool window's document head.
+    for (const win of getGlobalMockWindows().values()) {
+      const w = win as { document: Document };
+      if (!w.document) continue;
+      const styleNodes = w.document.head.querySelectorAll(
+        'style, link[rel="stylesheet"]',
+      );
+      expect(styleNodes.length).toBe(0);
+    }
+  });
 });

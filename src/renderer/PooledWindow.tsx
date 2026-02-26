@@ -15,8 +15,13 @@ import type {
   WindowHandle,
   WindowPoolConfig,
   BaseWindowProps,
+  InjectStylesMode,
 } from "../shared/types.js";
-import { CREATION_ONLY_PROPS, POOL_SHAPE_PROPS } from "../shared/types.js";
+import {
+  CREATION_ONLY_PROPS,
+  POOL_SHAPE_PROPS,
+  CHANGEABLE_BEHAVIOR_PROPS,
+} from "../shared/types.js";
 import { useWindowLifecycle, NOT_READY_HANDLE } from "./useWindowLifecycle.js";
 
 // Lifecycle / meta props that are never forwarded as IPC props on acquire.
@@ -44,6 +49,10 @@ const LIFECYCLE_EXCLUDED_ON_ACQUIRE = new Set([
   "name",
   "recreateOnShapeChange",
   "persistBounds",
+  "defaultWidth",
+  "defaultHeight",
+  "defaultX",
+  "defaultY",
 ]);
 
 /**
@@ -54,6 +63,7 @@ export interface WindowPoolDefinition {
   shape: PoolShape;
   config?: WindowPoolConfig;
   debug?: boolean;
+  injectStyles?: InjectStylesMode;
 }
 
 // Singleton pool instances keyed by pool definition. Pools outlive individual
@@ -65,12 +75,21 @@ const poolInstances = new WeakMap<WindowPoolDefinition, RendererWindowPool>();
  * fixed for all windows in this pool — consumers cannot override them per-use.
  *
  * Call this once at module level and reuse across renders.
+ *
+ * @param shape - Immutable creation-only props shared by all pool windows
+ * @param config - Pool sizing and eviction config
+ * @param options - Additional options
+ * @param options.injectStyles - How to inject styles into pool windows.
+ *   - "auto": Copy <style> and <link> tags from parent (default)
+ *   - false: No injection (for CSS-in-JS frameworks)
+ *   - function: Custom injection
  */
 export function createWindowPool(
   shape: PoolShape,
   config?: WindowPoolConfig,
+  options?: { injectStyles?: InjectStylesMode },
 ): WindowPoolDefinition {
-  return { shape, config: config ?? {} };
+  return { shape, config: config ?? {}, injectStyles: options?.injectStyles };
 }
 
 /** @deprecated Use createWindowPool instead */
@@ -155,6 +174,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
           shape: poolDef.shape,
           config: poolDef.config,
           debug: poolDef.debug,
+          injectStyles: poolDef.injectStyles,
           registerWindow: provider.registerWindow,
           unregisterWindow: provider.unregisterWindow,
           windowAction: provider.windowAction,
@@ -172,6 +192,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
     const pendingShowRef = useRef<string | null>(null);
     const visibleRef = useRef(visible);
     visibleRef.current = visible;
+    const prevPropsRef = useRef<Record<string, unknown> | null>(null);
 
     // Tracks the currently-acquired pool entry so release() has the right id
     const entryRef = useRef<{
@@ -214,6 +235,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
     useEffect(() => {
       if (!open) {
         if (entryRef.current) {
+          prevPropsRef.current = null;
           const idToRelease = entryRef.current.id;
           entryRef.current = null;
           childWindowRef.current = null;
@@ -238,6 +260,24 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
 
         entryRef.current = entry;
         childWindowRef.current = entry.childWindow;
+
+        // B5: Apply default size/position via setBounds if specified.
+        // defaultWidth/Height/X/Y have no setter in main — use setBounds instead.
+        const { defaultWidth, defaultHeight, defaultX, defaultY } =
+          rest as Record<string, number | undefined>;
+        if (
+          defaultWidth !== undefined ||
+          defaultHeight !== undefined ||
+          defaultX !== undefined ||
+          defaultY !== undefined
+        ) {
+          const bounds: Record<string, number> = {};
+          if (defaultWidth !== undefined) bounds.width = defaultWidth;
+          if (defaultHeight !== undefined) bounds.height = defaultHeight;
+          if (defaultX !== undefined) bounds.x = defaultX;
+          if (defaultY !== undefined) bounds.y = defaultY;
+          void provider.windowAction(entry.id, { type: "setBounds", bounds });
+        }
 
         // Forward changeable (non-shape, non-lifecycle) props via IPC
         const changeableProps: Record<string, unknown> = {};
@@ -286,6 +326,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
         setPortalTarget(entry.portalTarget);
         setChildDocument(entry.childWindow.document);
         setIsReady(true);
+        prevPropsRef.current = { ...rest, title, visible };
 
         // Defer show to useLayoutEffect — React must commit the portal content
         // to the DOM before the window becomes visible. The layout effect fires
@@ -315,6 +356,47 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
         onReady?.();
       }
     }, [isReady]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // B4: Send prop updates to main process when changeable props change while open.
+    useEffect(() => {
+      if (!isReady || !windowId || !prevPropsRef.current) return;
+
+      const prevProps = prevPropsRef.current;
+      const currentProps: Record<string, unknown> = { ...rest, title, visible };
+
+      // Title is set directly on the document (renderer-side, no IPC needed)
+      if (title !== prevProps.title && title && childWindowRef.current) {
+        childWindowRef.current.document.title = title;
+      }
+
+      // Diff changeable behavior props
+      const changedBehaviorProps: Record<string, unknown> = {};
+      for (const prop of CHANGEABLE_BEHAVIOR_PROPS) {
+        const prevValue = prevProps[prop];
+        const currentValue = currentProps[prop];
+        if (prevValue !== currentValue && currentValue !== undefined) {
+          changedBehaviorProps[prop] = currentValue;
+        }
+      }
+
+      // Diff controlled bounds
+      const boundsUpdate: Record<string, unknown> = {};
+      const r = rest as Record<string, unknown>;
+      if (r.width !== undefined && r.width !== prevProps.width)
+        boundsUpdate.width = r.width;
+      if (r.height !== undefined && r.height !== prevProps.height)
+        boundsUpdate.height = r.height;
+      if (r.x !== undefined && r.x !== prevProps.x) boundsUpdate.x = r.x;
+      if (r.y !== undefined && r.y !== prevProps.y) boundsUpdate.y = r.y;
+
+      const allChanges = { ...changedBehaviorProps, ...boundsUpdate };
+      if (Object.keys(allChanges).length > 0) {
+        void provider.updateWindow(windowId, allChanges);
+      }
+
+      prevPropsRef.current = currentProps;
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isReady, windowId, provider, rest, title, visible]);
 
     // Release and cancel debounce on unmount
     useEffect(() => {
