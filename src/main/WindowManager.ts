@@ -83,6 +83,19 @@ export interface WindowManagerConfig {
   /** Enable development warnings */
   devWarnings?: boolean;
 
+  /**
+   * Allowed origins for parent renderers. Restricts which WebContents
+   * (by their main-frame URL's origin) may call this library's IPC.
+   *
+   * If unset, all parent renderers with `setupForWindow()` called are allowed
+   * (a dev warning is logged). Use `["*"]` to explicitly allow all.
+   *
+   * This validates the **parent renderer's** origin (where you called
+   * `setupForWindow`). Iframe-within-renderer enforcement is separately
+   * handled by the EIPC `AppOrigin` validator and is always main-frame-only.
+   */
+  allowedOrigins?: string[];
+
   /** Maximum pending window registrations. Default: 100. */
   maxPendingWindows?: number;
 
@@ -98,6 +111,7 @@ interface ResolvedConfig {
     | Partial<Electron.BrowserWindowConstructorOptions>
     | (() => Partial<Electron.BrowserWindowConstructorOptions>);
   devWarnings: boolean;
+  allowedOrigins: string[] | undefined;
   maxPendingWindows: number;
   maxWindows: number;
   debug: boolean;
@@ -108,15 +122,22 @@ interface ResolvedConfig {
  * Renderer calls RegisterWindow(id, props) + window.open(url, id), then this class
  * intercepts the new window via setWindowOpenHandler / did-create-window and wraps it.
  *
- * Origin and frame validation (main-frame-only enforcement) is handled by the
- * EIPC-generated `AppOrigin` validator in the schema — it runs before these handlers
- * and rejects calls from iframes or unexpected origins at the IPC layer.
+ * Security model:
+ * - Iframe enforcement (main-frame-only) is handled by the EIPC-generated
+ *   `AppOrigin` validator — it runs before these handlers at the IPC layer.
+ * - Parent renderer origin is validated here via `allowedOrigins` config.
+ * - Per-WebContents ownership: a renderer can only mutate windows it created.
+ *   `UnregisterWindow`/`UpdateWindow`/`DestroyWindow`/`WindowAction` check that
+ *   the caller's WebContents matches the one that registered the window.
  */
 export class WindowManager {
-  private readonly windows: Map<WindowId, WindowInstance> = new Map();
+  private readonly windows: Map<
+    WindowId,
+    { instance: WindowInstance; ownerWebContentsId: number }
+  > = new Map();
   private readonly pendingWindows: Map<
     WindowId,
-    { props: IPCWindowProps; createdAt: number }
+    { props: IPCWindowProps; createdAt: number; ownerWebContentsId: number }
   > = new Map();
   private readonly config: ResolvedConfig;
 
@@ -124,6 +145,7 @@ export class WindowManager {
     this.config = {
       defaultWindowOptions: config.defaultWindowOptions ?? (() => ({})),
       devWarnings: config.devWarnings ?? process.env.NODE_ENV === "development",
+      allowedOrigins: config.allowedOrigins,
       maxPendingWindows: config.maxPendingWindows ?? 100,
       maxWindows: config.maxWindows ?? 50,
       debug: config.debug ?? false,
@@ -145,6 +167,44 @@ export class WindowManager {
     return typeof this.config.defaultWindowOptions === "function"
       ? this.config.defaultWindowOptions()
       : this.config.defaultWindowOptions;
+  }
+
+  /**
+   * Validate the parent renderer's origin. This checks the WebContents'
+   * top-frame URL — i.e., which window called setupForWindow and is now
+   * making IPC calls. Iframe-within-renderer enforcement is separately
+   * handled by the EIPC AppOrigin validator.
+   */
+  private validateOrigin(sender: WebContents): boolean {
+    if (!this.config.allowedOrigins) {
+      if (this.config.devWarnings) {
+        devWarning(
+          `IPC call from "${sender.mainFrame.url}" allowed by default. ` +
+            `Set allowedOrigins in WindowManagerConfig for stricter security.`,
+        );
+      }
+      return true;
+    }
+    if (this.config.allowedOrigins.includes("*")) return true;
+
+    const url = sender.mainFrame.url;
+    try {
+      const parsedOrigin = new URL(url).origin;
+      // file:// and custom protocols have origin "null" — fall back to protocol+host
+      const origin =
+        parsedOrigin !== "null"
+          ? parsedOrigin
+          : new URL(url).protocol + "//" + new URL(url).host;
+      const allowed = this.config.allowedOrigins.some((o) => origin === o);
+      if (!allowed && this.config.devWarnings) {
+        devWarning(
+          `IPC call from origin "${origin}" rejected. Add to allowedOrigins to allow.`,
+        );
+      }
+      return allowed;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -195,8 +255,20 @@ export class WindowManager {
       const { frameName, url } = details;
 
       // Check if this is a library-managed window (about:blank + registered frameName)
-      if (url === "about:blank" && this.pendingWindows.has(frameName)) {
-        const pending = this.pendingWindows.get(frameName)!;
+      const pending = this.pendingWindows.get(frameName);
+      if (url === "about:blank" && pending) {
+        // Ownership check: the pending registration must belong to THIS
+        // WebContents. Prevents an iframe (or another renderer with access
+        // to the windowId) from hijacking a registration via window.open.
+        if (pending.ownerWebContentsId !== webContents.id) {
+          if (this.config.devWarnings) {
+            devWarning(
+              `window.open for "${frameName}" denied — registration owned by a different WebContents.`,
+            );
+          }
+          return { action: "deny" };
+        }
+
         const constructorOptions = this.buildConstructorOptions(
           pending.props,
           webContents,
@@ -259,7 +331,10 @@ export class WindowManager {
         hideOnClose: (pending.props as any).hideOnClose === true,
       });
 
-      this.windows.set(windowId, instance);
+      this.windows.set(windowId, {
+        instance,
+        ownerWebContentsId: webContents.id,
+      });
     });
   }
 
@@ -381,7 +456,43 @@ export class WindowManager {
     ) as Partial<Electron.BrowserWindowConstructorOptions>;
   }
 
-  private createImplementation(_sender: WebContents): IWindowManagerImpl {
+  private createImplementation(sender: WebContents): IWindowManagerImpl {
+    const senderId = sender.id;
+
+    // Origin check runs once here — the sender WebContents doesn't change
+    // per-call, so validating on each IPC would be redundant. If the sender
+    // navigates to a different origin mid-session, that's a different threat
+    // model (app-controlled navigation).
+    if (!this.validateOrigin(sender)) {
+      // Return a stub implementation that rejects everything.
+      return {
+        RegisterWindow: () => false,
+        UnregisterWindow: () => false,
+        UpdateWindow: () => false,
+        DestroyWindow: () => false,
+        WindowAction: () => false,
+        GetWindowState: () => null,
+      };
+    }
+
+    /** Verify the caller owns the given window ID. */
+    const checkOwnership = (
+      id: WindowId,
+      entry: { ownerWebContentsId: number } | undefined,
+    ): boolean => {
+      if (!entry) return false;
+      if (entry.ownerWebContentsId !== senderId) {
+        if (this.config.devWarnings) {
+          devWarning(
+            `IPC call on window "${id}" rejected — caller (WebContents ${senderId}) ` +
+              `does not own this window (registered by WebContents ${entry.ownerWebContentsId}).`,
+          );
+        }
+        return false;
+      }
+      return true;
+    };
+
     return {
       RegisterWindow: (id: WindowId, props: IPCWindowProps) => {
         this.debugLog("←", "RegisterWindow", id, props);
@@ -414,16 +525,22 @@ export class WindowManager {
         this.pendingWindows.set(id, {
           props: filteredProps,
           createdAt: Date.now(),
+          ownerWebContentsId: senderId,
         });
         return true;
       },
 
       UnregisterWindow: (id: WindowId) => {
         this.debugLog("←", "UnregisterWindow", id);
-        this.pendingWindows.delete(id);
-        const instance = this.windows.get(id);
-        if (instance) {
-          instance.destroy();
+        const pending = this.pendingWindows.get(id);
+        if (pending) {
+          if (!checkOwnership(id, pending)) return false;
+          this.pendingWindows.delete(id);
+        }
+        const entry = this.windows.get(id);
+        if (entry) {
+          if (!checkOwnership(id, entry)) return false;
+          entry.instance.destroy();
           this.windows.delete(id);
         }
         return true;
@@ -431,15 +548,15 @@ export class WindowManager {
 
       UpdateWindow: (id: WindowId, props: IPCWindowProps) => {
         this.debugLog("←", "UpdateWindow", id, props);
-        const instance = this.windows.get(id);
-        if (!instance) return false;
+        const entry = this.windows.get(id);
+        if (!checkOwnership(id, entry)) return false;
         const filteredProps = filterAllowedProps(
           props,
           this.config.devWarnings,
         );
-        instance.updateProps(
+        entry!.instance.updateProps(
           filteredProps as unknown as Parameters<
-            typeof instance.updateProps
+            WindowInstance["updateProps"]
           >[0],
         );
         return true;
@@ -447,17 +564,18 @@ export class WindowManager {
 
       DestroyWindow: (id: WindowId) => {
         this.debugLog("←", "DestroyWindow", id);
-        const instance = this.windows.get(id);
-        if (!instance) return false;
-        instance.destroy();
+        const entry = this.windows.get(id);
+        if (!checkOwnership(id, entry)) return false;
+        entry!.instance.destroy();
         this.windows.delete(id);
         return true;
       },
 
       WindowAction: (id: WindowId, action: IPCWindowAction) => {
         this.debugLog("←", "WindowAction", id, action);
-        const instance = this.windows.get(id);
-        if (!instance) return false;
+        const entry = this.windows.get(id);
+        if (!checkOwnership(id, entry)) return false;
+        const instance = entry!.instance;
 
         switch (action.type) {
           case "focus":
@@ -505,7 +623,9 @@ export class WindowManager {
 
       GetWindowState: (id: WindowId) => {
         this.debugLog("←", "GetWindowState", id);
-        return this.windows.get(id)?.getState() ?? null;
+        const entry = this.windows.get(id);
+        // GetWindowState is read-only — allow cross-owner reads (harmless)
+        return entry?.instance.getState() ?? null;
       },
     };
   }
@@ -529,20 +649,20 @@ export class WindowManager {
   }
 
   getWindow(id: WindowId): WindowInstance | undefined {
-    return this.windows.get(id);
+    return this.windows.get(id)?.instance;
   }
 
   getAllWindows(): WindowInstance[] {
-    return [...this.windows.values()];
+    return [...this.windows.values()].map((e) => e.instance);
   }
 
   getWindowState(id: WindowId): WindowState | null {
-    return this.windows.get(id)?.getState() ?? null;
+    return this.windows.get(id)?.instance.getState() ?? null;
   }
 
   destroy(): void {
-    for (const instance of this.windows.values()) {
-      instance.destroy();
+    for (const entry of this.windows.values()) {
+      entry.instance.destroy();
     }
     this.windows.clear();
   }

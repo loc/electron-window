@@ -98,11 +98,11 @@ function createWindowInstance(
 // IPC layer by extracting the impl via a mock WebContents.
 // ---------------------------------------------------------------------------
 
-function createMockWebContents() {
+function createMockWebContents(opts: { id?: number; url?: string } = {}) {
   return {
-    id: 99,
+    id: opts.id ?? 99,
     mainFrame: {
-      url: "app://main",
+      url: opts.url ?? "app://main",
       top: null as unknown,
       parent: null as unknown,
     },
@@ -113,6 +113,7 @@ function createMockWebContents() {
     setWindowOpenHandler: vi.fn(),
     on: vi.fn(),
     send: vi.fn(),
+    isDestroyed: vi.fn(() => false),
   };
 }
 
@@ -153,8 +154,8 @@ function getLastImpl(): ReturnType<
 }
 
 // Minimal mock BrowserWindow for setupForWindow calls
-function createMockParentWindow() {
-  const wc = createMockWebContents();
+function createMockParentWindow(opts: { id?: number; url?: string } = {}) {
+  const wc = createMockWebContents(opts);
   return {
     webContents: wc,
     isDestroyed: vi.fn(() => false),
@@ -1405,5 +1406,182 @@ describe("buildConstructorOptions — targetDisplay", () => {
     const opts = result.overrideBrowserWindowOptions!;
     expect(opts.x).toBe(100);
     expect(opts.y).toBe(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: allowedOrigins — parent renderer origin validation
+// ---------------------------------------------------------------------------
+
+describe("allowedOrigins — parent renderer origin validation", () => {
+  function setupWithOrigin(
+    config: ConstructorParameters<typeof WindowManager>[0],
+    url: string,
+  ) {
+    (globalThis as Record<string, unknown>).__lastImpl__ = undefined;
+    const manager = new WindowManager(config);
+    const parent = createMockParentWindow({ url });
+    manager.setupForWindow(
+      parent as unknown as import("electron").BrowserWindow,
+    );
+    return getLastImpl();
+  }
+
+  it("allows calls when no allowedOrigins is configured (default permissive)", () => {
+    const impl = setupWithOrigin({ devWarnings: false }, "app://main");
+    expect(impl.RegisterWindow("w1", {} as never)).toBe(true);
+  });
+
+  it('allows calls when allowedOrigins includes "*"', () => {
+    const impl = setupWithOrigin(
+      { devWarnings: false, allowedOrigins: ["*"] },
+      "https://evil.example",
+    );
+    expect(impl.RegisterWindow("w1", {} as never)).toBe(true);
+  });
+
+  it("allows calls when origin matches allowedOrigins", () => {
+    const impl = setupWithOrigin(
+      { devWarnings: false, allowedOrigins: ["app://main"] },
+      "app://main/index.html",
+    );
+    expect(impl.RegisterWindow("w1", {} as never)).toBe(true);
+  });
+
+  it("rejects all calls when origin is not in allowedOrigins", () => {
+    const impl = setupWithOrigin(
+      { devWarnings: false, allowedOrigins: ["app://trusted"] },
+      "https://untrusted.example",
+    );
+    // Stub implementation returns false for everything
+    expect(impl.RegisterWindow("w1", {} as never)).toBe(false);
+    expect(impl.UpdateWindow("w1", {} as never)).toBe(false);
+    expect(impl.DestroyWindow("w1")).toBe(false);
+    expect(impl.WindowAction("w1", { type: "show" } as never)).toBe(false);
+    expect(impl.GetWindowState("w1")).toBeNull();
+  });
+
+  it('handles file:// origins (parsedOrigin === "null")', () => {
+    const impl = setupWithOrigin(
+      { devWarnings: false, allowedOrigins: ["file://"] },
+      "file:///Users/app/index.html",
+    );
+    expect(impl.RegisterWindow("w1", {} as never)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: per-WebContents ownership enforcement
+// ---------------------------------------------------------------------------
+
+describe("per-WebContents ownership enforcement", () => {
+  // Two parent windows (A and B) call setupForWindow on the same manager.
+  // B should not be able to mutate windows created by A.
+
+  function setupTwoParents() {
+    (globalThis as Record<string, unknown>).__lastImpl__ = undefined;
+    const manager = new WindowManager({ devWarnings: false });
+
+    const parentA = createMockParentWindow({ id: 1 });
+    manager.setupForWindow(
+      parentA as unknown as import("electron").BrowserWindow,
+    );
+    const implA = getLastImpl();
+
+    const parentB = createMockParentWindow({ id: 2 });
+    manager.setupForWindow(
+      parentB as unknown as import("electron").BrowserWindow,
+    );
+    const implB = getLastImpl();
+
+    return { manager, parentA, parentB, implA, implB };
+  }
+
+  it("renderer B cannot unregister a pending window registered by A", () => {
+    const { implA, implB } = setupTwoParents();
+
+    implA.RegisterWindow("a-window", { width: 400 } as never);
+    expect(implB.UnregisterWindow("a-window")).toBe(false);
+    // A can still unregister its own window
+    expect(implA.UnregisterWindow("a-window")).toBe(true);
+  });
+
+  it("renderer B cannot UpdateWindow/DestroyWindow/WindowAction on A's active window", () => {
+    const { manager, parentA, implA, implB } = setupTwoParents();
+
+    // A registers and opens a window
+    implA.RegisterWindow("a-win", { width: 400 } as never);
+    const openHandler = parentA.webContents.setWindowOpenHandler.mock
+      .calls[0]?.[0] as (arg: { frameName: string; url: string }) => unknown;
+    const result = openHandler({ frameName: "a-win", url: "about:blank" });
+    expect((result as { action: string }).action).toBe("allow");
+
+    // Simulate did-create-window
+    const didCreateHandler = parentA.webContents.on.mock.calls.find(
+      (c) => c[0] === "did-create-window",
+    )?.[1] as (bw: unknown, details: { frameName: string }) => void;
+    const mockChild = createMockBrowserWindow();
+    didCreateHandler(mockChild, { frameName: "a-win" });
+
+    expect(manager.getWindow("a-win")).toBeDefined();
+
+    // B tries to manipulate A's window — all should be rejected
+    expect(implB.UpdateWindow("a-win", { title: "hijacked" } as never)).toBe(
+      false,
+    );
+    expect(implB.WindowAction("a-win", { type: "hide" } as never)).toBe(false);
+    expect(implB.DestroyWindow("a-win")).toBe(false);
+
+    // Window should still exist
+    expect(manager.getWindow("a-win")).toBeDefined();
+
+    // A can still control it
+    expect(implA.UpdateWindow("a-win", { title: "ok" } as never)).toBe(true);
+    expect(implA.DestroyWindow("a-win")).toBe(true);
+  });
+
+  it("setWindowOpenHandler denies open from a different WebContents than the registrar", () => {
+    const { parentA, parentB, implA } = setupTwoParents();
+
+    // A registers the window (ownerWebContentsId = 1)
+    implA.RegisterWindow("hijack-target", {} as never);
+
+    // B's setWindowOpenHandler fires (simulating B calling window.open with A's frameName)
+    const openHandlerB = parentB.webContents.setWindowOpenHandler.mock
+      .calls[0]?.[0] as (arg: { frameName: string; url: string }) => {
+      action: string;
+    };
+    const resultB = openHandlerB({
+      frameName: "hijack-target",
+      url: "about:blank",
+    });
+    expect(resultB.action).toBe("deny");
+
+    // A can still open it
+    const openHandlerA = parentA.webContents.setWindowOpenHandler.mock
+      .calls[0]?.[0] as (arg: { frameName: string; url: string }) => {
+      action: string;
+    };
+    const resultA = openHandlerA({
+      frameName: "hijack-target",
+      url: "about:blank",
+    });
+    expect(resultA.action).toBe("allow");
+  });
+
+  it("GetWindowState is allowed cross-owner (read-only, harmless)", () => {
+    const { parentA, implA, implB } = setupTwoParents();
+
+    implA.RegisterWindow("a-win", {} as never);
+    const openHandler = parentA.webContents.setWindowOpenHandler.mock
+      .calls[0]?.[0] as (arg: { frameName: string; url: string }) => unknown;
+    openHandler({ frameName: "a-win", url: "about:blank" });
+    const didCreate = parentA.webContents.on.mock.calls.find(
+      (c) => c[0] === "did-create-window",
+    )?.[1] as (bw: unknown, details: { frameName: string }) => void;
+    didCreate(createMockBrowserWindow(), { frameName: "a-win" });
+
+    // B can read state (harmless)
+    expect(implB.GetWindowState("a-win")).not.toBeNull();
   });
 });

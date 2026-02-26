@@ -33,6 +33,7 @@ manager.setupForWindow(mainWindow);
 | Option                 | Type                                                                       | Default       | Description                                                                                            |
 | ---------------------- | -------------------------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------ |
 | `defaultWindowOptions` | `BrowserWindowConstructorOptions \| () => BrowserWindowConstructorOptions` | `{}`          | Applied to every child window. Use a function for dynamic values (e.g. theme-aware `backgroundColor`). |
+| `allowedOrigins`       | `string[]`                                                                 | unset (allow) | Restrict which parent renderer origins may use this library's IPC. `["*"]` explicitly allows all.      |
 | `devWarnings`          | `boolean`                                                                  | `true` in dev | Log warnings for misuse (blocked props, shape changes, etc.).                                          |
 | `maxPendingWindows`    | `number`                                                                   | `100`         | Max windows awaiting creation. Prevents runaway open loops.                                            |
 | `maxWindows`           | `number`                                                                   | `50`          | Max total open windows. Registrations beyond this are rejected.                                        |
@@ -350,11 +351,13 @@ test("handles bounds change", async () => {
 
 ## Security
 
-- `webPreferences` cannot be set from the renderer — only via `setupWindowManager` in the main process
+- `webPreferences` cannot be set from the renderer — only via `setupWindowManager` in the main process. The library enforces `nodeIntegration: false`, `contextIsolation: true`, and `sandbox: true` (default) on all child windows regardless of consumer config.
 - All renderer-supplied props are filtered through an allowlist before reaching `BrowserWindow`
 - Child windows can only open `about:blank` — arbitrary URLs are rejected
-- IPC validated via schema with origin and frame checks
-- Rate limits on window creation (configurable `maxPendingWindows` and `maxWindows`)
+- IPC main-frame-only enforcement via EIPC-generated validators; configurable parent-renderer origin allowlist via `allowedOrigins`
+- **Per-WebContents ownership**: a renderer can only mutate (`UpdateWindow`/`DestroyWindow`/`WindowAction`) windows it registered. If you `setupForWindow` on multiple parent windows, each is isolated.
+- Rate limits on window creation (`maxPendingWindows`, `maxWindows`, 10-second TTL on pending registrations)
+- Window IDs are crypto-random (`crypto.randomUUID()`)
 
 ## Entry Points
 
