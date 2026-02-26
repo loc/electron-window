@@ -12,11 +12,13 @@
     },
     "./main": {
       "types": "./dist/main/index.d.ts",
-      "default": "./dist/main/index.js"
+      "import": "./dist/main/index.js",
+      "require": "./dist/main/index.cjs"
     },
     "./preload": {
       "types": "./dist/preload/index.d.ts",
-      "default": "./dist/preload/index.js"
+      "import": "./dist/preload/index.js",
+      "require": "./dist/preload/index.cjs"
     },
     "./testing": {
       "types": "./dist/testing/index.d.ts",
@@ -29,9 +31,13 @@
   ],
   "sideEffects": [
     "./dist/preload/index.js",
+    "./dist/preload/index.cjs",
     "./src/preload/**",
     "./src/generated-ipc/**/preload/**"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=20"
   },
@@ -41,8 +47,8 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "vitest run",
-    "test:unit": "vitest run --project unit",
-    "test:integration": "vitest run --project integration",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
     "pretest:e2e": "yarn build && node tests/e2e/fixtures/test-app/build.js",
     "test:e2e": "playwright test",
     "test:watch": "vitest",
