@@ -70,10 +70,54 @@ function isStyleNode(node: Node): node is HTMLStyleElement | HTMLLinkElement {
   );
 }
 
+interface Subscriber {
+  targetDoc: Document;
+  cloneMap: WeakMap<Node, Node>;
+}
+
+const subscribers = new Set<Subscriber>();
+let sharedObserver: MutationObserver | null = null;
+
+function applyMutationToSubscriber(
+  sub: Subscriber,
+  mutations: MutationRecord[],
+): void {
+  for (const mutation of mutations) {
+    for (const node of mutation.addedNodes) {
+      if (isStyleNode(node) && !sub.cloneMap.has(node)) {
+        const clone = node.cloneNode(true);
+        sub.cloneMap.set(node, clone);
+        sub.targetDoc.head.appendChild(clone);
+      }
+    }
+
+    for (const node of mutation.removedNodes) {
+      const clone = sub.cloneMap.get(node);
+      if (clone) {
+        clone.parentNode?.removeChild(clone);
+        sub.cloneMap.delete(node);
+      }
+    }
+
+    if (mutation.type === "characterData" || mutation.type === "childList") {
+      const target =
+        mutation.type === "characterData"
+          ? mutation.target.parentNode
+          : mutation.target;
+      if (target && isStyleNode(target)) {
+        const clone = sub.cloneMap.get(target);
+        if (clone && clone instanceof HTMLStyleElement) {
+          clone.textContent = (target as HTMLStyleElement).textContent;
+        }
+      }
+    }
+  }
+}
+
 /**
  * Inject styles from parent document into child window document.
- * In "auto" mode, sets up a MutationObserver that keeps styles in sync.
- * Returns a cleanup function to disconnect the observer.
+ * In "auto" mode, a single shared MutationObserver fans out style changes
+ * to all subscribed child documents. Returns a cleanup function to unsubscribe.
  */
 export function handleStyleInjection(
   doc: Document,
@@ -85,10 +129,9 @@ export function handleStyleInjection(
     return () => {};
   }
 
-  // "auto" — clone existing styles and observe for changes
+  // "auto" — clone existing styles and subscribe to shared observer
   const cloneMap = new WeakMap<Node, Node>();
 
-  // 1. Clone all existing stylesheets
   const existing = document.querySelectorAll('style, link[rel="stylesheet"]');
   for (const sheet of existing) {
     const clone = sheet.cloneNode(true);
@@ -96,51 +139,31 @@ export function handleStyleInjection(
     doc.head.appendChild(clone);
   }
 
-  // 2. Observe parent document.head for style changes
-  const observer = new MutationObserver((mutations) => {
-    for (const mutation of mutations) {
-      // New nodes added to <head>
-      for (const node of mutation.addedNodes) {
-        if (isStyleNode(node) && !cloneMap.has(node)) {
-          const clone = node.cloneNode(true);
-          cloneMap.set(node, clone);
-          doc.head.appendChild(clone);
+  const sub: Subscriber = { targetDoc: doc, cloneMap };
+  subscribers.add(sub);
+
+  if (sharedObserver === null) {
+    sharedObserver = new MutationObserver((mutations) => {
+      for (const s of subscribers) {
+        try {
+          applyMutationToSubscriber(s, mutations);
+        } catch {
+          subscribers.delete(s);
         }
       }
+    });
+    sharedObserver.observe(document.head, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+  }
 
-      // Nodes removed from <head>
-      for (const node of mutation.removedNodes) {
-        const clone = cloneMap.get(node);
-        if (clone) {
-          clone.parentNode?.removeChild(clone);
-          cloneMap.delete(node);
-        }
-      }
-
-      // textContent changes on existing <style> elements
-      if (mutation.type === "characterData" || mutation.type === "childList") {
-        const target =
-          mutation.type === "characterData"
-            ? mutation.target.parentNode
-            : mutation.target;
-        if (target && isStyleNode(target)) {
-          const clone = cloneMap.get(target);
-          if (clone && clone instanceof HTMLStyleElement) {
-            clone.textContent = (target as HTMLStyleElement).textContent;
-          }
-        }
-      }
-    }
-  });
-
-  observer.observe(document.head, {
-    childList: true,
-    subtree: true,
-    characterData: true,
-  });
-
-  // 3. Return cleanup to disconnect
   return () => {
-    observer.disconnect();
+    subscribers.delete(sub);
+    if (subscribers.size === 0) {
+      sharedObserver?.disconnect();
+      sharedObserver = null;
+    }
   };
 }
