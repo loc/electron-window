@@ -275,6 +275,7 @@ export class RendererWindowPool {
     if (index !== -1) {
       const [entry] = this.idle.splice(index, 1);
       if (entry) {
+        entry.styleCleanup();
         entry.childWindow.close();
         void this.unregisterWindow(id);
       }

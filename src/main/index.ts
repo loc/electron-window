@@ -19,7 +19,6 @@ export { WindowInstance } from "./WindowInstance.js";
 // Re-export types needed in main process
 export type {
   WindowPoolConfig,
-  WindowShape,
   Bounds,
   WindowState,
   WindowId,

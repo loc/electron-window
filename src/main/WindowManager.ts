@@ -56,13 +56,7 @@ function filterAllowedProps(
   const rejected: string[] = [];
 
   for (const [key, value] of Object.entries(props)) {
-    if (
-      RENDERER_ALLOWED_PROPS.has(key) ||
-      key === "hasOnBoundsChange" ||
-      key === "hasOnUserClose" ||
-      key === "name" ||
-      key === "hideOnClose"
-    ) {
+    if (RENDERER_ALLOWED_PROPS.has(key)) {
       filtered[key] = value;
     } else {
       rejected.push(key);

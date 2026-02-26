@@ -330,13 +330,18 @@ describe("filterAllowedProps (via WindowManager IPC implementation)", () => {
     }
   });
 
-  it("allows internal callback flags (name, hasOnBoundsChange, hasOnUserClose)", () => {
-    // These are not in RENDERER_ALLOWED_PROPS but filterAllowedProps accepts them explicitly
+  it("allows name and pool-support props via RENDERER_ALLOWED_PROPS", () => {
+    // These were previously hardcoded exceptions in filterAllowedProps.
+    // Now they're in the allowlist directly.
+    expect(RENDERER_ALLOWED_PROPS.has("name")).toBe(true);
+    expect(RENDERER_ALLOWED_PROPS.has("hideOnClose")).toBe(true);
+    expect(RENDERER_ALLOWED_PROPS.has("showOnCreate")).toBe(true);
+
     const result = impl.RegisterWindow("cb-win", {
       width: 400,
       name: "my-window",
-      hasOnBoundsChange: true,
-      hasOnUserClose: true,
+      hideOnClose: true,
+      showOnCreate: false,
     } as never);
     expect(result).toBe(true);
   });
@@ -763,16 +768,17 @@ describe("WindowInstance updateProps — PROP_SETTERS dispatch", () => {
     expect(bw.setFocusable).toHaveBeenCalledWith(false);
   });
 
-  it("calls setAlwaysOnTop(true, 'screen-saver') when alwaysOnTop is true", () => {
+  it("calls setAlwaysOnTop(true) when alwaysOnTop is true (Electron default level)", () => {
     const { instance, bw } = createWindowInstance({ alwaysOnTop: false });
     instance.updateProps({ alwaysOnTop: true });
-    expect(bw.setAlwaysOnTop).toHaveBeenCalledWith(true, "screen-saver");
+    // No level arg — matches BrowserWindow constructor behavior for alwaysOnTop: true
+    expect(bw.setAlwaysOnTop).toHaveBeenCalledWith(true);
   });
 
-  it("calls setAlwaysOnTop(false, undefined) when alwaysOnTop is false", () => {
+  it("calls setAlwaysOnTop(false) when alwaysOnTop is false", () => {
     const { instance, bw } = createWindowInstance({ alwaysOnTop: true });
     instance.updateProps({ alwaysOnTop: false });
-    expect(bw.setAlwaysOnTop).toHaveBeenCalledWith(false, undefined);
+    expect(bw.setAlwaysOnTop).toHaveBeenCalledWith(false);
   });
 
   it("calls setAlwaysOnTop with level string when alwaysOnTop is a level", () => {

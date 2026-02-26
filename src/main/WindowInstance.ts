@@ -35,7 +35,7 @@ const PROP_SETTERS: Record<
   focusable: (win, v) => win.setFocusable(v as boolean),
   alwaysOnTop: (win, v) => {
     if (typeof v === "boolean") {
-      win.setAlwaysOnTop(v, v ? "screen-saver" : undefined);
+      win.setAlwaysOnTop(v);
     } else if (typeof v === "string") {
       win.setAlwaysOnTop(
         true,

@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useMemo,
@@ -171,6 +172,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
     const [childDocument, setChildDocument] = useState<Document | null>(null);
     const [windowId, setWindowId] = useState<WindowId | null>(null);
     const [isReady, setIsReady] = useState(false);
+    const pendingShowRef = useRef<string | null>(null);
 
     // Tracks the currently-acquired pool entry so release() has the right id
     const entryRef = useRef<{
@@ -280,11 +282,10 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
         setChildDocument(entry.childWindow.document);
         setIsReady(true);
 
-        // Show fires after portal target is set — by the time the window
-        // becomes visible, React has already started rendering content into it.
-        void provider.windowAction(entry.id, { type: "show" });
-
-        onReady?.();
+        // Defer show to useLayoutEffect — React must commit the portal content
+        // to the DOM before the window becomes visible. The layout effect fires
+        // after React's commit phase, guaranteeing content is painted.
+        pendingShowRef.current = entry.id;
       }
 
       acquireWindow();
@@ -294,6 +295,18 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
       // Intentionally minimal — prop changes are handled by a separate effect
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open]);
+
+    // Show the window AFTER React has committed portal content to the DOM.
+    // useLayoutEffect fires synchronously after commit, before browser paint —
+    // the window becomes visible with content already rendered.
+    useLayoutEffect(() => {
+      const showId = pendingShowRef.current;
+      if (showId) {
+        pendingShowRef.current = null;
+        void provider.windowAction(showId, { type: "show" });
+        onReady?.();
+      }
+    });
 
     // Release and cancel debounce on unmount
     useEffect(() => {

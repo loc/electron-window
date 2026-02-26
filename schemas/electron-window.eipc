@@ -131,9 +131,6 @@ structure WindowProps {
     titleBarOverlay?: TitleBarOverlayOptions
     // Advanced
     name?: string
-    // Callback flags
-    hasOnBoundsChange?: boolean
-    hasOnUserClose?: boolean
 }
 
 // Window actions

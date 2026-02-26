@@ -1,4 +1,3 @@
-import type { BrowserWindowConstructorOptions } from "electron";
 import type {
   Bounds,
   DisplayInfo,
@@ -144,8 +143,10 @@ export const RENDERER_ALLOWED_PROPS = new Set([
   "titleBarOverlay",
   // Advanced
   "targetDisplay",
+  "name",
   // Pool support
   "showOnCreate",
+  "hideOnClose",
 ]) as ReadonlySet<string>;
 
 /**
@@ -515,14 +516,6 @@ export interface WindowPoolConfig {
   /** Time in ms before destroying idle windows */
   idleTimeout?: number;
 }
-
-/**
- * Pool shape - immutable options that define pool compatibility
- */
-export type WindowShape = Pick<
-  BrowserWindowConstructorOptions,
-  "transparent" | "frame" | "titleBarStyle" | "type" | "vibrancy"
->;
 
 // WindowManagerConfig is defined in src/main/WindowManager.ts
 // It includes all security options (allowedOrigins, allowIframes, validator)

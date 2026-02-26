@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   forwardRef,
@@ -67,9 +68,6 @@ function extractIPCProps(
       ipcProps[key] = (props as Record<string, unknown>)[key];
     }
   }
-  // Communicate whether callbacks are registered so main can behave accordingly
-  ipcProps.hasOnBoundsChange = !!props.onBoundsChange;
-  ipcProps.hasOnUserClose = !!props.onUserClose;
   if (props.name) ipcProps.name = props.name;
   return ipcProps;
 }
@@ -129,6 +127,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(
     const [childDocument, setChildDocument] = useState<Document | null>(null);
 
     const [isReady, setIsReady] = useState(false);
+    const pendingShowRef = useRef<string | null>(null);
 
     const childWindowRef = useRef<globalThis.Window | null>(null);
     const prevPropsRef = useRef<Omit<WindowProps, "children"> | null>(null);
@@ -296,11 +295,9 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         setChildDocument(win.document);
         setIsReady(true);
 
-        // Show after portal target is set — React starts rendering before the
-        // window becomes visible, so content is already in the DOM.
-        void provider.windowAction(windowId, { type: "show" });
-
-        onReady?.();
+        // Defer show to useLayoutEffect — React must commit the portal content
+        // before the window becomes visible.
+        pendingShowRef.current = windowId;
       }
 
       openWindow();
@@ -408,6 +405,16 @@ export const Window = forwardRef<WindowRef, WindowProps>(
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [windowId]);
+
+    // Show the window AFTER React has committed portal content to the DOM.
+    useLayoutEffect(() => {
+      const showId = pendingShowRef.current;
+      if (showId) {
+        pendingShowRef.current = null;
+        void provider.windowAction(showId, { type: "show" });
+        onReady?.();
+      }
+    });
 
     useImperativeHandle(ref, () => lifecycle.handle ?? NOT_READY_HANDLE, [
       lifecycle.handle,

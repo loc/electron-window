@@ -61,5 +61,4 @@ export type {
   InjectStylesMode,
   TargetDisplay,
   WindowPoolConfig,
-  WindowShape,
 } from "../shared/types.js";

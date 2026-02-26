@@ -52,8 +52,19 @@ export function WindowProvider({
     return unsubscribe;
   }, [api]);
 
+  // debug is stable per mount in practice; read via ref to avoid churning
+  // callback identities (and the context value) when toggled.
+  const debugRef = useRef(debug);
+  debugRef.current = debug;
+  const trace = (method: string, id: string, data?: unknown) => {
+    if (!debugRef.current) return;
+    const payload = data ? ` ${JSON.stringify(data)}` : "";
+    console.trace(`[electron-window] → ${method} "${id}"${payload}`);
+  };
+
   const registerWindow = useCallback(
     async (id: WindowId, props: Record<string, unknown>) => {
+      trace("RegisterWindow", id, props);
       await api?.RegisterWindow?.(
         id,
         props as Parameters<IWindowManagerRenderer["RegisterWindow"]>[1],
@@ -64,17 +75,16 @@ export function WindowProvider({
 
   const unregisterWindow = useCallback(
     async (id: WindowId) => {
-      if (debug) {
-        console.trace(`[electron-window] UnregisterWindow "${id}"`);
-      }
+      trace("UnregisterWindow", id);
       await api?.UnregisterWindow?.(id);
       eventListeners.current.delete(id);
     },
-    [api, debug],
+    [api],
   );
 
   const updateWindow = useCallback(
     async (id: WindowId, props: Record<string, unknown>) => {
+      trace("UpdateWindow", id, props);
       await api?.UpdateWindow?.(
         id,
         props as Parameters<IWindowManagerRenderer["UpdateWindow"]>[1],
@@ -85,6 +95,7 @@ export function WindowProvider({
 
   const destroyWindow = useCallback(
     async (id: WindowId) => {
+      trace("DestroyWindow", id);
       await api?.DestroyWindow?.(id);
       eventListeners.current.delete(id);
     },
@@ -93,6 +104,7 @@ export function WindowProvider({
 
   const windowAction = useCallback(
     async (id: WindowId, action: { type: string; [key: string]: unknown }) => {
+      trace("WindowAction", id, action);
       await api?.WindowAction?.(
         id,
         action as Parameters<IWindowManagerRenderer["WindowAction"]>[1],
