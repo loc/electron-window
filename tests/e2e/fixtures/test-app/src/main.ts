@@ -27,7 +27,11 @@ function createMainWindow() {
 
   manager.setupForWindow(mainWindow);
 
-  mainWindow.loadFile(path.join(__dirname, "index.html"));
+  // STRICT_MODE env var enables React.StrictMode in the renderer — the e2e
+  // suite launches a second app instance with this set to verify the Window
+  // component survives StrictMode's dev-mode effect double-invocation.
+  const loadOptions = process.env.STRICT_MODE ? { hash: "strict" } : undefined;
+  mainWindow.loadFile(path.join(__dirname, "index.html"), loadOptions);
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
@@ -37,6 +41,13 @@ function createMainWindow() {
 
 ipcMain.handle("test:get-window-count", () => {
   return manager.getAllWindows().length;
+});
+
+// Total BrowserWindows in the process, minus the main window. Catches orphans
+// that the manager lost track of (e.g., StrictMode double-open leaking a window
+// that isn't in the manager's map because its registration was overwritten).
+ipcMain.handle("test:get-total-browser-window-count", () => {
+  return BrowserWindow.getAllWindows().filter((w) => w !== mainWindow).length;
 });
 
 ipcMain.handle("test:get-all-windows", () => {

@@ -6,6 +6,8 @@ import { contextBridge, ipcRenderer } from "electron";
 const testAPI = {
   ping: () => "pong",
   getWindowCount: () => ipcRenderer.invoke("test:get-window-count"),
+  getTotalBrowserWindowCount: () =>
+    ipcRenderer.invoke("test:get-total-browser-window-count"),
   getAllWindows: () => ipcRenderer.invoke("test:get-all-windows"),
   getWindowProps: (id: string) =>
     ipcRenderer.invoke("test:get-window-props", id),

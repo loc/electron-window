@@ -806,3 +806,190 @@ test.describe("E2E: Recreate On Shape Change", () => {
     expect(finalWindows[0].id).not.toBe(initialId);
   });
 });
+
+// ─── StrictMode ─────────────────────────────────────────────────────────────
+// React 18 StrictMode double-invokes effects in dev: mount → cleanup → mount.
+// The Window component's open effect is async (registerWindow → window.open →
+// waitForWindowReady), and windowId is stable across the double-mount. Failure
+// modes would be: extra BrowserWindows, onReady firing twice, orphaned windows
+// after close, or event routing (onUserClose) breaking.
+test.describe("E2E: StrictMode", () => {
+  let app: ElectronApplication;
+  let page: Page;
+
+  test.beforeAll(async () => {
+    app = await electron.launch({
+      args: [testAppPath],
+      env: { ...process.env, STRICT_MODE: "1" },
+    });
+    page = await app.firstWindow();
+    await page.waitForLoadState("domcontentloaded");
+  });
+
+  test.afterAll(async () => {
+    await app.close();
+  });
+
+  test.beforeEach(async () => {
+    // Close from React side first so onClose handlers fire cleanly
+    await page.evaluate(() => window.__test__.setWindowOpen(false));
+    await page.evaluate(() => window.testAPI.clearAllState());
+    // Wait for all child BrowserWindows to actually be destroyed — destruction
+    // is async even after clearAllState returns, and Playwright's page.evaluate
+    // can fail with "Execution context was destroyed" if a child window dies
+    // mid-evaluation.
+    await waitFor(async () => {
+      const total = await page.evaluate(() =>
+        window.testAPI.getTotalBrowserWindowCount(),
+      );
+      return total === 0;
+    });
+    await page.evaluate(() => {
+      window.__test__.setScenario("basic");
+      window.__test__.clearEvents();
+    });
+  });
+
+  test("StrictMode is active", async () => {
+    // Sanity check — confirm the hash fragment was applied
+    const hash = await page.evaluate(() => window.location.hash);
+    expect(hash).toBe("#strict");
+  });
+
+  test("open creates exactly one BrowserWindow (no orphan from double-mount)", async () => {
+    await page.evaluate(() => window.__test__.setWindowOpen(true));
+
+    // Wait for the managed window to exist
+    await waitFor(async () => {
+      return (await page.evaluate(() => window.testAPI.getWindowCount())) === 1;
+    });
+
+    // Give StrictMode's double-mount time to settle — if the first run's window
+    // wasn't properly closed by the cancelled flag, it would still be alive here.
+    await page.waitForTimeout(500);
+
+    // Managed count should be 1
+    const managedCount = await page.evaluate(() =>
+      window.testAPI.getWindowCount(),
+    );
+    expect(managedCount).toBe(1);
+
+    // Total BrowserWindow count (minus main) should ALSO be 1 — no orphans
+    // that the manager lost track of.
+    const totalCount = await page.evaluate(() =>
+      window.testAPI.getTotalBrowserWindowCount(),
+    );
+    expect(totalCount).toBe(1);
+  });
+
+  test("onReady fires exactly once", async () => {
+    await page.evaluate(() => window.__test__.setWindowOpen(true));
+
+    await waitFor(async () => {
+      const events = await page.evaluate(() => window.__test__.getEvents());
+      return events.some((e) => e.type === "ready");
+    });
+
+    // Wait for any lagging double-mount callback
+    await page.waitForTimeout(500);
+
+    const events = await page.evaluate(() => window.__test__.getEvents());
+    const readyEvents = events.filter((e) => e.type === "ready");
+    expect(readyEvents.length).toBe(1);
+  });
+
+  test("close leaves no orphaned BrowserWindows", async () => {
+    await page.evaluate(() => window.__test__.setWindowOpen(true));
+
+    await waitFor(async () => {
+      return (await page.evaluate(() => window.testAPI.getWindowCount())) === 1;
+    });
+
+    await page.evaluate(() => window.__test__.setWindowOpen(false));
+
+    await waitFor(async () => {
+      return (await page.evaluate(() => window.testAPI.getWindowCount())) === 0;
+    });
+
+    await page.waitForTimeout(500);
+
+    // No orphans — neither managed nor unmanaged
+    const totalCount = await page.evaluate(() =>
+      window.testAPI.getTotalBrowserWindowCount(),
+    );
+    expect(totalCount).toBe(0);
+  });
+
+  test("onUserClose fires when window closed from main", async () => {
+    // Event routing depends on windowId → listener mapping. StrictMode's
+    // double-register could confuse this if the map is overwritten wrong.
+    await page.evaluate(() => {
+      window.__test__.setScenario("user-close");
+      window.__test__.setWindowOpen(true);
+    });
+
+    await waitFor(async () => {
+      return (await page.evaluate(() => window.testAPI.getWindowCount())) === 1;
+    });
+
+    const windows = await page.evaluate(() => window.testAPI.getAllWindows());
+    const windowId = windows[0].id;
+
+    await page.evaluate((id) => window.testAPI.closeChildWindow(id), windowId);
+
+    await waitFor(async () => {
+      const events = await page.evaluate(() => window.__test__.getEvents());
+      return events.some((e) => e.type === "userClose");
+    });
+
+    const events = await page.evaluate(() => window.__test__.getEvents());
+    expect(events.filter((e) => e.type === "userClose").length).toBe(1);
+  });
+
+  test("child window content is rendered (portal targets correct document)", async () => {
+    // If StrictMode's double-open leaves the portal targeting the first run's
+    // (now-closed) window document, children won't render anywhere visible.
+    await page.evaluate(() => {
+      window.__test__.setScenario("content-check");
+      window.__test__.setWindowOpen(true);
+    });
+
+    await waitFor(async () => {
+      return (await page.evaluate(() => window.testAPI.getWindowCount())) === 1;
+    });
+
+    // Playwright can navigate to child windows via app.windows()
+    await waitFor(async () => {
+      return (await app.windows()).length === 2;
+    });
+    const childPage = (await app.windows()).find((w) => w !== page)!;
+
+    await childPage.waitForLoadState("domcontentloaded");
+    const content = await childPage.getByTestId("child-content").textContent();
+    expect(content).toContain("Hello from child window");
+  });
+
+  test("rapid toggle under StrictMode does not leak", async () => {
+    // Each toggle re-renders Window with a new open value; under StrictMode
+    // each render may double-invoke effects. Stress test.
+    for (let i = 0; i < 5; i++) {
+      await page.evaluate(() => window.__test__.setWindowOpen(true));
+      await page.waitForTimeout(50);
+      await page.evaluate(() => window.__test__.setWindowOpen(false));
+      await page.waitForTimeout(50);
+    }
+
+    await page.evaluate(() => window.__test__.setWindowOpen(true));
+    await page.waitForTimeout(500);
+
+    const managedCount = await page.evaluate(() =>
+      window.testAPI.getWindowCount(),
+    );
+    expect(managedCount).toBeLessThanOrEqual(1);
+
+    const totalCount = await page.evaluate(() =>
+      window.testAPI.getTotalBrowserWindowCount(),
+    );
+    expect(totalCount).toBeLessThanOrEqual(1);
+  });
+});
