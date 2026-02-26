@@ -14,6 +14,7 @@ export {
   type WindowPoolDefinition,
   type PooledWindowRef,
 } from "./PooledWindow.js";
+export type { PoolShape } from "./RendererWindowPool.js";
 export { WindowProvider, type WindowProviderProps } from "./WindowProvider.js";
 
 // Hooks
@@ -58,6 +59,7 @@ export type {
   TitleBarOverlayOptions,
   AlwaysOnTopLevel,
   TitleBarStyle,
+  VibrancyType,
   InjectStylesMode,
   TargetDisplay,
   WindowPoolConfig,

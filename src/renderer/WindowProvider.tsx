@@ -12,11 +12,10 @@ import {
 } from "./context.js";
 import type { WindowId } from "../shared/types.js";
 import { devWarning } from "../shared/utils.js";
-import {
-  WindowManager,
-  type IWindowManagerRenderer,
-  type WindowEvent,
-  type WindowState,
+import type {
+  IWindowManagerRenderer,
+  WindowEvent,
+  WindowState,
 } from "../generated-ipc/renderer/electron_window.js";
 
 export interface WindowProviderProps {
@@ -47,10 +46,15 @@ export function WindowProvider({
 
   const hasWarnedAboutBridgeRef = useRef(false);
   const api = useMemo<IWindowManagerRenderer | null>(() => {
-    if (typeof window !== "undefined" && WindowManager) {
-      return WindowManager as IWindowManagerRenderer;
-    }
-    if (typeof window !== "undefined" && !hasWarnedAboutBridgeRef.current) {
+    if (typeof window === "undefined") return null;
+    // Lazy lookup — the generated module captures globalThis at eval time,
+    // which can be undefined if the preload hasn't finished. Re-read here.
+    const bridge = (globalThis as Record<string, unknown>)[
+      "electron_window"
+    ] as { WindowManager?: Partial<IWindowManagerRenderer> } | undefined;
+    const manager = bridge?.WindowManager as IWindowManagerRenderer | undefined;
+    if (manager) return manager;
+    if (!hasWarnedAboutBridgeRef.current) {
       hasWarnedAboutBridgeRef.current = true;
       devWarning(
         "@loc/electron-window preload bridge not found on window. " +

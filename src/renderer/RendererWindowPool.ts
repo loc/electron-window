@@ -1,5 +1,10 @@
 import { generateWindowId } from "../shared/utils.js";
-import type { WindowPoolConfig, InjectStylesMode } from "../shared/types.js";
+import type {
+  WindowPoolConfig,
+  InjectStylesMode,
+  TitleBarStyle,
+  VibrancyType,
+} from "../shared/types.js";
 import { waitForWindowReady, initWindowDocument } from "./windowUtils.js";
 
 /**
@@ -9,8 +14,8 @@ import { waitForWindowReady, initWindowDocument } from "./windowUtils.js";
 export interface PoolShape {
   transparent?: boolean;
   frame?: boolean;
-  titleBarStyle?: string;
-  vibrancy?: string;
+  titleBarStyle?: TitleBarStyle;
+  vibrancy?: VibrancyType;
 }
 
 interface PoolEntry {
@@ -259,7 +264,11 @@ export class RendererWindowPool {
 
     // Hide first, then clean DOM. The hide gives React time to unmount
     // the portal content before we clear the container.
-    await this.windowAction(id, { type: "hide" });
+    try {
+      await this.windowAction(id, { type: "hide" });
+    } catch {
+      // Main process may be gone during shutdown — fall through to DOM cleanup
+    }
 
     // Clean the DOM to prevent data leakage between pool window uses.
     // React unmounts portal content, but imperative DOM changes, global

@@ -23,6 +23,7 @@ import {
   CHANGEABLE_BEHAVIOR_PROPS,
 } from "../shared/types.js";
 import { useWindowLifecycle, NOT_READY_HANDLE } from "./useWindowLifecycle.js";
+import { devWarning } from "../shared/utils.js";
 
 // Lifecycle / meta props that are never forwarded as IPC props on acquire.
 // Shape props (transparent, frame, titleBarStyle, vibrancy) are excluded
@@ -262,7 +263,23 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
       let cancelled = false;
 
       async function acquireWindow() {
-        const entry = await pool.acquire();
+        let entry;
+        try {
+          entry = await pool.acquire();
+        } catch (err) {
+          devWarning(
+            `[electron-window] PooledWindow: pool.acquire() failed — ${err instanceof Error ? err.message : String(err)}`,
+          );
+          // Reset so the component is in a clean state; toggling open will retry.
+          entryRef.current = null;
+          childWindowRef.current = null;
+          setPortalTarget(null);
+          setChildDocument(null);
+          setWindowId(null);
+          setIsReady(false);
+          return;
+        }
+
         if (cancelled) {
           void pool.release(entry.id);
           return;

@@ -8,6 +8,7 @@ export default defineConfig([
     dts: true,
     sourcemap: true,
     clean: true,
+    splitting: true,
     external: ["electron", "react", "react-dom"],
   },
   // Main process entry — dual ESM/CJS because many Electron apps still use
