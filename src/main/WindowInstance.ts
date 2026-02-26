@@ -51,6 +51,12 @@ const PROP_SETTERS: Record<
       );
     }
   },
+  alwaysOnTopLevel: (win, v) => {
+    win.setAlwaysOnTop(
+      true,
+      v as Parameters<BrowserWindow["setAlwaysOnTop"]>[1],
+    );
+  },
   skipTaskbar: (win, v) => win.setSkipTaskbar(v as boolean),
   fullscreen: (win, v) => win.setFullScreen(v as boolean),
   fullscreenable: (win, v) => win.setFullScreenable(v as boolean),
@@ -181,6 +187,17 @@ export class WindowInstance {
       } else {
         win.setVisibleOnAllWorkspaces(true);
       }
+    }
+
+    // Apply alwaysOnTop level if specified — constructor only accepts boolean,
+    // level must be set via setAlwaysOnTop after creation.
+    const level = (this.currentProps as Record<string, unknown>)
+      .alwaysOnTopLevel as string | undefined;
+    if (level) {
+      win.setAlwaysOnTop(
+        true,
+        level as Parameters<BrowserWindow["setAlwaysOnTop"]>[1],
+      );
     }
   }
 

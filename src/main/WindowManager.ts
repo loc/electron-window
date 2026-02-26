@@ -394,10 +394,7 @@ export class WindowManager {
       maximizable: props.maximizable ?? true,
       closable: props.closable ?? true,
       focusable: props.focusable ?? true,
-      alwaysOnTop:
-        typeof props.alwaysOnTop === "boolean"
-          ? props.alwaysOnTop
-          : props.alwaysOnTop !== undefined,
+      alwaysOnTop: props.alwaysOnTop ?? false,
       skipTaskbar: props.skipTaskbar ?? false,
       fullscreen: props.fullscreen ?? false,
       fullscreenable: props.fullscreenable ?? true,

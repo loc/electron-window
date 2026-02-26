@@ -1180,3 +1180,50 @@ describe("WindowInstance getState", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests: alwaysOnTop level — full IPC pipeline
+// ---------------------------------------------------------------------------
+
+describe("alwaysOnTop level: full IPC pipeline", () => {
+  it("applyPostCreationProps calls setAlwaysOnTop(true, level) when alwaysOnTopLevel is set", () => {
+    const { bw } = createWindowInstance({
+      alwaysOnTop: true,
+      alwaysOnTopLevel: "floating",
+    });
+    expect(bw.setAlwaysOnTop).toHaveBeenCalledWith(true, "floating");
+  });
+
+  it("updateProps applies level when alwaysOnTopLevel changes", () => {
+    const { instance, bw } = createWindowInstance({ alwaysOnTop: false });
+    instance.updateProps({
+      alwaysOnTop: true,
+      alwaysOnTopLevel: "screen-saver",
+    } as never);
+    expect(bw.setAlwaysOnTop).toHaveBeenCalledWith(true, "screen-saver");
+  });
+
+  it("buildConstructorOptions sets alwaysOnTop: false when neither alwaysOnTop nor alwaysOnTopLevel is provided", () => {
+    (globalThis as Record<string, unknown>).__lastImpl__ = undefined;
+    const manager = new WindowManager({ devWarnings: false });
+    const parent = createMockParentWindow();
+    manager.setupForWindow(
+      parent as unknown as import("electron").BrowserWindow,
+    );
+    const impl = getLastImpl();
+
+    impl.RegisterWindow("aot-win", {} as never);
+
+    const handler = parent.webContents.setWindowOpenHandler.mock
+      .calls[0]?.[0] as
+      | ((arg: { frameName: string; url: string }) => unknown)
+      | undefined;
+    expect(handler).toBeDefined();
+    const result = handler!({ frameName: "aot-win", url: "about:blank" }) as {
+      action: string;
+      overrideBrowserWindowOptions?: Record<string, unknown>;
+    };
+    expect(result.action).toBe("allow");
+    expect(result.overrideBrowserWindowOptions?.alwaysOnTop).toBe(false);
+  });
+});

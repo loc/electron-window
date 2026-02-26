@@ -115,6 +115,7 @@ structure WindowProps {
     closable?: boolean
     focusable?: boolean
     alwaysOnTop?: boolean
+    alwaysOnTopLevel?: AlwaysOnTopLevel
     skipTaskbar?: boolean
     fullscreen?: boolean
     fullscreenable?: boolean

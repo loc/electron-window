@@ -47,6 +47,12 @@ function extractIPCProps(
     }
   }
   if (props.name) ipcProps.name = props.name;
+  // Normalize alwaysOnTop: string levels must be split into boolean + level fields
+  // because the IPC schema validates alwaysOnTop as boolean only.
+  if (typeof ipcProps.alwaysOnTop === "string") {
+    ipcProps.alwaysOnTopLevel = ipcProps.alwaysOnTop;
+    ipcProps.alwaysOnTop = true;
+  }
   return ipcProps;
 }
 
@@ -353,6 +359,13 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         if (prevValue !== currentValue && currentValue !== undefined) {
           changedBehaviorProps[prop] = currentValue;
         }
+      }
+
+      // Normalize alwaysOnTop string levels for IPC (schema validates alwaysOnTop as boolean)
+      if (typeof changedBehaviorProps.alwaysOnTop === "string") {
+        changedBehaviorProps.alwaysOnTopLevel =
+          changedBehaviorProps.alwaysOnTop;
+        changedBehaviorProps.alwaysOnTop = true;
       }
 
       // Collect controlled bounds changes

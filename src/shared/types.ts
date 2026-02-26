@@ -130,6 +130,7 @@ export const PROP_REGISTRY: Readonly<Record<string, PropMeta>> = {
   closable: { allowed: true, creationOnly: false },
   focusable: { allowed: true, creationOnly: false },
   alwaysOnTop: { allowed: true, creationOnly: false },
+  alwaysOnTopLevel: { allowed: true, creationOnly: false },
   skipTaskbar: { allowed: true, creationOnly: false },
   fullscreen: { allowed: true, creationOnly: false },
   fullscreenable: { allowed: true, creationOnly: false },
@@ -369,6 +370,9 @@ export interface BaseWindowProps {
 
   /** Whether the window should always be on top. */
   alwaysOnTop?: boolean | AlwaysOnTopLevel;
+
+  /** @internal IPC-level field: the string level for alwaysOnTop */
+  alwaysOnTopLevel?: AlwaysOnTopLevel;
 
   /** Whether to skip showing in taskbar/dock. */
   skipTaskbar?: boolean;

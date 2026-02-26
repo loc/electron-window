@@ -296,6 +296,11 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
         if (visible !== undefined) {
           changeableProps.visible = visible;
         }
+        // Normalize alwaysOnTop string levels for IPC (schema validates alwaysOnTop as boolean)
+        if (typeof changeableProps.alwaysOnTop === "string") {
+          changeableProps.alwaysOnTopLevel = changeableProps.alwaysOnTop;
+          changeableProps.alwaysOnTop = true;
+        }
         if (Object.keys(changeableProps).length > 0) {
           void provider.updateWindow(entry.id, changeableProps);
         }
@@ -377,6 +382,13 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
         if (prevValue !== currentValue && currentValue !== undefined) {
           changedBehaviorProps[prop] = currentValue;
         }
+      }
+
+      // Normalize alwaysOnTop string levels for IPC (schema validates alwaysOnTop as boolean)
+      if (typeof changedBehaviorProps.alwaysOnTop === "string") {
+        changedBehaviorProps.alwaysOnTopLevel =
+          changedBehaviorProps.alwaysOnTop;
+        changedBehaviorProps.alwaysOnTop = true;
       }
 
       // Diff controlled bounds
