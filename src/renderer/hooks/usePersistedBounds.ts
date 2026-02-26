@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import type { Bounds } from "../../shared/types.js";
 import { debounce } from "../../shared/utils.js";
 
@@ -79,6 +79,17 @@ export function usePersistedBounds(
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [storageKey, saveDebounceMs],
   );
+
+  // Re-read storage when the key changes (useState initializer only runs on mount)
+  useEffect(() => {
+    setPersistedBounds(readFromStorage(storageKey));
+  }, [storageKey]);
+
+  // Cancel any pending debounced save when debouncedSave is replaced (key/debounce changed)
+  // This prevents a stale save from writing to the old key after the key prop changes.
+  useEffect(() => {
+    return () => debouncedSave.cancel();
+  }, [debouncedSave]);
 
   const save = useCallback(
     (bounds: Bounds) => {

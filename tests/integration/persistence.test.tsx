@@ -238,6 +238,65 @@ describe("usePersistedBounds", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// usePersistedBounds — key change behaviour
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("usePersistedBounds — key change", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it("re-reads storage when key prop changes", async () => {
+    setPersistedBounds("key-a", { x: 10, y: 10, width: 900, height: 700 });
+    // key-b has no saved bounds
+
+    const { result, rerender } = renderHook(
+      ({ k }: { k: string }) =>
+        usePersistedBounds(k, { defaultWidth: 500, defaultHeight: 400 }),
+      { initialProps: { k: "key-a" } },
+    );
+
+    // Verify key-a bounds loaded
+    expect(result.current.bounds.defaultWidth).toBe(900);
+
+    // Switch to key-b (no stored data)
+    rerender({ k: "key-b" });
+
+    await waitFor(() => {
+      expect(result.current.bounds.defaultWidth).toBe(500);
+    });
+    expect(result.current.bounds.defaultHeight).toBe(400);
+  });
+
+  it("cancels pending debounced save for old key when key changes", async () => {
+    const { result, rerender } = renderHook(
+      ({ k }: { k: string }) => usePersistedBounds(k, { saveDebounceMs: 200 }),
+      { initialProps: { k: "key-cancel" } },
+    );
+
+    // Trigger a save for key-cancel but don't wait for the debounce to fire
+    act(() => {
+      result.current.save({ x: 0, y: 0, width: 800, height: 600 });
+    });
+
+    // Switch key before the debounce fires — should cancel the pending save
+    rerender({ k: "key-other" });
+
+    // Wait well past the debounce window
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 400));
+    });
+
+    // The save for key-cancel should have been cancelled
+    expect(localStorage.getItem(storageKey("key-cancel"))).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // <Window> + persistBounds — smoke tests
 //
 // <Window> accepts the persistBounds prop but doesn't read/write localStorage

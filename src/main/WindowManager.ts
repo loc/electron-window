@@ -1,4 +1,5 @@
 import { BrowserWindow, screen, type WebContents } from "electron";
+import { validateBoundsOnScreen } from "./persistence.js";
 import type { WindowId, WindowState } from "../shared/types.js";
 import { RENDERER_ALLOWED_PROPS } from "../shared/types.js";
 import { devWarning, isMac, isWindows } from "../shared/utils.js";
@@ -346,6 +347,20 @@ export class WindowManager {
     let y = props.y ?? props.defaultY;
     const width = props.width ?? props.defaultWidth ?? DEFAULT_WINDOW_WIDTH;
     const height = props.height ?? props.defaultHeight ?? DEFAULT_WINDOW_HEIGHT;
+
+    // If an explicit position was provided, verify it lands on at least one display.
+    // Skip the check when getAllDisplays returns nothing (e.g., in unit tests without
+    // a display configured) to avoid silently discarding valid positions.
+    if (x !== undefined && y !== undefined) {
+      const displays = screen.getAllDisplays();
+      if (displays.length > 0) {
+        const onScreen = validateBoundsOnScreen({ x, y, width, height });
+        if (!onScreen) {
+          x = undefined;
+          y = undefined;
+        }
+      }
+    }
 
     const shouldCenter =
       props.center !== false && x === undefined && y === undefined;

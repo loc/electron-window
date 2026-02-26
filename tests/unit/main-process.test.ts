@@ -1227,3 +1227,114 @@ describe("alwaysOnTop level: full IPC pipeline", () => {
     expect(result.overrideBrowserWindowOptions?.alwaysOnTop).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests: off-screen bounds validation in buildConstructorOptions
+// ---------------------------------------------------------------------------
+
+describe("buildConstructorOptions — off-screen bounds validation", () => {
+  function setupManagerAndGetHandler() {
+    (globalThis as Record<string, unknown>).__lastImpl__ = undefined;
+    const localManager = new WindowManager({ devWarnings: false });
+    const localParent = createMockParentWindow();
+    localManager.setupForWindow(
+      localParent as unknown as import("electron").BrowserWindow,
+    );
+    const localImpl = getLastImpl();
+    const localHandler = localParent.webContents.setWindowOpenHandler.mock
+      .calls[0]?.[0] as (arg: { frameName: string; url: string }) => {
+      action: string;
+      overrideBrowserWindowOptions?: Record<string, unknown>;
+    };
+    return { localImpl, localHandler };
+  }
+
+  it("discards x/y when window would be fully off-screen", async () => {
+    const { screen } = await import("electron");
+    vi.mocked(screen.getAllDisplays).mockReturnValue([
+      {
+        id: 1,
+        bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+        workArea: { x: 0, y: 0, width: 1920, height: 1040 },
+        scaleFactor: 1,
+      } as import("electron").Display,
+    ]);
+
+    const { localImpl, localHandler } = setupManagerAndGetHandler();
+
+    localImpl.RegisterWindow("offscreen-win", {
+      defaultX: 5000,
+      defaultY: 5000,
+      defaultWidth: 800,
+      defaultHeight: 600,
+    } as never);
+
+    const result = localHandler({
+      frameName: "offscreen-win",
+      url: "about:blank",
+    });
+
+    expect(result.action).toBe("allow");
+    const opts = result.overrideBrowserWindowOptions!;
+    // Off-screen x/y should have been discarded
+    expect(opts.x).not.toBe(5000);
+    expect(opts.y).not.toBe(5000);
+  });
+
+  it("keeps x/y when window is on-screen", async () => {
+    const { screen } = await import("electron");
+    vi.mocked(screen.getAllDisplays).mockReturnValue([
+      {
+        id: 1,
+        bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+        workArea: { x: 0, y: 0, width: 1920, height: 1040 },
+        scaleFactor: 1,
+      } as import("electron").Display,
+    ]);
+
+    const { localImpl, localHandler } = setupManagerAndGetHandler();
+
+    localImpl.RegisterWindow("onscreen-win", {
+      defaultX: 100,
+      defaultY: 100,
+      defaultWidth: 800,
+      defaultHeight: 600,
+    } as never);
+
+    const result = localHandler({
+      frameName: "onscreen-win",
+      url: "about:blank",
+    });
+
+    expect(result.action).toBe("allow");
+    const opts = result.overrideBrowserWindowOptions!;
+    expect(opts.x).toBe(100);
+    expect(opts.y).toBe(100);
+  });
+
+  it("skips validation when no displays are configured (preserves x/y)", async () => {
+    const { screen } = await import("electron");
+    // Default mock returns [] — validation should be skipped entirely
+    vi.mocked(screen.getAllDisplays).mockReturnValue([]);
+
+    const { localImpl, localHandler } = setupManagerAndGetHandler();
+
+    localImpl.RegisterWindow("nodisplay-win", {
+      defaultX: 200,
+      defaultY: 200,
+      defaultWidth: 800,
+      defaultHeight: 600,
+    } as never);
+
+    const result = localHandler({
+      frameName: "nodisplay-win",
+      url: "about:blank",
+    });
+
+    expect(result.action).toBe("allow");
+    const opts = result.overrideBrowserWindowOptions!;
+    // With no displays, x/y should be preserved as-is
+    expect(opts.x).toBe(200);
+    expect(opts.y).toBe(200);
+  });
+});
