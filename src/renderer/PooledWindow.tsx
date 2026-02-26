@@ -377,15 +377,23 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open]);
 
-    // Show the window AFTER React has committed portal content to the DOM.
-    // useLayoutEffect fires synchronously after commit, before browser paint —
-    // the window becomes visible with content already rendered.
+    // Fire onReady and (if visible) show the window AFTER React has committed
+    // portal content. onReady is decoupled from show — a window mounted with
+    // visible={false} still fires onReady when the portal is live.
+    const onReadyFiredRef = useRef(false);
     useLayoutEffect(() => {
+      if (!isReady) {
+        onReadyFiredRef.current = false;
+        return;
+      }
+      if (!onReadyFiredRef.current) {
+        onReadyFiredRef.current = true;
+        onReady?.();
+      }
       const showId = pendingShowRef.current;
       if (showId) {
         pendingShowRef.current = null;
         void provider.windowAction(showId, { type: "show" });
-        onReady?.();
       }
     }, [isReady]); // eslint-disable-line react-hooks/exhaustive-deps
 

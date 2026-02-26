@@ -1453,7 +1453,7 @@ describe("allowedOrigins — parent renderer origin validation", () => {
       { devWarnings: false, allowedOrigins: ["app://trusted"] },
       "https://untrusted.example",
     );
-    // Stub implementation returns false for everything
+    // Per-call validation — each handler checks origin fresh
     expect(impl.RegisterWindow("w1", {} as never)).toBe(false);
     expect(impl.UpdateWindow("w1", {} as never)).toBe(false);
     expect(impl.DestroyWindow("w1")).toBe(false);
@@ -1467,6 +1467,48 @@ describe("allowedOrigins — parent renderer origin validation", () => {
       "file:///Users/app/index.html",
     );
     expect(impl.RegisterWindow("w1", {} as never)).toBe(true);
+  });
+
+  it("allows pre-navigation state (empty url / about:blank) — setup before loadURL", () => {
+    // Mirrors the documented example: setupForWindow(win) BEFORE loadURL().
+    // At that moment mainFrame.url is "" or "about:blank". Real IPC can't
+    // fire until the page loads, but the implementation is created eagerly.
+    // Previously this would return a stub that rejects everything (regression).
+    const implEmpty = setupWithOrigin(
+      { devWarnings: false, allowedOrigins: ["app://main"] },
+      "",
+    );
+    expect(implEmpty.RegisterWindow("w1", {} as never)).toBe(true);
+
+    const implBlank = setupWithOrigin(
+      { devWarnings: false, allowedOrigins: ["app://main"] },
+      "about:blank",
+    );
+    expect(implBlank.RegisterWindow("w2", {} as never)).toBe(true);
+  });
+
+  it("re-validates per call — navigation to a different origin is caught", () => {
+    // Setup with trusted origin, then simulate navigation to untrusted.
+    (globalThis as Record<string, unknown>).__lastImpl__ = undefined;
+    const manager = new WindowManager({
+      devWarnings: false,
+      allowedOrigins: ["app://trusted"],
+    });
+    const parent = createMockParentWindow({ url: "app://trusted/index.html" });
+    manager.setupForWindow(
+      parent as unknown as import("electron").BrowserWindow,
+    );
+    const impl = getLastImpl();
+
+    // First call at trusted origin — allowed
+    expect(impl.RegisterWindow("w1", {} as never)).toBe(true);
+
+    // Simulate navigation: change the mock's mainFrame.url
+    (parent.webContents.mainFrame as { url: string }).url =
+      "https://untrusted.example/page";
+
+    // Next call at untrusted origin — rejected (per-call validation)
+    expect(impl.RegisterWindow("w2", {} as never)).toBe(false);
   });
 });
 
@@ -1569,7 +1611,7 @@ describe("per-WebContents ownership enforcement", () => {
     expect(resultA.action).toBe("allow");
   });
 
-  it("GetWindowState is allowed cross-owner (read-only, harmless)", () => {
+  it("GetWindowState is rejected cross-owner (bounds/title enable clickjacking precision)", () => {
     const { parentA, implA, implB } = setupTwoParents();
 
     implA.RegisterWindow("a-win", {} as never);
@@ -1581,7 +1623,10 @@ describe("per-WebContents ownership enforcement", () => {
     )?.[1] as (bw: unknown, details: { frameName: string }) => void;
     didCreate(createMockBrowserWindow(), { frameName: "a-win" });
 
-    // B can read state (harmless)
-    expect(implB.GetWindowState("a-win")).not.toBeNull();
+    // B cannot read A's window state — bounds+title would enable
+    // pixel-precise overlay positioning
+    expect(implB.GetWindowState("a-win")).toBeNull();
+    // A can read its own
+    expect(implA.GetWindowState("a-win")).not.toBeNull();
   });
 });

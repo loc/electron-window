@@ -32,12 +32,15 @@ export default defineConfig([
     platform: "node",
     external: ["electron"],
   },
-  // Testing entry
+  // Testing entry — externalizes @loc/electron-window so MockWindowProvider
+  // uses the SAME React context instances as the real package. Without this,
+  // the relative context import would be inlined → duplicate createContext()
+  // → mocks and real components see different contexts.
   {
     entry: { "testing/index": "src/testing/index.ts" },
     format: ["esm"],
     dts: true,
     sourcemap: true,
-    external: ["react", "react-dom"],
+    external: ["react", "react-dom", "@loc/electron-window"],
   },
 ]);

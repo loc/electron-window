@@ -231,6 +231,10 @@ export class RendererWindowPool {
     try {
       await waitForWindowReady(childWindow);
     } catch {
+      // Close the orphan before re-throwing — without this the BrowserWindow
+      // stays alive, hidden, with a stale pendingWindows entry (10s GC).
+      childWindow.close();
+      void this.unregisterWindow(id);
       throw new Error("Timed out waiting for pool window to be ready");
     }
 
@@ -376,6 +380,11 @@ export class RendererWindowPool {
    *   never runs and the entry would leak in the active map otherwise)
    */
   notifyDestroyed(id: string): void {
+    // Release the style subscriber (holds Document → Window) before untrackng.
+    // The pool's own unload listener would do this, but BrowserWindow.destroy()
+    // from main doesn't fire unload — this path must clean up explicitly.
+    const entry = this.active.get(id) ?? this.idle.find((e) => e.id === id);
+    entry?.styleCleanup();
     this.handleWindowDestroyed(id);
   }
 

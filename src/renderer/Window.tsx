@@ -46,7 +46,6 @@ function extractIPCProps(
       ipcProps[key] = (props as Record<string, unknown>)[key];
     }
   }
-  if (props.name) ipcProps.name = props.name;
   // Normalize alwaysOnTop: string levels must be split into boolean + level fields
   // because the IPC schema validates alwaysOnTop as boolean only.
   if (typeof ipcProps.alwaysOnTop === "string") {
@@ -339,6 +338,11 @@ export const Window = forwardRef<WindowRef, WindowProps>(
 
         if (changedCreationOnlyProps.length > 0) {
           if (recreateOnShapeChange) {
+            // Release the style subscriber for the old window before closing.
+            // close() fires unload (which also cleans up), but we want
+            // deterministic cleanup before the new window's setup runs.
+            styleCleanupRef.current?.();
+            styleCleanupRef.current = null;
             if (childWindowRef.current && !childWindowRef.current.closed) {
               childWindowRef.current.close();
             }
@@ -432,13 +436,23 @@ export const Window = forwardRef<WindowRef, WindowProps>(
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [windowId]);
 
-    // Show the window AFTER React has committed portal content to the DOM.
+    // Fire onReady and (if visible) show the window AFTER React has committed
+    // portal content to the DOM. onReady is decoupled from show — a window
+    // mounted with visible={false} still fires onReady when the portal is live.
+    const onReadyFiredRef = useRef(false);
     useLayoutEffect(() => {
+      if (!isReady) {
+        onReadyFiredRef.current = false;
+        return;
+      }
+      if (!onReadyFiredRef.current) {
+        onReadyFiredRef.current = true;
+        onReady?.();
+      }
       const showId = pendingShowRef.current;
       if (showId) {
         pendingShowRef.current = null;
         void provider.windowAction(showId, { type: "show" });
-        onReady?.();
       }
     }, [isReady]); // eslint-disable-line react-hooks/exhaustive-deps
 

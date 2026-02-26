@@ -91,14 +91,37 @@ export function WindowProvider({
     console.trace(`[electron-window] → ${method} "${id}"${payload}`);
   };
 
+  // EIPC-layer validation (origin, schema, main-frame) throws on rejection.
+  // Without a catch here, those throws propagate through fire-and-forget
+  // `void provider.X(...)` calls → unhandled promise rejections. We catch
+  // at this boundary, devWarn with the EIPC error message (which is actionable),
+  // and return a safe fallback so callers see a clean failure signal.
+  const safeInvoke = async <T,>(
+    // api?.Method?.() returns Promise<T> | undefined (not Promise<T|undefined>)
+    fn: () => Promise<T> | undefined,
+    fallback: T,
+  ): Promise<T> => {
+    try {
+      const result = await fn();
+      return result ?? fallback;
+    } catch (err) {
+      devWarning(
+        `IPC rejected: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return fallback;
+    }
+  };
+
   const registerWindow = useCallback(
     async (id: WindowId, props: Record<string, unknown>): Promise<boolean> => {
       trace("RegisterWindow", id, props);
-      return (
-        (await api?.RegisterWindow?.(
-          id,
-          props as Parameters<IWindowManagerRenderer["RegisterWindow"]>[1],
-        )) ?? false
+      return safeInvoke(
+        () =>
+          api?.RegisterWindow?.(
+            id,
+            props as Parameters<IWindowManagerRenderer["RegisterWindow"]>[1],
+          ),
+        false,
       );
     },
     [api],
@@ -107,8 +130,11 @@ export function WindowProvider({
   const unregisterWindow = useCallback(
     async (id: WindowId) => {
       trace("UnregisterWindow", id);
-      await api?.UnregisterWindow?.(id);
-      eventListeners.current.delete(id);
+      const ok = await safeInvoke(() => api?.UnregisterWindow?.(id), false);
+      // Only tear down listeners if main actually processed the unregister —
+      // ownership-rejected calls return false, and we shouldn't tear down
+      // subscriptions the caller may still need.
+      if (ok) eventListeners.current.delete(id);
     },
     [api],
   );
@@ -116,9 +142,13 @@ export function WindowProvider({
   const updateWindow = useCallback(
     async (id: WindowId, props: Record<string, unknown>) => {
       trace("UpdateWindow", id, props);
-      await api?.UpdateWindow?.(
-        id,
-        props as Parameters<IWindowManagerRenderer["UpdateWindow"]>[1],
+      await safeInvoke(
+        () =>
+          api?.UpdateWindow?.(
+            id,
+            props as Parameters<IWindowManagerRenderer["UpdateWindow"]>[1],
+          ),
+        false,
       );
     },
     [api],
@@ -127,8 +157,8 @@ export function WindowProvider({
   const destroyWindow = useCallback(
     async (id: WindowId) => {
       trace("DestroyWindow", id);
-      await api?.DestroyWindow?.(id);
-      eventListeners.current.delete(id);
+      const ok = await safeInvoke(() => api?.DestroyWindow?.(id), false);
+      if (ok) eventListeners.current.delete(id);
     },
     [api],
   );
@@ -136,9 +166,13 @@ export function WindowProvider({
   const windowAction = useCallback(
     async (id: WindowId, action: { type: string; [key: string]: unknown }) => {
       trace("WindowAction", id, action);
-      await api?.WindowAction?.(
-        id,
-        action as Parameters<IWindowManagerRenderer["WindowAction"]>[1],
+      await safeInvoke(
+        () =>
+          api?.WindowAction?.(
+            id,
+            action as Parameters<IWindowManagerRenderer["WindowAction"]>[1],
+          ),
+        false,
       );
     },
     [api],
@@ -146,7 +180,7 @@ export function WindowProvider({
 
   const getWindowState = useCallback(
     async (id: WindowId): Promise<WindowState | null> => {
-      return api?.GetWindowState?.(id) ?? null;
+      return safeInvoke(() => api?.GetWindowState?.(id), null);
     },
     [api],
   );

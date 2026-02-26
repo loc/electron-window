@@ -9,19 +9,23 @@ import React, {
   type ReactNode,
   type ReactElement,
 } from "react";
+// Import contexts from the PACKAGE ENTRY, not relative paths. With
+// @loc/electron-window marked as external in the testing tsup build, this
+// becomes a literal `import ... from "@loc/electron-window"` in dist —
+// so MockWindowProvider/MockWindow use the SAME React context instances
+// as the real Window/WindowProvider. Relative imports would be inlined by
+// the bundler, creating duplicate createContext() calls → context mismatch.
 import {
   WindowContext,
   WindowProviderContext,
   type WindowContextValue,
   type WindowProviderContextValue,
-} from "../renderer/context.js";
-import type {
-  WindowId,
-  WindowState,
-  Bounds,
-  DisplayInfo,
-  WindowEvent,
-} from "../shared/types.js";
+  type WindowId,
+  type WindowState,
+  type Bounds,
+  type DisplayInfo,
+} from "@loc/electron-window";
+import type { WindowEvent } from "../shared/types.js";
 
 /**
  * Mock window data for testing

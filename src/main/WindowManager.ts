@@ -170,16 +170,30 @@ export class WindowManager {
   }
 
   /**
-   * Validate the parent renderer's origin. This checks the WebContents'
-   * top-frame URL — i.e., which window called setupForWindow and is now
-   * making IPC calls. Iframe-within-renderer enforcement is separately
-   * handled by the EIPC AppOrigin validator.
+   * Tracks WebContents we've already warned about (permissive-default origin).
+   * Keyed by WebContents object — GC'd when the WebContents is destroyed.
+   */
+  private readonly originWarned = new WeakSet<WebContents>();
+
+  /**
+   * Validate the parent renderer's origin against allowedOrigins.
+   * Runs PER-IPC-CALL (not once at setup) so it:
+   * - sees the correct URL after loadURL/loadFile (setup often runs before)
+   * - re-validates after navigation to a different origin
+   *
+   * Reads sender.mainFrame.url. Since the EIPC layer already enforces
+   * main-frame-only, this IS the origin of the frame that made the call.
+   *
+   * Empty/about:blank URLs (pre-navigation) are ALLOWED — the renderer can't
+   * send IPC before the page loads, so in practice this only happens when
+   * setupForWindow is called before loadURL and no actual IPC has fired yet.
    */
   private validateOrigin(sender: WebContents): boolean {
     if (!this.config.allowedOrigins) {
-      if (this.config.devWarnings) {
+      if (this.config.devWarnings && !this.originWarned.has(sender)) {
+        this.originWarned.add(sender);
         devWarning(
-          `IPC call from "${sender.mainFrame.url}" allowed by default. ` +
+          `IPC from "${sender.mainFrame.url}" allowed by default. ` +
             `Set allowedOrigins in WindowManagerConfig for stricter security.`,
         );
       }
@@ -188,9 +202,12 @@ export class WindowManager {
     if (this.config.allowedOrigins.includes("*")) return true;
 
     const url = sender.mainFrame.url;
+    // Pre-navigation state (setup ran before loadURL). Actual IPC can't fire
+    // until the page loads, so this check is really for the first real call.
+    if (!url || url === "about:blank") return true;
+
     try {
       const parsedOrigin = new URL(url).origin;
-      // file:// and custom protocols have origin "null" — fall back to protocol+host
       const origin =
         parsedOrigin !== "null"
           ? parsedOrigin
@@ -459,22 +476,6 @@ export class WindowManager {
   private createImplementation(sender: WebContents): IWindowManagerImpl {
     const senderId = sender.id;
 
-    // Origin check runs once here — the sender WebContents doesn't change
-    // per-call, so validating on each IPC would be redundant. If the sender
-    // navigates to a different origin mid-session, that's a different threat
-    // model (app-controlled navigation).
-    if (!this.validateOrigin(sender)) {
-      // Return a stub implementation that rejects everything.
-      return {
-        RegisterWindow: () => false,
-        UnregisterWindow: () => false,
-        UpdateWindow: () => false,
-        DestroyWindow: () => false,
-        WindowAction: () => false,
-        GetWindowState: () => null,
-      };
-    }
-
     /** Verify the caller owns the given window ID. */
     const checkOwnership = (
       id: WindowId,
@@ -493,9 +494,13 @@ export class WindowManager {
       return true;
     };
 
+    /** Per-call origin gate. Runs before each handler body. */
+    const checkOrigin = (): boolean => this.validateOrigin(sender);
+
     return {
       RegisterWindow: (id: WindowId, props: IPCWindowProps) => {
         this.debugLog("←", "RegisterWindow", id, props);
+        if (!checkOrigin()) return false;
         const now = Date.now();
         for (const [entryId, entry] of this.pendingWindows) {
           if (now - entry.createdAt > 10_000) {
@@ -532,6 +537,7 @@ export class WindowManager {
 
       UnregisterWindow: (id: WindowId) => {
         this.debugLog("←", "UnregisterWindow", id);
+        if (!checkOrigin()) return false;
         const pending = this.pendingWindows.get(id);
         if (pending) {
           if (!checkOwnership(id, pending)) return false;
@@ -548,6 +554,7 @@ export class WindowManager {
 
       UpdateWindow: (id: WindowId, props: IPCWindowProps) => {
         this.debugLog("←", "UpdateWindow", id, props);
+        if (!checkOrigin()) return false;
         const entry = this.windows.get(id);
         if (!checkOwnership(id, entry)) return false;
         const filteredProps = filterAllowedProps(
@@ -564,6 +571,7 @@ export class WindowManager {
 
       DestroyWindow: (id: WindowId) => {
         this.debugLog("←", "DestroyWindow", id);
+        if (!checkOrigin()) return false;
         const entry = this.windows.get(id);
         if (!checkOwnership(id, entry)) return false;
         entry!.instance.destroy();
@@ -573,6 +581,7 @@ export class WindowManager {
 
       WindowAction: (id: WindowId, action: IPCWindowAction) => {
         this.debugLog("←", "WindowAction", id, action);
+        if (!checkOrigin()) return false;
         const entry = this.windows.get(id);
         if (!checkOwnership(id, entry)) return false;
         const instance = entry!.instance;
@@ -623,9 +632,12 @@ export class WindowManager {
 
       GetWindowState: (id: WindowId) => {
         this.debugLog("←", "GetWindowState", id);
+        if (!checkOrigin()) return null;
         const entry = this.windows.get(id);
-        // GetWindowState is read-only — allow cross-owner reads (harmless)
-        return entry?.instance.getState() ?? null;
+        // Read-only — but bounds+title can enable clickjacking precision,
+        // so gate behind ownership like the mutators.
+        if (!checkOwnership(id, entry)) return null;
+        return entry!.instance.getState();
       },
     };
   }
