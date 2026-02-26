@@ -178,3 +178,75 @@ describe("handleStyleInjection — subscriber cleanup (memory leak guard)", () =
     expect(__getStyleSubscriberCount()).toBe(before);
   });
 });
+
+describe("__originHook — build-time origin allowlist", () => {
+  // The hooks read __ELECTRON_WINDOW_ALLOWED_ORIGINS__ via `typeof`, which
+  // at runtime (no bundler define) evaluates to "undefined" → permissive.
+  // To test the active path, we set the constant as a global before importing
+  // the hook, then import fresh via vi.resetModules() + dynamic import. Each
+  // test cleans up the global so tests don't leak into each other.
+
+  const CONST = "__ELECTRON_WINDOW_ALLOWED_ORIGINS__";
+
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>)[CONST];
+    vi.resetModules();
+  });
+
+  async function loadMainHook() {
+    const mod = await import("../../src/main/__originHook.js");
+    return mod.__originHook;
+  }
+
+  it("permissive when constant is undefined (consumer did not define)", async () => {
+    // Without define, typeof __ELECTRON_WINDOW_ALLOWED_ORIGINS__ is "undefined"
+    const hook = await loadMainHook();
+    expect(hook("https://any.example")).toBe(true);
+    expect(hook(undefined)).toBe(true);
+  });
+
+  it("allows origins in the allowlist", async () => {
+    (globalThis as Record<string, unknown>)[CONST] = [
+      "https://trusted.example",
+    ];
+    vi.resetModules();
+    const hook = await loadMainHook();
+    expect(hook("https://trusted.example/page")).toBe(true);
+    expect(hook("https://trusted.example/other?q=1")).toBe(true);
+  });
+
+  it("rejects origins not in the allowlist", async () => {
+    (globalThis as Record<string, unknown>)[CONST] = [
+      "https://trusted.example",
+    ];
+    vi.resetModules();
+    const hook = await loadMainHook();
+    expect(hook("https://evil.example/page")).toBe(false);
+    expect(hook("http://trusted.example/")).toBe(false); // wrong protocol
+  });
+
+  it("rejects undefined url when allowlist is configured", async () => {
+    (globalThis as Record<string, unknown>)[CONST] = ["app://main"];
+    vi.resetModules();
+    const hook = await loadMainHook();
+    expect(hook(undefined)).toBe(false);
+  });
+
+  it("handles custom protocols (file://, app://) via origin 'null' fallback", async () => {
+    (globalThis as Record<string, unknown>)[CONST] = ["file://", "app://main"];
+    vi.resetModules();
+    const hook = await loadMainHook();
+    expect(hook("file:///Users/app/index.html")).toBe(true);
+    expect(hook("app://main/page")).toBe(true);
+    expect(hook("app://other/page")).toBe(false);
+  });
+
+  it("rejects malformed URLs", async () => {
+    (globalThis as Record<string, unknown>)[CONST] = [
+      "https://trusted.example",
+    ];
+    vi.resetModules();
+    const hook = await loadMainHook();
+    expect(hook("not a url")).toBe(false);
+  });
+});

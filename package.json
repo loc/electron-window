@@ -43,6 +43,7 @@
   },
   "scripts": {
     "generate:ipc": "generate-ipc schemas src/generated-ipc",
+    "postgenerate:ipc": "node scripts/patch-ipc-validators.mjs",
     "prebuild": "yarn generate:ipc",
     "build": "tsup",
     "dev": "tsup --watch",
@@ -70,7 +71,7 @@
     }
   },
   "devDependencies": {
-    "@marshallofsound/ipc": "^2.6.0",
+    "@marshallofsound/ipc": "~2.6.0",
     "@playwright/test": "^1.40.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^14.1.0",

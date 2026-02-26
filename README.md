@@ -354,10 +354,33 @@ test("handles bounds change", async () => {
 - `webPreferences` cannot be set from the renderer — only via `setupWindowManager` in the main process. The library enforces `nodeIntegration: false`, `contextIsolation: true`, and `sandbox: true` (default) on all child windows regardless of consumer config.
 - All renderer-supplied props are filtered through an allowlist before reaching `BrowserWindow`
 - Child windows can only open `about:blank` — arbitrary URLs are rejected
-- IPC main-frame-only enforcement via EIPC-generated validators; configurable parent-renderer origin allowlist via `allowedOrigins`
+- IPC main-frame-only enforcement via EIPC-generated validators (iframes cannot call the API)
 - **Per-WebContents ownership**: a renderer can only mutate (`UpdateWindow`/`DestroyWindow`/`WindowAction`) windows it registered. If you `setupForWindow` on multiple parent windows, each is isolated.
 - Rate limits on window creation (`maxPendingWindows`, `maxWindows`, 10-second TTL on pending registrations)
 - Window IDs are crypto-random (`crypto.randomUUID()`)
+
+### Origin allowlist
+
+Two ways to restrict which renderer origins can use the library:
+
+**Runtime (main process only)** — works whether or not you bundle your main process:
+
+```ts
+setupWindowManager({
+  allowedOrigins: ["app://main", "file://"],
+});
+```
+
+**Build-time (main + preload)** — if you bundle both your main process and preload (most apps do), define a constant in your bundler config. This additionally gates the preload: on a wrong origin, `window.electron_window` is never exposed at all.
+
+```js
+// vite.config.ts / esbuild / webpack DefinePlugin — for BOTH main and preload builds
+define: {
+  __ELECTRON_WINDOW_ALLOWED_ORIGINS__: JSON.stringify(["app://main", "file://"]),
+}
+```
+
+Both mechanisms validate the same thing (the main frame's origin, since iframes are already blocked). Use the build-time define for the extra preload-side gate; use the runtime config if you don't bundle your main process.
 
 ## Entry Points
 
