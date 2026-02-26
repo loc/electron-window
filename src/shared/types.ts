@@ -78,76 +78,152 @@ export type VibrancyType =
   | "under-window"
   | "under-page";
 
+interface PropMeta {
+  /** Whether the renderer is allowed to send this prop via IPC (security boundary) */
+  allowed: boolean;
+  /** Whether this prop can only be set at window creation time (no Electron setter) */
+  creationOnly: boolean;
+}
+
+/**
+ * Single source of truth for prop classification.
+ *
+ * allowed=true    → renderer may send this via IPC (security allowlist)
+ * creationOnly=true → no Electron setter; must be passed at BrowserWindow construction
+ *
+ * From these two flags all downstream sets are derived:
+ *   RENDERER_ALLOWED_PROPS  = allowed
+ *   CREATION_ONLY_PROPS     = creationOnly
+ *   CHANGEABLE_BEHAVIOR_PROPS (Window.tsx) = allowed && !creationOnly && not a meta/geometry prop
+ *   shape props (PooledWindow.tsx)          = creationOnly && allowed
+ */
+export const PROP_REGISTRY: Readonly<Record<string, PropMeta>> = {
+  // --- Geometry: initial values (creation-only) ---
+  defaultWidth: { allowed: true, creationOnly: false },
+  defaultHeight: { allowed: true, creationOnly: false },
+  defaultX: { allowed: true, creationOnly: false },
+  defaultY: { allowed: true, creationOnly: false },
+  center: { allowed: true, creationOnly: false },
+  // --- Geometry: controlled values ---
+  width: { allowed: true, creationOnly: false },
+  height: { allowed: true, creationOnly: false },
+  x: { allowed: true, creationOnly: false },
+  y: { allowed: true, creationOnly: false },
+  // --- Geometry: constraints ---
+  minWidth: { allowed: true, creationOnly: false },
+  maxWidth: { allowed: true, creationOnly: false },
+  minHeight: { allowed: true, creationOnly: false },
+  maxHeight: { allowed: true, creationOnly: false },
+  // --- Appearance ---
+  title: { allowed: true, creationOnly: false },
+  backgroundColor: { allowed: true, creationOnly: false },
+  opacity: { allowed: true, creationOnly: false },
+  transparent: { allowed: true, creationOnly: true },
+  frame: { allowed: true, creationOnly: true },
+  titleBarStyle: { allowed: true, creationOnly: true },
+  vibrancy: { allowed: true, creationOnly: true },
+  // --- Behavior ---
+  resizable: { allowed: true, creationOnly: false },
+  movable: { allowed: true, creationOnly: false },
+  minimizable: { allowed: true, creationOnly: false },
+  maximizable: { allowed: true, creationOnly: false },
+  closable: { allowed: true, creationOnly: false },
+  focusable: { allowed: true, creationOnly: false },
+  alwaysOnTop: { allowed: true, creationOnly: false },
+  skipTaskbar: { allowed: true, creationOnly: false },
+  fullscreen: { allowed: true, creationOnly: false },
+  fullscreenable: { allowed: true, creationOnly: false },
+  // --- Mouse ---
+  ignoreMouseEvents: { allowed: true, creationOnly: false },
+  // --- Visibility ---
+  visible: { allowed: true, creationOnly: false },
+  showInactive: { allowed: true, creationOnly: false },
+  visibleOnAllWorkspaces: { allowed: true, creationOnly: false },
+  // --- Platform-specific ---
+  trafficLightPosition: { allowed: true, creationOnly: false },
+  titleBarOverlay: { allowed: true, creationOnly: false },
+  // --- Multiple monitors ---
+  targetDisplay: { allowed: true, creationOnly: false },
+  // --- Advanced ---
+  name: { allowed: true, creationOnly: false },
+  // --- Pool support ---
+  showOnCreate: { allowed: true, creationOnly: false },
+  hideOnClose: { allowed: true, creationOnly: false },
+  // --- Creation-only props not exposed to renderer ---
+  // (allowed=false keeps them off the IPC allowlist while still tracking creationOnly)
+  type: { allowed: false, creationOnly: true },
+  visualEffectState: { allowed: false, creationOnly: true },
+  roundedCorners: { allowed: false, creationOnly: true },
+  thickFrame: { allowed: false, creationOnly: true },
+  hasShadow: { allowed: false, creationOnly: true },
+};
+
 /**
  * Props that can only be set at window creation time
  * These have no setter methods in Electron
  */
-export const CREATION_ONLY_PROPS = new Set([
-  "transparent",
-  "frame",
-  "titleBarStyle",
-  "type",
-  "vibrancy",
-  "visualEffectState",
-  "roundedCorners",
-  "thickFrame",
-  "hasShadow",
-]) as ReadonlySet<string>;
+export const CREATION_ONLY_PROPS: ReadonlySet<string> = new Set(
+  Object.entries(PROP_REGISTRY)
+    .filter(([, meta]) => meta.creationOnly)
+    .map(([prop]) => prop),
+);
 
 /**
  * Props allowlist that renderers can set
  * Security: webPreferences and other sensitive options are NOT included
  */
-export const RENDERER_ALLOWED_PROPS = new Set([
-  // Geometry
-  "width",
-  "height",
-  "x",
-  "y",
-  "minWidth",
-  "maxWidth",
-  "minHeight",
-  "maxHeight",
-  "defaultWidth",
-  "defaultHeight",
-  "defaultX",
-  "defaultY",
-  "center",
-  // Appearance
-  "title",
-  "backgroundColor",
-  "opacity",
-  "transparent",
-  "frame",
-  "titleBarStyle",
-  "vibrancy",
-  // Behavior
-  "resizable",
-  "movable",
-  "minimizable",
-  "maximizable",
-  "closable",
-  "focusable",
-  "alwaysOnTop",
-  "skipTaskbar",
-  "fullscreen",
-  "fullscreenable",
-  // Mouse
-  "ignoreMouseEvents",
-  // Visibility
-  "visible",
-  "showInactive",
-  "visibleOnAllWorkspaces",
-  // Platform-specific
-  "trafficLightPosition",
-  "titleBarOverlay",
-  // Advanced
-  "targetDisplay",
-  "name",
-  // Pool support
-  "showOnCreate",
-  "hideOnClose",
-]) as ReadonlySet<string>;
+export const RENDERER_ALLOWED_PROPS: ReadonlySet<string> = new Set(
+  Object.entries(PROP_REGISTRY)
+    .filter(([, meta]) => meta.allowed)
+    .map(([prop]) => prop),
+);
+
+/**
+ * Props that can be updated after window creation via IPC.
+ * These are renderer-allowed, not creation-only, and not pure meta/geometry props
+ * (geometry is handled separately via bounds IPC).
+ */
+export const CHANGEABLE_BEHAVIOR_PROPS: ReadonlySet<string> = new Set(
+  Object.entries(PROP_REGISTRY)
+    .filter(([, meta]) => meta.allowed && !meta.creationOnly)
+    .map(([prop]) => prop)
+    .filter(
+      (prop) =>
+        ![
+          // Geometry — handled via explicit bounds IPC, not the changeable-props loop
+          "width",
+          "height",
+          "x",
+          "y",
+          "defaultWidth",
+          "defaultHeight",
+          "defaultX",
+          "defaultY",
+          "minWidth",
+          "maxWidth",
+          "minHeight",
+          "maxHeight",
+          "center",
+          // Meta / renderer-only props
+          "title",
+          "targetDisplay",
+          "name",
+          "showOnCreate",
+          "hideOnClose",
+          "showInactive",
+        ].includes(prop),
+    ),
+);
+
+/**
+ * Creation-only props that are also renderer-allowed — these are the pool's
+ * "shape" props, fixed at pool creation time and excluded on acquire.
+ */
+export const POOL_SHAPE_PROPS: ReadonlySet<string> = new Set(
+  Object.entries(PROP_REGISTRY)
+    .filter(([, meta]) => meta.allowed && meta.creationOnly)
+    .map(([prop]) => prop),
+);
 
 /**
  * Base window props (shared between Window and PooledWindow)

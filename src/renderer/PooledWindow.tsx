@@ -16,18 +16,14 @@ import type {
   WindowPoolConfig,
   BaseWindowProps,
 } from "../shared/types.js";
-import { CREATION_ONLY_PROPS } from "../shared/types.js";
+import { CREATION_ONLY_PROPS, POOL_SHAPE_PROPS } from "../shared/types.js";
 import { useWindowLifecycle, NOT_READY_HANDLE } from "./useWindowLifecycle.js";
 
-// Props excluded when forwarding to the window — either owned by the pool
-// (shape props) or lifecycle-only (callbacks, meta).
-const EXCLUDED_ON_ACQUIRE = new Set([
-  // Shape props — fixed by the pool definition
-  "transparent",
-  "frame",
-  "titleBarStyle",
-  "vibrancy",
-  // Lifecycle / meta — not forwarded as IPC props
+// Lifecycle / meta props that are never forwarded as IPC props on acquire.
+// Shape props (transparent, frame, titleBarStyle, vibrancy) are excluded
+// separately via POOL_SHAPE_PROPS so adding a new creation-only allowed prop
+// automatically excludes it here too.
+const LIFECYCLE_EXCLUDED_ON_ACQUIRE = new Set([
   "children",
   "open",
   "pool",
@@ -244,7 +240,8 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
         const changeableProps: Record<string, unknown> = {};
         for (const [key, value] of Object.entries(rest)) {
           if (
-            !EXCLUDED_ON_ACQUIRE.has(key) &&
+            !LIFECYCLE_EXCLUDED_ON_ACQUIRE.has(key) &&
+            !POOL_SHAPE_PROPS.has(key) &&
             !CREATION_ONLY_PROPS.has(key) &&
             value !== undefined
           ) {

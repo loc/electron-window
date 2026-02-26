@@ -12,34 +12,12 @@ import type { WindowId, WindowProps, WindowHandle } from "../shared/types.js";
 import {
   CREATION_ONLY_PROPS,
   RENDERER_ALLOWED_PROPS,
+  CHANGEABLE_BEHAVIOR_PROPS,
 } from "../shared/types.js";
 import { usePersistedBounds } from "./hooks/usePersistedBounds.js";
 import { devWarning, generateWindowId } from "../shared/utils.js";
 import { waitForWindowReady, initWindowDocument } from "./windowUtils.js";
 import { useWindowLifecycle, NOT_READY_HANDLE } from "./useWindowLifecycle.js";
-
-/**
- * Changeable behavior props that can be updated after window creation via IPC
- */
-const CHANGEABLE_BEHAVIOR_PROPS = new Set([
-  "resizable",
-  "movable",
-  "minimizable",
-  "maximizable",
-  "closable",
-  "focusable",
-  "alwaysOnTop",
-  "skipTaskbar",
-  "fullscreen",
-  "fullscreenable",
-  "ignoreMouseEvents",
-  "visibleOnAllWorkspaces",
-  "backgroundColor",
-  "opacity",
-  "trafficLightPosition",
-  "titleBarOverlay",
-  "visible",
-]);
 
 /**
  * Extract the window shape (creation-only props) for change detection
