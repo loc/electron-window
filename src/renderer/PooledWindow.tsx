@@ -138,6 +138,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
       onExitFullscreen,
       onDisplayChange,
       title,
+      visible,
       ...rest
     },
     ref,
@@ -169,6 +170,8 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
     const [windowId, setWindowId] = useState<WindowId | null>(null);
     const [isReady, setIsReady] = useState(false);
     const pendingShowRef = useRef<string | null>(null);
+    const visibleRef = useRef(visible);
+    visibleRef.current = visible;
 
     // Tracks the currently-acquired pool entry so release() has the right id
     const entryRef = useRef<{
@@ -248,6 +251,11 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
             changeableProps[key] = value;
           }
         }
+        // visible was destructured separately to create visibleRef, but it
+        // is still a changeable prop that should be forwarded on acquire.
+        if (visible !== undefined) {
+          changeableProps.visible = visible;
+        }
         if (Object.keys(changeableProps).length > 0) {
           void provider.updateWindow(entry.id, changeableProps);
         }
@@ -282,7 +290,10 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
         // Defer show to useLayoutEffect — React must commit the portal content
         // to the DOM before the window becomes visible. The layout effect fires
         // after React's commit phase, guaranteeing content is painted.
-        pendingShowRef.current = entry.id;
+        // Skip if initially hidden.
+        if (visibleRef.current !== false) {
+          pendingShowRef.current = entry.id;
+        }
       }
 
       acquireWindow();
@@ -303,7 +314,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
         void provider.windowAction(showId, { type: "show" });
         onReady?.();
       }
-    });
+    }, [isReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Release and cancel debounce on unmount
     useEffect(() => {

@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import React, { useState, useEffect } from "react";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  render,
+  screen,
+  waitFor,
+  fireEvent,
+  act,
+} from "@testing-library/react";
 import { Window, type WindowRef } from "../../src/renderer/Window.js";
 import {
   MockWindowProvider,
@@ -10,6 +16,40 @@ import {
 } from "../../src/testing/index.js";
 import type { Bounds } from "../../src/shared/types.js";
 import { resetMockWindowsGlobal, getGlobalMockWindows } from "../setup.js";
+import {
+  useWindowProviderContext,
+  WindowProviderContext,
+} from "../../src/renderer/context.js";
+
+/** Intercepts windowAction("show") calls for assertion */
+function ShowSpy({
+  children,
+  onShow,
+}: {
+  children: React.ReactNode;
+  onShow: (id: string) => void;
+}) {
+  const ctx = useWindowProviderContext();
+  const wrapped = useMemo(
+    () => ({
+      ...ctx,
+      windowAction: async (
+        id: string,
+        action: { type: string; [key: string]: unknown },
+      ) => {
+        if (action.type === "show") onShow(id);
+        return ctx.windowAction(id, action);
+      },
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ctx],
+  );
+  return React.createElement(
+    WindowProviderContext.Provider,
+    { value: wrapped },
+    children,
+  );
+}
 
 // Helper component for testing
 function TestApp({
@@ -1452,5 +1492,77 @@ describe("<Window> timing and cancellation", () => {
     // If debounce cleanup works, onBoundsChange is never called after unmount.
     // (A failure here would also surface as a "setState on unmounted component" warning.)
     expect(onBoundsChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("<Window> visible prop", () => {
+  beforeEach(() => {
+    resetMockWindows();
+    resetMockWindowsGlobal();
+    vi.clearAllMocks();
+  });
+
+  it("does not show the window on initial render when visible={false}", async () => {
+    const showActions: string[] = [];
+
+    function TestApp() {
+      return (
+        <MockWindowProvider>
+          <ShowSpy onShow={(id) => showActions.push(id)}>
+            <Window open visible={false}>
+              <div data-testid="hidden-content">Content</div>
+            </Window>
+          </ShowSpy>
+        </MockWindowProvider>
+      );
+    }
+
+    render(<TestApp />);
+
+    // Wait for window to be registered
+    await waitFor(() => {
+      expect(getMockWindows().length).toBe(1);
+    });
+
+    // Give time for any async show to fire
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    // Window exists but show was never called
+    expect(showActions).toHaveLength(0);
+  });
+
+  it("sends visible=true via updateWindow when visible flips from false to true", async () => {
+    function TestApp() {
+      const [visible, setVisible] = useState(false);
+      return (
+        <MockWindowProvider>
+          <button onClick={() => setVisible(true)}>Show</button>
+          <Window open visible={visible}>
+            <div>Content</div>
+          </Window>
+        </MockWindowProvider>
+      );
+    }
+
+    render(<TestApp />);
+
+    await waitFor(() => {
+      expect(getMockWindows().length).toBe(1);
+    });
+
+    // Initial props should not have visible=true yet (window was opened with false)
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    // Flip visible to true — the prop-diff effect should call updateWindow({ visible: true })
+    fireEvent.click(screen.getByText("Show"));
+
+    await waitFor(() => {
+      const wins = getMockWindows();
+      expect(wins[0].props.visible).toBe(true);
+    });
   });
 });

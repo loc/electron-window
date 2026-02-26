@@ -106,6 +106,9 @@ export const Window = forwardRef<WindowRef, WindowProps>(
 
     const [isReady, setIsReady] = useState(false);
     const pendingShowRef = useRef<string | null>(null);
+    const visibleRef = useRef(visible);
+    visibleRef.current = visible;
+    const unregisteredRef = useRef(false);
 
     const childWindowRef = useRef<globalThis.Window | null>(null);
     const prevPropsRef = useRef<Omit<WindowProps, "children"> | null>(null);
@@ -174,10 +177,12 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         setChildDocument(null);
         setIsReady(false);
         lifecycle.setWindowState(null);
+        unregisteredRef.current = true;
         void provider.unregisterWindow(windowId);
         return;
       }
 
+      unregisteredRef.current = false;
       let cancelled = false;
 
       async function openWindow() {
@@ -274,8 +279,10 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         setIsReady(true);
 
         // Defer show to useLayoutEffect — React must commit the portal content
-        // before the window becomes visible.
-        pendingShowRef.current = windowId;
+        // before the window becomes visible. Skip if initially hidden.
+        if (visibleRef.current !== false) {
+          pendingShowRef.current = windowId;
+        }
       }
 
       openWindow();
@@ -379,7 +386,9 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         if (childWindowRef.current && !childWindowRef.current.closed) {
           childWindowRef.current.close();
         }
-        void provider.unregisterWindow(windowId);
+        if (!unregisteredRef.current) {
+          void provider.unregisterWindow(windowId);
+        }
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [windowId]);
@@ -392,7 +401,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         void provider.windowAction(showId, { type: "show" });
         onReady?.();
       }
-    });
+    }, [isReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useImperativeHandle(ref, () => lifecycle.handle ?? NOT_READY_HANDLE, [
       lifecycle.handle,
