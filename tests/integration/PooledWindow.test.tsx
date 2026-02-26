@@ -661,6 +661,88 @@ describe("<PooledWindow>", () => {
     expect(sized).toBeDefined();
   });
 
+  // A4. Pool rebinds provider refs when provider remounts
+  it("rebinds provider methods after WindowProvider remounts", async () => {
+    const { destroyWindowPool } =
+      await import("../../src/renderer/PooledWindow.js");
+    // minIdle: 0 so warmup doesn't create any idle windows — we only want
+    // to test that the rebind happens and the new provider's methods are used.
+    const poolDef = createWindowPool({ transparent: true }, { minIdle: 0 });
+
+    function App({ open }: { open: boolean }) {
+      return (
+        <MockWindowProvider>
+          <PooledWindow pool={poolDef} open={open}>
+            <div data-testid="rebind-content">Content</div>
+          </PooledWindow>
+        </MockWindowProvider>
+      );
+    }
+
+    // First mount — pool is created (no warmup with minIdle: 0)
+    const { unmount } = render(<App open={false} />);
+
+    // Unmount — simulates provider remount (HMR, test teardown).
+    // The pool singleton stays in the WeakMap with no idle windows.
+    unmount();
+
+    // Remount with a fresh MockWindowProvider — PooledWindow calls rebind()
+    // with the new provider's methods on its next render.
+    render(<App open={true} />);
+
+    // The new provider's registerWindow is used for the on-demand acquire,
+    // proving the pool uses fresh refs after remount and not stale ones.
+    await waitFor(() => {
+      expect(
+        queryInPoolWindows('[data-testid="rebind-content"]'),
+      ).not.toBeNull();
+    });
+
+    destroyWindowPool(poolDef);
+  });
+
+  // D5. In-flight tracking prevents over-creation during rapid acquires
+  it("does not over-replenish idle windows when acquiring concurrently", async () => {
+    const { RendererWindowPool } =
+      await import("../../src/renderer/RendererWindowPool.js");
+
+    const registerWindow = vi.fn(async () => {});
+    const unregisterWindow = vi.fn(async () => {});
+    const windowAction = vi.fn(async () => {});
+
+    // minIdle=2, maxIdle=3: warmup creates 2 idle. Acquiring both triggers
+    // replenishment on each acquire. Without inFlight tracking, both replenishments
+    // would proceed concurrently and create 2 idle windows, exceeding maxIdle.
+    const pool = new RendererWindowPool({
+      shape: {},
+      config: { minIdle: 2, maxIdle: 3 },
+      registerWindow,
+      unregisterWindow,
+      windowAction,
+    });
+
+    await pool.warmUp();
+    expect(pool.getIdleCount()).toBe(2);
+
+    // Acquire both idle windows synchronously — each triggers a replenishment check.
+    const e1 = await pool.acquire();
+    const e2 = await pool.acquire();
+    // At this point inFlight=1 from the first acquire's replenishment; the second
+    // acquire's replenishment check should see inFlight and not over-create.
+
+    // Let all in-flight creations settle
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Total windows should not exceed maxIdle (idle + active + any leftover)
+    expect(pool.getIdleCount() + pool.getActiveCount()).toBeLessThanOrEqual(3);
+    expect(pool.getInFlightCount()).toBe(0);
+
+    await pool.release(e1.id);
+    await pool.release(e2.id);
+
+    pool.destroy();
+  });
+
   // B6. injectStyles: false in pool definition suppresses style injection
   it("respects injectStyles: false from pool definition (B6)", async () => {
     const pool = createWindowPool({}, { minIdle: 0 }, { injectStyles: false });

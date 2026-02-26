@@ -165,8 +165,6 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
     const provider = useWindowProviderContext();
 
     // Share one pool instance per pool definition across all mounts.
-    // The pool captures provider methods at creation time — stable in practice
-    // since the provider comes from context and doesn't change across renders.
     const pool = useMemo(() => {
       let instance = poolInstances.get(poolDef);
       if (!instance) {
@@ -182,8 +180,15 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
         poolInstances.set(poolDef, instance);
         void instance.warmUp();
       }
+      // Always rebind provider refs — the pool outlives individual mounts and
+      // needs fresh references if WindowProvider remounts (HMR, test teardown).
+      instance.rebind({
+        registerWindow: provider.registerWindow,
+        unregisterWindow: provider.unregisterWindow,
+        windowAction: provider.windowAction,
+      });
       return instance;
-    }, [poolDef]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [poolDef]); // eslint-disable-line react-hooks/exhaustive-deps -- provider rebind is handled above
 
     const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
     const [childDocument, setChildDocument] = useState<Document | null>(null);

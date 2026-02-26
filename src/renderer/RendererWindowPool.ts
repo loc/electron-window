@@ -53,13 +53,14 @@ export class RendererWindowPool {
   private readonly idleTimers: Map<string, ReturnType<typeof setTimeout>> =
     new Map();
 
-  private readonly registerWindow: RendererWindowPoolOptions["registerWindow"];
-  private readonly unregisterWindow: RendererWindowPoolOptions["unregisterWindow"];
-  private readonly windowAction: RendererWindowPoolOptions["windowAction"];
+  private registerWindow: RendererWindowPoolOptions["registerWindow"];
+  private unregisterWindow: RendererWindowPoolOptions["unregisterWindow"];
+  private windowAction: RendererWindowPoolOptions["windowAction"];
   private readonly debug: boolean;
   private readonly injectStyles: InjectStylesMode;
 
   private isDestroyed = false;
+  private inFlight = 0;
 
   constructor(options: RendererWindowPoolOptions) {
     this.shape = options.shape;
@@ -73,11 +74,27 @@ export class RendererWindowPool {
     this.injectStyles = options.injectStyles ?? "auto";
   }
 
+  /**
+   * Update the provider method references. The pool is cached in a WeakMap and
+   * outlives individual component mounts, so if WindowProvider remounts (HMR,
+   * test teardown), the pool needs fresh provider refs.
+   */
+  rebind(options: {
+    registerWindow: RendererWindowPoolOptions["registerWindow"];
+    unregisterWindow: RendererWindowPoolOptions["unregisterWindow"];
+    windowAction: RendererWindowPoolOptions["windowAction"];
+  }): void {
+    this.registerWindow = options.registerWindow;
+    this.unregisterWindow = options.unregisterWindow;
+    this.windowAction = options.windowAction;
+  }
+
   private debugLog(msg: string, id?: string): void {
     if (!this.debug) return;
     const idStr = id ? ` (id=${id})` : "";
+    const inFlightStr = this.inFlight > 0 ? ` inFlight=${this.inFlight}` : "";
     console.log(
-      `[electron-window] Pool: ${msg}${idStr} idle=${this.idle.length}/${this.maxIdle} active=${this.active.size}`,
+      `[electron-window] Pool: ${msg}${idStr} idle=${this.idle.length}/${this.maxIdle} active=${this.active.size}${inFlightStr}`,
     );
   }
 
@@ -101,52 +118,57 @@ export class RendererWindowPool {
   private async createIdleWindow(): Promise<void> {
     if (this.isDestroyed) return;
 
-    const id = generateWindowId();
-
-    // showOnCreate: false keeps the BrowserWindow hidden until we explicitly show it.
-    // closable: false prevents the main process from destroying the window when the
-    // user clicks X — the renderer handles close by releasing back to the pool.
-    await this.registerWindow(id, {
-      ...this.shape,
-      showOnCreate: false,
-      hideOnClose: true,
-    });
-
-    if (this.isDestroyed) return;
-
-    const childWindow = window.open("about:blank", id, "");
-    if (!childWindow) return;
-
+    this.inFlight++;
     try {
-      await waitForWindowReady(childWindow, () => this.isDestroyed);
-    } catch {
-      childWindow.close();
-      return;
-    }
+      const id = generateWindowId();
 
-    if (this.isDestroyed) {
-      childWindow.close();
-      return;
-    }
-
-    const { container: portalTarget, cleanup: styleCleanup } =
-      initWindowDocument(childWindow.document, {
-        injectStyles: this.injectStyles,
+      // showOnCreate: false keeps the BrowserWindow hidden until we explicitly show it.
+      // closable: false prevents the main process from destroying the window when the
+      // user clicks X — the renderer handles close by releasing back to the pool.
+      await this.registerWindow(id, {
+        ...this.shape,
+        showOnCreate: false,
+        hideOnClose: true,
       });
-    const entry: PoolEntry = { id, childWindow, portalTarget, styleCleanup };
-    this.idle.push(entry);
-    this.debugLog("idle window ready", id);
 
-    // Handle external destruction (e.g., main process shutdown or DestroyWindow IPC).
-    // Note: 'unload' can also fire on hide() in some Electron versions — only
-    // treat it as destruction if the window is actually closed.
-    childWindow.addEventListener("unload", () => {
-      if (childWindow.closed) {
-        styleCleanup();
-        this.debugLog("window destroyed externally", id);
-        this.handleWindowDestroyed(id);
+      if (this.isDestroyed) return;
+
+      const childWindow = window.open("about:blank", id, "");
+      if (!childWindow) return;
+
+      try {
+        await waitForWindowReady(childWindow, () => this.isDestroyed);
+      } catch {
+        childWindow.close();
+        return;
       }
-    });
+
+      if (this.isDestroyed) {
+        childWindow.close();
+        return;
+      }
+
+      const { container: portalTarget, cleanup: styleCleanup } =
+        initWindowDocument(childWindow.document, {
+          injectStyles: this.injectStyles,
+        });
+      const entry: PoolEntry = { id, childWindow, portalTarget, styleCleanup };
+      this.idle.push(entry);
+      this.debugLog("idle window ready", id);
+
+      // Handle external destruction (e.g., main process shutdown or DestroyWindow IPC).
+      // Note: 'unload' can also fire on hide() in some Electron versions — only
+      // treat it as destruction if the window is actually closed.
+      childWindow.addEventListener("unload", () => {
+        if (childWindow.closed) {
+          styleCleanup();
+          this.debugLog("window destroyed externally", id);
+          this.handleWindowDestroyed(id);
+        }
+      });
+    } finally {
+      this.inFlight--;
+    }
   }
 
   /**
@@ -171,9 +193,11 @@ export class RendererWindowPool {
       // in the pool. Without this check, replenishment fills idle back to
       // minIdle, and when the active window is released, idle is already at
       // maxIdle — causing the released window to be destroyed instead of recycled.
+      // inFlight counts windows currently being created so we don't over-create
+      // during concurrent acquires.
       if (
-        this.idle.length < this.minIdle &&
-        this.idle.length + this.active.size < this.maxIdle
+        this.idle.length + this.inFlight < this.minIdle &&
+        this.idle.length + this.inFlight + this.active.size < this.maxIdle
       ) {
         this.debugLog("replenishing");
         void this.createIdleWindow();
@@ -322,6 +346,10 @@ export class RendererWindowPool {
 
   getActiveCount(): number {
     return this.active.size;
+  }
+
+  getInFlightCount(): number {
+    return this.inFlight;
   }
 
   /**
