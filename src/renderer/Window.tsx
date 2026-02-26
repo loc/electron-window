@@ -219,7 +219,14 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         // before React has rendered content into it. We show it ourselves after
         // setting the portal target, eliminating the blank-window flash.
         ipcProps.showOnCreate = false;
-        await provider.registerWindow(windowId, ipcProps);
+        const registered = await provider.registerWindow(windowId, ipcProps);
+        if (!registered) {
+          devWarning(
+            `${name ? `[${name}] ` : ""}RegisterWindow rejected by main process — ` +
+              `likely hit maxWindows (50) or maxPendingWindows (100) limit.`,
+          );
+          return;
+        }
         if (cancelled) return;
 
         // 2. Open the window — Electron's setWindowOpenHandler intercepts this

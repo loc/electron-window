@@ -42,7 +42,7 @@ export interface WindowProviderContextValue {
   registerWindow: (
     id: WindowId,
     props: Record<string, unknown>,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
 
   /** Unregister a window and clean up resources */
   unregisterWindow: (id: WindowId) => Promise<void>;

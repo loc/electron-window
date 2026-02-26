@@ -26,7 +26,10 @@ export interface RendererWindowPoolOptions {
   debug?: boolean;
   injectStyles?: InjectStylesMode;
   // Injected by PooledWindow from WindowProviderContext
-  registerWindow: (id: string, props: Record<string, unknown>) => Promise<void>;
+  registerWindow: (
+    id: string,
+    props: Record<string, unknown>,
+  ) => Promise<boolean>;
   unregisterWindow: (id: string) => Promise<void>;
   windowAction: (id: string, action: { type: string }) => Promise<void>;
 }
@@ -125,11 +128,12 @@ export class RendererWindowPool {
       // showOnCreate: false keeps the BrowserWindow hidden until we explicitly show it.
       // closable: false prevents the main process from destroying the window when the
       // user clicks X — the renderer handles close by releasing back to the pool.
-      await this.registerWindow(id, {
+      const ok = await this.registerWindow(id, {
         ...this.shape,
         showOnCreate: false,
         hideOnClose: true,
       });
+      if (!ok) return;
 
       if (this.isDestroyed) return;
 
@@ -209,11 +213,12 @@ export class RendererWindowPool {
     // Pool exhausted — create on the fly (slower path)
     this.debugLog("exhausted, creating on-the-fly");
     const id = generateWindowId();
-    await this.registerWindow(id, {
+    const ok = await this.registerWindow(id, {
       ...this.shape,
       showOnCreate: false,
       hideOnClose: true,
     });
+    if (!ok) throw new Error("RegisterWindow rejected by main process");
 
     const childWindow = window.open("about:blank", id, "");
     if (!childWindow) throw new Error("window.open returned null");

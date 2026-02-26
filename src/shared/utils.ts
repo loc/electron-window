@@ -109,10 +109,20 @@ export function isLinux(): boolean {
  * Check if running in development mode
  */
 export function isDev(): boolean {
-  if (typeof process === "undefined") return false;
-  return (
-    process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test"
-  );
+  // Explicit global override (set by WindowProvider devWarnings prop)
+  if (
+    typeof globalThis !== "undefined" &&
+    "__ELECTRON_WINDOW_DEV__" in globalThis
+  ) {
+    return !!(globalThis as Record<string, unknown>).__ELECTRON_WINDOW_DEV__;
+  }
+  // Webpack/Node
+  if (typeof process !== "undefined" && process.env) {
+    return (
+      process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test"
+    );
+  }
+  return false;
 }
 
 /**

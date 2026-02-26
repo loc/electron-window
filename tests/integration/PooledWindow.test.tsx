@@ -544,7 +544,7 @@ describe("<PooledWindow>", () => {
 
     const unregisterWindow = vi.fn(async () => {});
     const windowAction = vi.fn(async () => {});
-    const registerWindow = vi.fn(async () => {});
+    const registerWindow = vi.fn(async () => true);
 
     const pool = new RendererWindowPool({
       shape: { transparent: true },
@@ -706,7 +706,7 @@ describe("<PooledWindow>", () => {
     const { RendererWindowPool } =
       await import("../../src/renderer/RendererWindowPool.js");
 
-    const registerWindow = vi.fn(async () => {});
+    const registerWindow = vi.fn(async () => true);
     const unregisterWindow = vi.fn(async () => {});
     const windowAction = vi.fn(async () => {});
 

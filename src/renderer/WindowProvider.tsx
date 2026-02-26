@@ -1,9 +1,17 @@
-import { useCallback, useMemo, useRef, useEffect, type ReactNode } from "react";
+import {
+  useCallback,
+  useMemo,
+  useRef,
+  useEffect,
+  type ReactNode,
+  type ReactElement,
+} from "react";
 import {
   WindowProviderContext,
   type WindowProviderContextValue,
 } from "./context.js";
 import type { WindowId } from "../shared/types.js";
+import { devWarning } from "../shared/utils.js";
 import {
   WindowManager,
   type IWindowManagerRenderer,
@@ -15,6 +23,8 @@ export interface WindowProviderProps {
   children: ReactNode;
   /** Log all IPC calls from the renderer with stack traces. Default: false. */
   debug?: boolean;
+  /** Force-enable dev warnings. In sandboxed renderers, process.env.NODE_ENV isn't available — use this to opt in. */
+  devWarnings?: boolean;
 }
 
 /**
@@ -24,14 +34,29 @@ export interface WindowProviderProps {
 export function WindowProvider({
   children,
   debug = false,
-}: WindowProviderProps): JSX.Element {
+  devWarnings,
+}: WindowProviderProps): ReactElement {
+  if (devWarnings !== undefined) {
+    (globalThis as Record<string, unknown>).__ELECTRON_WINDOW_DEV__ =
+      devWarnings;
+  }
+
   const eventListeners = useRef<
     Map<WindowId, Set<(event: WindowEvent) => void>>
   >(new Map());
 
+  const hasWarnedAboutBridgeRef = useRef(false);
   const api = useMemo<IWindowManagerRenderer | null>(() => {
     if (typeof window !== "undefined" && WindowManager) {
       return WindowManager as IWindowManagerRenderer;
+    }
+    if (typeof window !== "undefined" && !hasWarnedAboutBridgeRef.current) {
+      hasWarnedAboutBridgeRef.current = true;
+      devWarning(
+        "@loc/electron-window preload bridge not found on window. " +
+          "Make sure your preload script imports '@loc/electron-window/preload' " +
+          "and is bundled (e.g., esbuild --format=cjs) before use.",
+      );
     }
     return null;
   }, []);
@@ -63,11 +88,13 @@ export function WindowProvider({
   };
 
   const registerWindow = useCallback(
-    async (id: WindowId, props: Record<string, unknown>) => {
+    async (id: WindowId, props: Record<string, unknown>): Promise<boolean> => {
       trace("RegisterWindow", id, props);
-      await api?.RegisterWindow?.(
-        id,
-        props as Parameters<IWindowManagerRenderer["RegisterWindow"]>[1],
+      return (
+        (await api?.RegisterWindow?.(
+          id,
+          props as Parameters<IWindowManagerRenderer["RegisterWindow"]>[1],
+        )) ?? false
       );
     },
     [api],

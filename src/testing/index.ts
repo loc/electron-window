@@ -3,7 +3,12 @@
  * @module @loc/electron-window/testing
  */
 
-import React, { useCallback, useMemo, type ReactNode } from "react";
+import React, {
+  useCallback,
+  useMemo,
+  type ReactNode,
+  type ReactElement,
+} from "react";
 import {
   WindowContext,
   WindowProviderContext,
@@ -181,9 +186,9 @@ export interface MockWindowProviderProps {
  */
 export function MockWindowProvider({
   children,
-}: MockWindowProviderProps): JSX.Element {
+}: MockWindowProviderProps): ReactElement {
   const registerWindow = useCallback(
-    async (id: WindowId, props: Record<string, unknown>) => {
+    async (id: WindowId, props: Record<string, unknown>): Promise<boolean> => {
       const state: WindowState = {
         id,
         isFocused: false,
@@ -215,6 +220,7 @@ export function MockWindowProvider({
       setTimeout(() => {
         simulateMockWindowEvent(id, { type: "ready" });
       }, 0);
+      return true;
     },
     [],
   );
@@ -395,7 +401,7 @@ export function MockWindow({
   children,
   id = "mock-window",
   state = {},
-}: MockWindowComponentProps): JSX.Element {
+}: MockWindowComponentProps): ReactElement {
   const fullState: WindowState = {
     id,
     isFocused: false,
