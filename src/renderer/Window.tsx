@@ -53,6 +53,10 @@ function extractIPCProps(
     ipcProps.alwaysOnTopLevel = ipcProps.alwaysOnTop;
     ipcProps.alwaysOnTop = true;
   }
+  // Normalize targetDisplay: IPC schema expects a string; convert numeric index.
+  if (typeof ipcProps.targetDisplay === "number") {
+    ipcProps.targetDisplay = String(ipcProps.targetDisplay);
+  }
   return ipcProps;
 }
 

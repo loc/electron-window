@@ -132,11 +132,11 @@ The `default*` / controlled split follows React's `defaultValue` / `value` patte
 
 ### Platform
 
-| Prop                   | Platform | Description                                    |
-| ---------------------- | -------- | ---------------------------------------------- |
-| `trafficLightPosition` | macOS    | `{ x, y }` for close/minimize/maximize buttons |
-| `titleBarOverlay`      | Windows  | `{ color, symbolColor, height }`               |
-| `targetDisplay`        | all      | `"primary"`, `"cursor"`, or display index      |
+| Prop                   | Platform | Description                                                                                             |
+| ---------------------- | -------- | ------------------------------------------------------------------------------------------------------- |
+| `trafficLightPosition` | macOS    | `{ x, y }` for close/minimize/maximize buttons                                                          |
+| `titleBarOverlay`      | Windows  | `{ color, symbolColor, height }`                                                                        |
+| `targetDisplay`        | all      | `"primary"`, `"cursor"`, or display index. Centers the window on that display when no explicit `x`/`y`. |
 
 ### Advanced
 
@@ -220,6 +220,7 @@ import { PooledWindow, createWindowPool } from "@loc/electron-window";
 const overlayPool = createWindowPool(
   { transparent: true, frame: false }, // shape (creation-only props)
   { minIdle: 1, maxIdle: 3, idleTimeout: 5000 }, // pool config
+  { injectStyles: "auto" }, // optional: "auto" | false | (doc) => void
 );
 
 function App() {
@@ -234,7 +235,7 @@ function App() {
 
 On `open={true}`: acquires a pre-warmed window from the pool (instant). On `open={false}`: hides and returns to pool (no destroy/recreate cost).
 
-Shape props (`transparent`, `frame`, `titleBarStyle`, `vibrancy`) are fixed by the pool. All other props can change per use.
+Shape props (`transparent`, `frame`, `titleBarStyle`, `vibrancy`) and `injectStyles` are fixed by the pool definition. All other props work per-use: `defaultWidth`/`defaultHeight` size the window on each acquire, and behavior props (`alwaysOnTop`, `opacity`, etc.) update live while open.
 
 ## Common Patterns
 

@@ -188,6 +188,12 @@ vi.mock("electron", () => ({
     })),
     getAllDisplays: vi.fn(() => []),
     getDisplayMatching: vi.fn(),
+    getDisplayNearestPoint: vi.fn(() => ({
+      id: 1,
+      bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+      workArea: { x: 0, y: 0, width: 1920, height: 1040 },
+      scaleFactor: 1,
+    })),
     getCursorScreenPoint: vi.fn(() => ({ x: 0, y: 0 })),
   },
 }));

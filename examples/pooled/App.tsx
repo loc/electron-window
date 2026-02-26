@@ -11,12 +11,12 @@ import React, { useState } from "react";
 import {
   WindowProvider,
   PooledWindow,
-  createWindowPoolDefinition,
+  createWindowPool,
   useCurrentWindow,
 } from "@loc/electron-window";
 
 // Define a pool for transparent overlay windows
-const overlayPool = createWindowPoolDefinition(
+const overlayPool = createWindowPool(
   {
     // Window shape (creation-only props)
     transparent: true,
@@ -27,7 +27,7 @@ const overlayPool = createWindowPoolDefinition(
     minIdle: 1, // Keep 1 warm window
     maxIdle: 3, // Don't keep more than 3
     idleTimeout: 5000, // Destroy idle windows after 5s
-  }
+  },
 );
 
 // Overlay content

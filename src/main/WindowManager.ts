@@ -365,8 +365,37 @@ export class WindowManager {
     const shouldCenter =
       props.center !== false && x === undefined && y === undefined;
 
-    // Default: center on the same display as the parent window
-    if (shouldCenter && parentWebContents) {
+    // Resolve targetDisplay if specified — takes precedence over parent-display centering.
+    // Values: "primary", "cursor", or a stringified display index.
+    let resolvedDisplay: Electron.Display | undefined;
+    if (shouldCenter && props.targetDisplay) {
+      try {
+        if (props.targetDisplay === "primary") {
+          resolvedDisplay = screen.getPrimaryDisplay();
+        } else if (props.targetDisplay === "cursor") {
+          resolvedDisplay = screen.getDisplayNearestPoint(
+            screen.getCursorScreenPoint(),
+          );
+        } else {
+          const idx = parseInt(props.targetDisplay, 10);
+          if (!isNaN(idx)) {
+            resolvedDisplay = screen.getAllDisplays()[idx];
+          }
+        }
+      } catch {
+        // Display resolution failed — fall through to parent-centered
+      }
+    }
+
+    if (shouldCenter && resolvedDisplay) {
+      x =
+        resolvedDisplay.workArea.x +
+        Math.round((resolvedDisplay.workArea.width - width) / 2);
+      y =
+        resolvedDisplay.workArea.y +
+        Math.round((resolvedDisplay.workArea.height - height) / 2);
+    } else if (shouldCenter && parentWebContents) {
+      // Default: center on the same display as the parent window
       try {
         const parentWin = BrowserWindow.fromWebContents(parentWebContents);
         const parentBounds = parentWin?.getBounds();

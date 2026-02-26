@@ -130,6 +130,8 @@ structure WindowProps {
     // Platform-specific
     trafficLightPosition?: TrafficLightPosition
     titleBarOverlay?: TitleBarOverlayOptions
+    // Multi-monitor: "primary" | "cursor" | stringified index
+    targetDisplay?: string
     // Advanced
     name?: string
 }

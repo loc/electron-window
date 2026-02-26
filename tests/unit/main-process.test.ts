@@ -1338,3 +1338,132 @@ describe("buildConstructorOptions — off-screen bounds validation", () => {
     expect(opts.y).toBe(200);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests: targetDisplay resolution in buildConstructorOptions
+// ---------------------------------------------------------------------------
+
+describe("buildConstructorOptions — targetDisplay", () => {
+  function setupManagerAndGetHandler() {
+    (globalThis as Record<string, unknown>).__lastImpl__ = undefined;
+    const localManager = new WindowManager({ devWarnings: false });
+    const localParent = createMockParentWindow();
+    localManager.setupForWindow(
+      localParent as unknown as import("electron").BrowserWindow,
+    );
+    const localImpl = getLastImpl();
+    const localHandler = localParent.webContents.setWindowOpenHandler.mock
+      .calls[0]?.[0] as (arg: { frameName: string; url: string }) => {
+      action: string;
+      overrideBrowserWindowOptions?: Record<string, unknown>;
+    };
+    return { localImpl, localHandler };
+  }
+
+  it('centers on primary display when targetDisplay="primary"', async () => {
+    const { screen } = await import("electron");
+    vi.mocked(screen.getPrimaryDisplay).mockReturnValue({
+      id: 1,
+      bounds: { x: 0, y: 0, width: 2560, height: 1440 },
+      workArea: { x: 0, y: 0, width: 2560, height: 1400 },
+      scaleFactor: 2,
+    } as import("electron").Display);
+
+    const { localImpl, localHandler } = setupManagerAndGetHandler();
+
+    localImpl.RegisterWindow("td-primary", {
+      defaultWidth: 600,
+      defaultHeight: 400,
+      targetDisplay: "primary",
+    } as never);
+
+    const result = localHandler({
+      frameName: "td-primary",
+      url: "about:blank",
+    });
+    const opts = result.overrideBrowserWindowOptions!;
+    // Centered on primary workArea: x = 0 + (2560-600)/2 = 980, y = 0 + (1400-400)/2 = 500
+    expect(opts.x).toBe(980);
+    expect(opts.y).toBe(500);
+    expect(opts.center).toBe(false);
+  });
+
+  it('centers on cursor display when targetDisplay="cursor"', async () => {
+    const { screen } = await import("electron");
+    vi.mocked(screen.getCursorScreenPoint).mockReturnValue({ x: 3000, y: 500 });
+    vi.mocked(screen.getDisplayNearestPoint).mockReturnValue({
+      id: 2,
+      bounds: { x: 1920, y: 0, width: 1920, height: 1080 },
+      workArea: { x: 1920, y: 0, width: 1920, height: 1040 },
+      scaleFactor: 1,
+    } as import("electron").Display);
+
+    const { localImpl, localHandler } = setupManagerAndGetHandler();
+
+    localImpl.RegisterWindow("td-cursor", {
+      defaultWidth: 400,
+      defaultHeight: 300,
+      targetDisplay: "cursor",
+    } as never);
+
+    const result = localHandler({ frameName: "td-cursor", url: "about:blank" });
+    const opts = result.overrideBrowserWindowOptions!;
+    // Centered on second display's workArea: x = 1920 + (1920-400)/2 = 2680, y = 0 + (1040-300)/2 = 370
+    expect(opts.x).toBe(2680);
+    expect(opts.y).toBe(370);
+  });
+
+  it("centers on indexed display when targetDisplay is a numeric string", async () => {
+    const { screen } = await import("electron");
+    vi.mocked(screen.getAllDisplays).mockReturnValue([
+      {
+        id: 1,
+        bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+        workArea: { x: 0, y: 0, width: 1920, height: 1040 },
+        scaleFactor: 1,
+      } as import("electron").Display,
+      {
+        id: 2,
+        bounds: { x: 1920, y: 0, width: 1280, height: 1024 },
+        workArea: { x: 1920, y: 0, width: 1280, height: 1000 },
+        scaleFactor: 1,
+      } as import("electron").Display,
+    ]);
+
+    const { localImpl, localHandler } = setupManagerAndGetHandler();
+
+    localImpl.RegisterWindow("td-index", {
+      defaultWidth: 800,
+      defaultHeight: 600,
+      targetDisplay: "1", // index into getAllDisplays — renderer stringified
+    } as never);
+
+    const result = localHandler({ frameName: "td-index", url: "about:blank" });
+    const opts = result.overrideBrowserWindowOptions!;
+    // Centered on display[1] workArea: x = 1920 + (1280-800)/2 = 2160, y = 0 + (1000-600)/2 = 200
+    expect(opts.x).toBe(2160);
+    expect(opts.y).toBe(200);
+
+    vi.mocked(screen.getAllDisplays).mockReturnValue([]); // reset
+  });
+
+  it("ignores targetDisplay when explicit x/y are provided", async () => {
+    const { localImpl, localHandler } = setupManagerAndGetHandler();
+
+    localImpl.RegisterWindow("td-explicit", {
+      defaultX: 100,
+      defaultY: 200,
+      defaultWidth: 400,
+      defaultHeight: 300,
+      targetDisplay: "primary",
+    } as never);
+
+    const result = localHandler({
+      frameName: "td-explicit",
+      url: "about:blank",
+    });
+    const opts = result.overrideBrowserWindowOptions!;
+    expect(opts.x).toBe(100);
+    expect(opts.y).toBe(200);
+  });
+});

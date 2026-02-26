@@ -238,8 +238,12 @@ export interface BaseWindowProps {
   open: boolean;
 
   /**
-   * Callback fired when the user initiates a close (e.g., clicks X button).
-   * The window closes immediately; use this to sync your state.
+   * Called when the user initiates a close (e.g., clicks the X button).
+   *
+   * This is a notification, not an interceptor — the window closes immediately
+   * and this callback fires so you can sync your `open` state back to `false`.
+   * To prevent close, set `closable={false}` proactively (e.g.,
+   * `closable={!hasUnsavedChanges}`).
    */
   onUserClose?: () => void;
 
