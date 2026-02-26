@@ -226,12 +226,17 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
       onExitFullscreen,
       onDisplayChange,
       onWindowClosedSetState: () => {
+        // The window was destroyed (possibly via BrowserWindow.destroy() from
+        // main, which does NOT fire unload). The pool's own unload listener
+        // won't run in that case, so explicitly remove from pool tracking.
+        const destroyedId = entryRef.current?.id;
         entryRef.current = null;
         childWindowRef.current = null;
         setPortalTarget(null);
         setChildDocument(null);
         setWindowId(null);
         setIsReady(false);
+        if (destroyedId) pool.notifyDestroyed(destroyedId);
         // Hook resets its own windowState internally via the 'closed' case
       },
     });
@@ -423,6 +428,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
           void pool.release(entryRef.current.id);
           entryRef.current = null;
         }
+        childWindowRef.current = null;
         // Intentionally do NOT destroy the pool — it outlives individual mounts
       };
     }, [pool]);

@@ -353,9 +353,18 @@ export class RendererWindowPool {
   }
 
   /**
-   * Remove a window from idle/active tracking when it's destroyed externally
-   * (e.g., main process shutdown, DestroyWindow IPC).
+   * Remove a window from pool tracking when it's destroyed externally.
+   *
+   * Called from:
+   * - The pool's own unload listener (when childWindow.close() fires unload)
+   * - PooledWindow's onWindowClosedSetState (when main process destroy()s the
+   *   window directly, which does NOT fire unload — so the pool's listener
+   *   never runs and the entry would leak in the active map otherwise)
    */
+  notifyDestroyed(id: string): void {
+    this.handleWindowDestroyed(id);
+  }
+
   private handleWindowDestroyed(id: string): void {
     const idleIndex = this.idle.findIndex((e) => e.id === id);
     if (idleIndex !== -1) {

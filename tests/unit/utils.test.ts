@@ -5,6 +5,10 @@ import {
   debounce,
   sleep,
 } from "../../src/shared/utils.js";
+import {
+  handleStyleInjection,
+  __getStyleSubscriberCount,
+} from "../../src/renderer/windowUtils.js";
 
 describe("createDeferred", () => {
   it("creates a promise that can be resolved externally", async () => {
@@ -121,5 +125,56 @@ describe("sleep", () => {
     expect(resolved).toBe(true);
 
     vi.useRealTimers();
+  });
+});
+
+describe("handleStyleInjection — subscriber cleanup (memory leak guard)", () => {
+  // Each call to handleStyleInjection in 'auto' mode adds a Subscriber holding
+  // a strong reference to the child window's Document. If cleanup isn't called,
+  // the Document (and transitively its Window) leaks. This test guards the fix
+  // where Window.tsx's unmount cleanup now calls styleCleanup directly rather
+  // than relying on the unload event (which BrowserWindow.destroy() skips).
+
+  function makeFakeDoc(): Document {
+    // jsdom provides a usable Document via document.implementation
+    return document.implementation.createHTMLDocument("child");
+  }
+
+  it("cleanup removes the subscriber", () => {
+    const before = __getStyleSubscriberCount();
+    const cleanup = handleStyleInjection(makeFakeDoc(), "auto");
+    expect(__getStyleSubscriberCount()).toBe(before + 1);
+
+    cleanup();
+    expect(__getStyleSubscriberCount()).toBe(before);
+  });
+
+  it("cleanup is idempotent (double-call is safe)", () => {
+    // The fix calls styleCleanup from both the unmount effect AND the unload
+    // handler — whichever fires first wins, the second is a no-op.
+    const before = __getStyleSubscriberCount();
+    const cleanup = handleStyleInjection(makeFakeDoc(), "auto");
+    cleanup();
+    cleanup(); // no-op
+    expect(__getStyleSubscriberCount()).toBe(before);
+  });
+
+  it("multiple subscribers are tracked independently", () => {
+    const before = __getStyleSubscriberCount();
+    const c1 = handleStyleInjection(makeFakeDoc(), "auto");
+    const c2 = handleStyleInjection(makeFakeDoc(), "auto");
+    expect(__getStyleSubscriberCount()).toBe(before + 2);
+    c1();
+    expect(__getStyleSubscriberCount()).toBe(before + 1);
+    c2();
+    expect(__getStyleSubscriberCount()).toBe(before);
+  });
+
+  it("mode=false does not add a subscriber", () => {
+    const before = __getStyleSubscriberCount();
+    const cleanup = handleStyleInjection(makeFakeDoc(), false);
+    expect(__getStyleSubscriberCount()).toBe(before);
+    cleanup(); // no-op
+    expect(__getStyleSubscriberCount()).toBe(before);
   });
 });

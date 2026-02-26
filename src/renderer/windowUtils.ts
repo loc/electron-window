@@ -167,3 +167,8 @@ export function handleStyleInjection(
     }
   };
 }
+
+/** @internal Test-only: returns the number of style-sync subscribers. */
+export function __getStyleSubscriberCount(): number {
+  return subscribers.size;
+}

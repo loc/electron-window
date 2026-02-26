@@ -121,6 +121,11 @@ export const Window = forwardRef<WindowRef, WindowProps>(
     const unregisteredRef = useRef(false);
 
     const childWindowRef = useRef<globalThis.Window | null>(null);
+    // Stores the style-injection cleanup returned by initWindowDocument so
+    // the unmount path can release the child Document from the shared style
+    // subscriber set. The unload handler also calls this, but
+    // BrowserWindow.destroy() (used by unregisterWindow) doesn't fire unload.
+    const styleCleanupRef = useRef<(() => void) | null>(null);
     const prevPropsRef = useRef<Omit<WindowProps, "children"> | null>(null);
     const initialShapeRef = useRef<Record<string, unknown> | null>(null);
     const persistenceRef = useRef(persistence);
@@ -252,9 +257,13 @@ export const Window = forwardRef<WindowRef, WindowProps>(
           { injectStyles, title },
         );
 
-        // 5. Handle user closing the window via OS chrome (X button)
+        // 5. Handle user closing the window via OS chrome (X button).
+        // styleCleanup is also stored in a ref so the unmount cleanup can
+        // call it — BrowserWindow.destroy() doesn't fire unload.
+        styleCleanupRef.current = styleCleanup;
         win.addEventListener("unload", () => {
           styleCleanup();
+          styleCleanupRef.current = null;
           if (!cancelled) {
             childWindowRef.current = null;
             setPortalTarget(null);
@@ -400,9 +409,15 @@ export const Window = forwardRef<WindowRef, WindowProps>(
     useEffect(() => {
       return () => {
         lifecycle.debouncedBoundsChange.current.cancel();
+        // Release the style subscriber before destroying — unregisterWindow
+        // calls BrowserWindow.destroy() which does NOT fire unload, so the
+        // unload path's styleCleanup won't run.
+        styleCleanupRef.current?.();
+        styleCleanupRef.current = null;
         if (childWindowRef.current && !childWindowRef.current.closed) {
           childWindowRef.current.close();
         }
+        childWindowRef.current = null;
         if (!unregisteredRef.current) {
           void provider.unregisterWindow(windowId);
         }
