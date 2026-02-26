@@ -422,9 +422,44 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
       };
     }, [pool]);
 
-    useImperativeHandle(ref, () => lifecycle.handle ?? NOT_READY_HANDLE, [
-      lifecycle.handle,
-    ]);
+    useImperativeHandle(ref, () => {
+      if (!isReady || !windowId) return NOT_READY_HANDLE;
+      const state = lifecycle.windowState;
+      return {
+        id: windowId,
+        isReady: true,
+        isFocused: state?.isFocused ?? false,
+        isMaximized: state?.isMaximized ?? false,
+        isMinimized: state?.isMinimized ?? false,
+        isFullscreen: state?.isFullscreen ?? false,
+        bounds: state?.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
+        focus: () => void provider.windowAction(windowId, { type: "focus" }),
+        blur: () => void provider.windowAction(windowId, { type: "blur" }),
+        minimize: () =>
+          void provider.windowAction(windowId, { type: "minimize" }),
+        maximize: () =>
+          void provider.windowAction(windowId, { type: "maximize" }),
+        unmaximize: () =>
+          void provider.windowAction(windowId, { type: "unmaximize" }),
+        toggleMaximize: () =>
+          void provider.windowAction(windowId, {
+            type: state?.isMaximized ? "unmaximize" : "maximize",
+          }),
+        close: () => void provider.windowAction(windowId, { type: "close" }),
+        forceClose: () =>
+          void provider.windowAction(windowId, { type: "forceClose" }),
+        setBounds: (bounds) =>
+          void provider.windowAction(windowId, { type: "setBounds", bounds }),
+        setTitle: (t) => {
+          if (childWindowRef.current) childWindowRef.current.document.title = t;
+          void provider.windowAction(windowId, { type: "setTitle", title: t });
+        },
+        enterFullscreen: () =>
+          void provider.windowAction(windowId, { type: "enterFullscreen" }),
+        exitFullscreen: () =>
+          void provider.windowAction(windowId, { type: "exitFullscreen" }),
+      };
+    }, [isReady, windowId, lifecycle.windowState, provider, childWindowRef]);
 
     if (!portalTarget) return null;
 

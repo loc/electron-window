@@ -542,3 +542,104 @@ describe("useWindowDisplay", () => {
     }).toThrow(/useWindowContext must be used within a Window/);
   });
 });
+
+describe("re-render isolation", () => {
+  beforeEach(() => {
+    resetMockWindows();
+    resetMockWindowsGlobal();
+    vi.clearAllMocks();
+  });
+
+  it("non-subscribing child does not re-render when boundsChanged fires", async () => {
+    let renderCount = 0;
+
+    function CountingChild() {
+      renderCount++;
+      return <div data-testid="child">child</div>;
+    }
+
+    render(
+      <MockWindowProvider>
+        <Window open>
+          <CountingChild />
+        </Window>
+      </MockWindowProvider>,
+    );
+
+    await waitFor(() => {
+      expect(getGlobalMockWindows().size).toBe(1);
+    });
+
+    const mockWindows = getMockWindows();
+    const renderCountAfterMount = renderCount;
+
+    // Fire 3 boundsChanged events
+    simulateMockWindowEvent(mockWindows[0].id, {
+      type: "boundsChanged",
+      bounds: { x: 0, y: 0, width: 1000, height: 700 },
+    });
+    simulateMockWindowEvent(mockWindows[0].id, {
+      type: "boundsChanged",
+      bounds: { x: 0, y: 0, width: 1100, height: 750 },
+    });
+    simulateMockWindowEvent(mockWindows[0].id, {
+      type: "boundsChanged",
+      bounds: { x: 0, y: 0, width: 1200, height: 800 },
+    });
+
+    // Give React time to flush any updates
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // CountingChild should not have re-rendered at all after mount
+    expect(renderCount).toBe(renderCountAfterMount);
+  });
+
+  it("useWindowBounds child re-renders exactly once per boundsChanged event", async () => {
+    let renderCount = 0;
+
+    function BoundsChild() {
+      renderCount++;
+      useWindowBounds();
+      return <div data-testid="child">child</div>;
+    }
+
+    render(
+      <MockWindowProvider>
+        <Window open>
+          <BoundsChild />
+        </Window>
+      </MockWindowProvider>,
+    );
+
+    await waitFor(() => {
+      expect(getGlobalMockWindows().size).toBe(1);
+    });
+
+    const mockWindows = getMockWindows();
+    const renderCountAfterMount = renderCount;
+
+    simulateMockWindowEvent(mockWindows[0].id, {
+      type: "boundsChanged",
+      bounds: { x: 0, y: 0, width: 1000, height: 700 },
+    });
+    await waitFor(() => {
+      expect(renderCount).toBe(renderCountAfterMount + 1);
+    });
+
+    simulateMockWindowEvent(mockWindows[0].id, {
+      type: "boundsChanged",
+      bounds: { x: 0, y: 0, width: 1100, height: 750 },
+    });
+    await waitFor(() => {
+      expect(renderCount).toBe(renderCountAfterMount + 2);
+    });
+
+    simulateMockWindowEvent(mockWindows[0].id, {
+      type: "boundsChanged",
+      bounds: { x: 0, y: 0, width: 1200, height: 800 },
+    });
+    await waitFor(() => {
+      expect(renderCount).toBe(renderCountAfterMount + 3);
+    });
+  });
+});

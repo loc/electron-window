@@ -73,7 +73,6 @@ export interface WindowLifecycleResult {
   setWindowState: React.Dispatch<React.SetStateAction<WindowState | null>>;
   displayInfo: DisplayInfo | null;
   setDisplayInfo: React.Dispatch<React.SetStateAction<DisplayInfo | null>>;
-  handle: WindowHandle | null;
   contextValue: WindowContextValue;
   debouncedBoundsChange: React.MutableRefObject<
     ReturnType<typeof debounce<(bounds: Bounds) => void>>
@@ -83,7 +82,7 @@ export interface WindowLifecycleResult {
 export function useWindowLifecycle(
   opts: WindowLifecycleOptions,
 ): WindowLifecycleResult {
-  const { windowId, isReady, provider, childWindowRef } = opts;
+  const { windowId, isReady, provider } = opts;
 
   const [windowState, setWindowState] = useState<WindowState | null>(null);
   const [displayInfo, setDisplayInfo] = useState<DisplayInfo | null>(null);
@@ -130,70 +129,75 @@ export function useWindowLifecycle(
     }, BOUNDS_CHANGE_DEBOUNCE_MS),
   );
 
+  // State subscription for useSyncExternalStore in child hooks
+  const stateListeners = useRef<Set<() => void>>(new Set());
+
+  // Refs holding latest snapshots — allows getSnapshot/getDisplaySnapshot to
+  // be stable (no deps) while still returning up-to-date values.
+  const windowStateRef = useRef<WindowState | null>(null);
+  const displayInfoRef = useRef<DisplayInfo | null>(null);
+  windowStateRef.current = windowState;
+  displayInfoRef.current = displayInfo;
+
   // Subscribe to window events — only re-subscribes when windowId/isReady/provider changes
   useEffect(() => {
     if (!isReady || !windowId) return;
 
     const unsubscribe = provider.subscribeToEvents(windowId, (event) => {
+      // Helper: apply a patch to windowStateRef and schedule the React state
+      // update. We update the ref first so that getSnapshot() returns the new
+      // value synchronously when we notify useSyncExternalStore listeners below.
+      function patchState(patch: Partial<WindowState>): void {
+        if (windowStateRef.current) {
+          windowStateRef.current = { ...windowStateRef.current, ...patch };
+        }
+        setWindowState((prev) => (prev ? { ...prev, ...patch } : prev));
+      }
+
       switch (event.type) {
         case "focused":
-          setWindowState((prev) =>
-            prev ? { ...prev, isFocused: true } : prev,
-          );
+          patchState({ isFocused: true });
           onFocusRef.current?.();
           break;
         case "blurred":
-          setWindowState((prev) =>
-            prev ? { ...prev, isFocused: false } : prev,
-          );
+          patchState({ isFocused: false });
           onBlurRef.current?.();
           break;
         case "maximized":
-          setWindowState((prev) =>
-            prev ? { ...prev, isMaximized: true } : prev,
-          );
+          patchState({ isMaximized: true });
           onMaximizeRef.current?.();
           break;
         case "unmaximized":
-          setWindowState((prev) =>
-            prev ? { ...prev, isMaximized: false } : prev,
-          );
+          patchState({ isMaximized: false });
           onUnmaximizeRef.current?.();
           break;
         case "minimized":
-          setWindowState((prev) =>
-            prev ? { ...prev, isMinimized: true } : prev,
-          );
+          patchState({ isMinimized: true });
           onMinimizeRef.current?.();
           break;
         case "restored":
-          setWindowState((prev) =>
-            prev ? { ...prev, isMinimized: false } : prev,
-          );
+          patchState({ isMinimized: false });
           onRestoreRef.current?.();
           break;
         case "enterFullscreen":
-          setWindowState((prev) =>
-            prev ? { ...prev, isFullscreen: true } : prev,
-          );
+          patchState({ isFullscreen: true });
           onEnterFullscreenRef.current?.();
           break;
         case "leaveFullscreen":
-          setWindowState((prev) =>
-            prev ? { ...prev, isFullscreen: false } : prev,
-          );
+          patchState({ isFullscreen: false });
           onExitFullscreenRef.current?.();
           break;
         case "boundsChanged":
           if (event.bounds) {
             const bounds = event.bounds as Bounds;
-            setWindowState((prev) => (prev ? { ...prev, bounds } : prev));
+            patchState({ bounds });
             debouncedBoundsChange.current(bounds);
           }
           break;
         case "displayChanged":
           if (event.display) {
             const display = event.display as DisplayInfo;
+            displayInfoRef.current = display;
             setDisplayInfo(display);
             onDisplayChangeRef.current?.(display);
           }
@@ -202,58 +206,23 @@ export function useWindowLifecycle(
           onUserCloseRef.current?.();
           break;
         case "closed":
+          windowStateRef.current = null;
           setWindowState(null);
           onWindowClosedSetStateRef.current?.();
           onCloseRef.current?.();
           break;
       }
+
+      // Notify useSyncExternalStore subscribers synchronously. The refs are
+      // already updated above, so getSnapshot() returns the new value here,
+      // before React has committed the corresponding setState.
+      for (const listener of stateListeners.current) {
+        listener();
+      }
     });
 
     return unsubscribe;
   }, [isReady, windowId, provider]);
-
-  // Handle for imperative access
-  const handle = useMemo<WindowHandle | null>(() => {
-    if (!isReady || !windowId) return null;
-
-    return {
-      id: windowId,
-      isReady: true,
-      isFocused: windowState?.isFocused ?? false,
-      isMaximized: windowState?.isMaximized ?? false,
-      isMinimized: windowState?.isMinimized ?? false,
-      isFullscreen: windowState?.isFullscreen ?? false,
-      bounds: windowState?.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
-      focus: () => void provider.windowAction(windowId, { type: "focus" }),
-      blur: () => void provider.windowAction(windowId, { type: "blur" }),
-      minimize: () =>
-        void provider.windowAction(windowId, { type: "minimize" }),
-      maximize: () =>
-        void provider.windowAction(windowId, { type: "maximize" }),
-      unmaximize: () =>
-        void provider.windowAction(windowId, { type: "unmaximize" }),
-      toggleMaximize: () =>
-        void provider.windowAction(windowId, {
-          type: windowState?.isMaximized ? "unmaximize" : "maximize",
-        }),
-      close: () => void provider.windowAction(windowId, { type: "close" }),
-      forceClose: () =>
-        void provider.windowAction(windowId, { type: "forceClose" }),
-      setBounds: (bounds) =>
-        void provider.windowAction(windowId, { type: "setBounds", bounds }),
-      setTitle: (t) => {
-        if (childWindowRef?.current) childWindowRef.current.document.title = t;
-        void provider.windowAction(windowId, { type: "setTitle", title: t });
-      },
-      enterFullscreen: () =>
-        void provider.windowAction(windowId, { type: "enterFullscreen" }),
-      exitFullscreen: () =>
-        void provider.windowAction(windowId, { type: "exitFullscreen" }),
-    };
-  }, [windowId, isReady, windowState, provider, childWindowRef]);
-
-  // State subscription for useSyncExternalStore in child hooks
-  const stateListeners = useRef<Set<() => void>>(new Set());
 
   const subscribe = useCallback((listener: () => void) => {
     stateListeners.current.add(listener);
@@ -262,37 +231,22 @@ export function useWindowLifecycle(
     };
   }, []);
 
-  const getSnapshot = useCallback(() => windowState, [windowState]);
-  const getDisplaySnapshot = useCallback(() => displayInfo, [displayInfo]);
+  // Stable snapshots — read from refs, no deps needed
+  const getSnapshot = useCallback(() => windowStateRef.current, []);
+  const getDisplaySnapshot = useCallback(() => displayInfoRef.current, []);
 
-  // Notify useSyncExternalStore subscribers on state change
-  useEffect(() => {
-    for (const listener of stateListeners.current) {
-      listener();
-    }
-  }, [windowState, displayInfo]);
-
+  // contextValue is stable as long as windowId, subscribe, and document don't change.
+  // State is no longer in the value, so boundsChanged / focus events don't
+  // cause a new context object and don't force all portal children to re-render.
   const contextValue = useMemo<WindowContextValue>(
     () => ({
       windowId,
-      state: windowState,
-      display: displayInfo,
-      handle,
       subscribe,
       getSnapshot,
       getDisplaySnapshot,
       document: opts.childDocument ?? null,
     }),
-    [
-      windowId,
-      windowState,
-      displayInfo,
-      handle,
-      subscribe,
-      getSnapshot,
-      getDisplaySnapshot,
-      opts.childDocument,
-    ],
+    [windowId, subscribe, getSnapshot, getDisplaySnapshot, opts.childDocument],
   );
 
   return {
@@ -300,7 +254,6 @@ export function useWindowLifecycle(
     setWindowState,
     displayInfo,
     setDisplayInfo,
-    handle,
     contextValue,
     debouncedBoundsChange,
   };

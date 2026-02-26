@@ -1,26 +1,17 @@
 import { createContext, useContext } from "react";
-import type {
-  WindowId,
-  WindowState,
-  WindowHandle,
-  DisplayInfo,
-} from "../shared/types.js";
+import type { WindowId, WindowState, DisplayInfo } from "../shared/types.js";
 
 /**
- * Internal window context value
+ * Internal window context value.
+ *
+ * State is intentionally omitted — consumers use useSyncExternalStore via
+ * subscribe/getSnapshot to opt in to re-renders only when they care about
+ * a specific piece of state. This prevents all portal children from re-rendering
+ * on every window state change.
  */
 export interface WindowContextValue {
   /** Current window ID */
   windowId: WindowId | null;
-
-  /** Current window state */
-  state: WindowState | null;
-
-  /** Current display info */
-  display: DisplayInfo | null;
-
-  /** Window handle for imperative access */
-  handle: WindowHandle | null;
 
   /** Subscribe to state changes */
   subscribe: (listener: () => void) => () => void;

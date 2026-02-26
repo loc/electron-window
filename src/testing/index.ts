@@ -13,7 +13,6 @@ import {
 import type {
   WindowId,
   WindowState,
-  WindowHandle,
   Bounds,
   DisplayInfo,
   WindowEvent,
@@ -409,33 +408,8 @@ export function MockWindow({
     ...state,
   };
 
-  const handle: WindowHandle = {
-    id,
-    isReady: true,
-    isFocused: fullState.isFocused,
-    isMaximized: fullState.isMaximized,
-    isMinimized: fullState.isMinimized,
-    isFullscreen: fullState.isFullscreen,
-    bounds: fullState.bounds,
-    focus: () => {},
-    blur: () => {},
-    minimize: () => {},
-    maximize: () => {},
-    unmaximize: () => {},
-    toggleMaximize: () => {},
-    close: () => {},
-    forceClose: () => {},
-    setBounds: () => {},
-    setTitle: () => {},
-    enterFullscreen: () => {},
-    exitFullscreen: () => {},
-  };
-
   const contextValue: WindowContextValue = {
     windowId: id,
-    state: fullState,
-    display: null,
-    handle,
     subscribe: (_listener) => () => {},
     getSnapshot: () => fullState,
     getDisplaySnapshot: () => null,
