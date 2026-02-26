@@ -10,7 +10,6 @@ export {
 } from "./WindowManager.js";
 export type {
   WindowManagerConfig,
-  SecurityValidator,
   SetupOptions,
   WindowOpenHandlerResult,
 } from "./WindowManager.js";

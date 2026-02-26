@@ -42,7 +42,7 @@ export function createDeferred<T>(): Deferred<T> {
  * Generate a unique window ID
  */
 export function generateWindowId(): string {
-  return `win_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  return `win_${crypto.randomUUID()}`;
 }
 
 /**

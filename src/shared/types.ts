@@ -600,6 +600,3 @@ export interface WindowPoolConfig {
   /** Time in ms before destroying idle windows */
   idleTimeout?: number;
 }
-
-// WindowManagerConfig is defined in src/main/WindowManager.ts
-// It includes all security options (allowedOrigins, allowIframes, validator)

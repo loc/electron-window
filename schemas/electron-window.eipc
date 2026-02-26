@@ -38,6 +38,26 @@ enum TitleBarStyle {
     CustomButtonsOnHover = "customButtonsOnHover"
 }
 
+enum Vibrancy {
+    AppearanceBased = "appearance-based"
+    Light = "light"
+    Dark = "dark"
+    Titlebar = "titlebar"
+    Selection = "selection"
+    Menu = "menu"
+    Popover = "popover"
+    Sidebar = "sidebar"
+    Header = "header"
+    Sheet = "sheet"
+    Window = "window"
+    Hud = "hud"
+    FullscreenUi = "fullscreen-ui"
+    Tooltip = "tooltip"
+    Content = "content"
+    UnderWindow = "under-window"
+    UnderPage = "under-page"
+}
+
 // Structures
 structure Bounds {
     x: number
@@ -103,8 +123,8 @@ structure WindowProps {
     title?: string
     transparent?: boolean
     frame?: boolean
-    titleBarStyle?: string
-    vibrancy?: string
+    titleBarStyle?: TitleBarStyle
+    vibrancy?: Vibrancy
     backgroundColor?: string
     opacity?: number
     // Behavior

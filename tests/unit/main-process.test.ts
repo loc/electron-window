@@ -234,14 +234,13 @@ describe("filterAllowedProps (via WindowManager IPC implementation)", () => {
     };
 
     expect(result.action).toBe("allow");
-    // The overrideBrowserWindowOptions must not carry renderer-supplied webPreferences
+    // The overrideBrowserWindowOptions must not carry renderer-supplied webPreferences.
+    // nodeIntegration is enforced to false (security floor), not left as renderer-supplied true.
     const opts = result.overrideBrowserWindowOptions!;
     expect(opts.webPreferences).toBeDefined();
-    // Should only contain defaults (from config.defaultWindowOptions.webPreferences)
-    // but never renderer-supplied values like nodeIntegration
     expect(
       (opts.webPreferences as Record<string, unknown>)?.nodeIntegration,
-    ).toBeUndefined();
+    ).toBe(false);
     expect(
       (opts.webPreferences as Record<string, unknown>)?.preload,
     ).toBeUndefined();
@@ -380,135 +379,76 @@ describe("filterAllowedProps (via WindowManager IPC implementation)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tests: WindowManager.validateFrame
+// Tests: WindowManager webPreferences security floor
 // ---------------------------------------------------------------------------
 
-describe("WindowManager validateFrame", () => {
+describe("WindowManager webPreferences security floor", () => {
   beforeEach(() => {
     (globalThis as Record<string, unknown>).__lastImpl__ = undefined;
   });
 
-  it("rejects iframe calls by default", () => {
+  it("enforces nodeIntegration: false and contextIsolation: true even when defaultWindowOptions is empty", () => {
     const manager = new WindowManager({ devWarnings: false });
     const parent = createMockParentWindow();
-
-    // Make mainFrame look like an iframe (frame !== frame.top)
-    const topFrame = { url: "app://main" };
-    parent.webContents.mainFrame = {
-      url: "app://main/iframe",
-      top: topFrame as unknown,
-      parent: topFrame as unknown,
-    };
-
     manager.setupForWindow(
       parent as unknown as import("electron").BrowserWindow,
     );
     const impl = getLastImpl();
 
-    // RegisterWindow should return false when the frame is rejected
-    const result = impl.RegisterWindow("iframe-win", { width: 800 } as never);
-    expect(result).toBe(false);
+    impl.RegisterWindow("sec-floor-win", { width: 800 } as never);
+
+    const handler = parent.webContents.setWindowOpenHandler.mock
+      .calls[0]?.[0] as (arg: { frameName: string; url: string }) => unknown;
+
+    const result = handler({
+      frameName: "sec-floor-win",
+      url: "about:blank",
+    }) as {
+      action: string;
+      overrideBrowserWindowOptions?: {
+        webPreferences?: Record<string, unknown>;
+      };
+    };
+
+    expect(result.action).toBe("allow");
+    const wp = result.overrideBrowserWindowOptions?.webPreferences;
+    expect(wp).toBeDefined();
+    expect(wp?.nodeIntegration).toBe(false);
+    expect(wp?.contextIsolation).toBe(true);
+    expect(wp?.sandbox).toBe(true);
   });
 
-  it("allows iframe calls when allowIframes: true", () => {
+  it("respects explicit sandbox: false from defaultWindowOptions", () => {
     const manager = new WindowManager({
       devWarnings: false,
-      allowIframes: true,
+      defaultWindowOptions: { webPreferences: { sandbox: false } },
     });
     const parent = createMockParentWindow();
+    manager.setupForWindow(
+      parent as unknown as import("electron").BrowserWindow,
+    );
+    const impl = getLastImpl();
 
-    const topFrame = { url: "app://main" };
-    parent.webContents.mainFrame = {
-      url: "app://main/iframe",
-      top: topFrame as unknown,
-      parent: topFrame as unknown,
+    impl.RegisterWindow("sandbox-win", {} as never);
+
+    const handler = parent.webContents.setWindowOpenHandler.mock
+      .calls[0]?.[0] as (arg: { frameName: string; url: string }) => unknown;
+
+    const result = handler({
+      frameName: "sandbox-win",
+      url: "about:blank",
+    }) as {
+      action: string;
+      overrideBrowserWindowOptions?: {
+        webPreferences?: Record<string, unknown>;
+      };
     };
 
-    manager.setupForWindow(
-      parent as unknown as import("electron").BrowserWindow,
-    );
-    const impl = getLastImpl();
-
-    const result = impl.RegisterWindow("iframe-win", { width: 800 } as never);
-    expect(result).toBe(true);
-  });
-
-  it("rejects calls from disallowed origins", () => {
-    const manager = new WindowManager({
-      devWarnings: false,
-      allowedOrigins: ["app://allowed"],
-    });
-    const parent = createMockParentWindow();
-    parent.webContents.mainFrame = {
-      url: "app://evil.com/page",
-      top: null as unknown,
-      parent: null as unknown,
-    };
-
-    manager.setupForWindow(
-      parent as unknown as import("electron").BrowserWindow,
-    );
-    const impl = getLastImpl();
-
-    const result = impl.RegisterWindow("evil-win", { width: 800 } as never);
-    expect(result).toBe(false);
-  });
-
-  it("allows calls from explicitly allowed origins", () => {
-    const manager = new WindowManager({
-      devWarnings: false,
-      allowedOrigins: ["app://allowed"],
-    });
-    const parent = createMockParentWindow();
-    parent.webContents.mainFrame = {
-      url: "app://allowed/page",
-      top: null as unknown,
-      parent: null as unknown,
-    };
-
-    manager.setupForWindow(
-      parent as unknown as import("electron").BrowserWindow,
-    );
-    const impl = getLastImpl();
-
-    const result = impl.RegisterWindow("valid-win", { width: 800 } as never);
-    expect(result).toBe(true);
-  });
-
-  it("allows all origins with wildcard", () => {
-    const manager = new WindowManager({
-      devWarnings: false,
-      allowedOrigins: ["*"],
-    });
-    const parent = createMockParentWindow();
-    parent.webContents.mainFrame = {
-      url: "https://any-origin.com/page",
-      top: null as unknown,
-      parent: null as unknown,
-    };
-
-    manager.setupForWindow(
-      parent as unknown as import("electron").BrowserWindow,
-    );
-    const impl = getLastImpl();
-
-    const result = impl.RegisterWindow("wildcard-win", { width: 800 } as never);
-    expect(result).toBe(true);
-  });
-
-  it("uses custom validator when provided", () => {
-    const validator = vi.fn(() => false);
-    const manager = new WindowManager({ devWarnings: false, validator });
-    const parent = createMockParentWindow();
-
-    manager.setupForWindow(
-      parent as unknown as import("electron").BrowserWindow,
-    );
-    const impl = getLastImpl();
-
-    const result = impl.RegisterWindow("custom-win", { width: 800 } as never);
-    expect(result).toBe(false);
-    expect(validator).toHaveBeenCalled();
+    expect(result.action).toBe("allow");
+    const wp = result.overrideBrowserWindowOptions?.webPreferences;
+    expect(wp?.sandbox).toBe(false);
+    expect(wp?.nodeIntegration).toBe(false);
+    expect(wp?.contextIsolation).toBe(true);
   });
 });
 

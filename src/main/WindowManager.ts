@@ -74,8 +74,6 @@ function filterAllowedProps(
   return filtered as IPCWindowProps;
 }
 
-export type SecurityValidator = (frame: Electron.WebFrameMain) => boolean;
-
 export interface WindowManagerConfig {
   /** Default options applied to all windows. Can be a function for dynamic values (e.g., theme-aware backgroundColor). */
   defaultWindowOptions?:
@@ -84,24 +82,6 @@ export interface WindowManagerConfig {
 
   /** Enable development warnings */
   devWarnings?: boolean;
-
-  /**
-   * Allowed origins for IPC calls.
-   * Use ['*'] to allow all origins (not recommended).
-   */
-  allowedOrigins?: string[];
-
-  /**
-   * Allow IPC calls from iframes.
-   * Default: false (only main frame may make IPC calls)
-   */
-  allowIframes?: boolean;
-
-  /**
-   * Custom security validator. Overrides allowedOrigins and allowIframes.
-   * Return true to allow, false to reject.
-   */
-  validator?: SecurityValidator;
 
   /** Maximum pending window registrations. Default: 100. */
   maxPendingWindows?: number;
@@ -118,9 +98,6 @@ interface ResolvedConfig {
     | Partial<Electron.BrowserWindowConstructorOptions>
     | (() => Partial<Electron.BrowserWindowConstructorOptions>);
   devWarnings: boolean;
-  allowedOrigins: string[] | undefined;
-  allowIframes: boolean;
-  validator: SecurityValidator | undefined;
   maxPendingWindows: number;
   maxWindows: number;
   debug: boolean;
@@ -130,20 +107,23 @@ interface ResolvedConfig {
  * Main process window manager.
  * Renderer calls RegisterWindow(id, props) + window.open(url, id), then this class
  * intercepts the new window via setWindowOpenHandler / did-create-window and wraps it.
+ *
+ * Origin and frame validation (main-frame-only enforcement) is handled by the
+ * EIPC-generated `AppOrigin` validator in the schema — it runs before these handlers
+ * and rejects calls from iframes or unexpected origins at the IPC layer.
  */
 export class WindowManager {
   private readonly windows: Map<WindowId, WindowInstance> = new Map();
-  private readonly pendingWindows: Map<WindowId, { props: IPCWindowProps }> =
-    new Map();
+  private readonly pendingWindows: Map<
+    WindowId,
+    { props: IPCWindowProps; createdAt: number }
+  > = new Map();
   private readonly config: ResolvedConfig;
 
   constructor(config: WindowManagerConfig = {}) {
     this.config = {
       defaultWindowOptions: config.defaultWindowOptions ?? (() => ({})),
       devWarnings: config.devWarnings ?? process.env.NODE_ENV === "development",
-      allowedOrigins: config.allowedOrigins,
-      allowIframes: config.allowIframes ?? false,
-      validator: config.validator,
       maxPendingWindows: config.maxPendingWindows ?? 100,
       maxWindows: config.maxWindows ?? 50,
       debug: config.debug ?? false,
@@ -165,61 +145,6 @@ export class WindowManager {
     return typeof this.config.defaultWindowOptions === "function"
       ? this.config.defaultWindowOptions()
       : this.config.defaultWindowOptions;
-  }
-
-  private validateFrame(frame: Electron.WebFrameMain): boolean {
-    if (this.config.validator) {
-      return this.config.validator(frame);
-    }
-
-    if (!this.config.allowIframes) {
-      if (frame.top && frame !== frame.top) {
-        if (this.config.devWarnings) {
-          devWarning(
-            "IPC call from iframe rejected. Set allowIframes: true to allow.",
-          );
-        }
-        return false;
-      }
-    }
-
-    if (this.config.allowedOrigins) {
-      if (this.config.allowedOrigins.includes("*")) {
-        return true;
-      }
-
-      const frameUrl = frame.url;
-      try {
-        const parsedOrigin = new URL(frameUrl).origin;
-        // For non-standard protocols (file://, app://), origin is "null".
-        // Fall back to protocol + host matching for these cases.
-        const origin =
-          parsedOrigin !== "null"
-            ? parsedOrigin
-            : new URL(frameUrl).protocol + "//" + new URL(frameUrl).host;
-        const allowed = this.config.allowedOrigins.some(
-          (allowedOrigin) => origin === allowedOrigin,
-        );
-
-        if (!allowed && this.config.devWarnings) {
-          devWarning(
-            `IPC call from origin "${origin}" rejected. Add to allowedOrigins to allow.`,
-          );
-        }
-
-        return allowed;
-      } catch {
-        return false;
-      }
-    }
-
-    if (this.config.devWarnings) {
-      devWarning(
-        `IPC call from "${frame.url}" allowed by default. Set allowedOrigins in WindowManagerConfig for stricter security.`,
-      );
-    }
-
-    return true;
   }
 
   /**
@@ -285,6 +210,9 @@ export class WindowManager {
             ...constructorOptions,
             webPreferences: {
               ...defaultWindowOptions.webPreferences,
+              nodeIntegration: false,
+              contextIsolation: true,
+              sandbox: defaultWindowOptions.webPreferences?.sandbox ?? true,
             },
             show: false,
           },
@@ -453,146 +381,131 @@ export class WindowManager {
     ) as Partial<Electron.BrowserWindowConstructorOptions>;
   }
 
-  private createImplementation(sender: WebContents): IWindowManagerImpl {
-    const getFrame = () => sender.mainFrame;
-
-    const withValidation = <T>(
-      fn: () => T | Promise<T>,
-      fallback: T,
-    ): T | Promise<T> => {
-      if (!this.validateFrame(getFrame())) {
-        return fallback;
-      }
-      return fn();
-    };
-
+  private createImplementation(_sender: WebContents): IWindowManagerImpl {
     return {
       RegisterWindow: (id: WindowId, props: IPCWindowProps) => {
         this.debugLog("←", "RegisterWindow", id, props);
-        return withValidation(() => {
-          if (this.pendingWindows.size >= this.config.maxPendingWindows) {
-            if (this.config.devWarnings) {
-              devWarning(
-                "Maximum pending windows reached. Registration rejected.",
-              );
-            }
-            return false;
+        const now = Date.now();
+        for (const [entryId, entry] of this.pendingWindows) {
+          if (now - entry.createdAt > 10_000) {
+            this.pendingWindows.delete(entryId);
           }
-          if (this.windows.size >= this.config.maxWindows) {
-            if (this.config.devWarnings) {
-              devWarning(
-                "Maximum active windows reached. Registration rejected.",
-              );
-            }
-            return false;
+        }
+        if (this.pendingWindows.size >= this.config.maxPendingWindows) {
+          if (this.config.devWarnings) {
+            devWarning(
+              "Maximum pending windows reached. Registration rejected.",
+            );
           }
-          const filteredProps = filterAllowedProps(
-            props,
-            this.config.devWarnings,
-          );
-          this.pendingWindows.set(id, { props: filteredProps });
-          return true;
-        }, false);
+          return false;
+        }
+        if (this.windows.size >= this.config.maxWindows) {
+          if (this.config.devWarnings) {
+            devWarning(
+              "Maximum active windows reached. Registration rejected.",
+            );
+          }
+          return false;
+        }
+        const filteredProps = filterAllowedProps(
+          props,
+          this.config.devWarnings,
+        );
+        this.pendingWindows.set(id, {
+          props: filteredProps,
+          createdAt: Date.now(),
+        });
+        return true;
       },
 
       UnregisterWindow: (id: WindowId) => {
         this.debugLog("←", "UnregisterWindow", id);
-        return withValidation(() => {
-          this.pendingWindows.delete(id);
-          const instance = this.windows.get(id);
-          if (instance) {
-            instance.destroy();
-            this.windows.delete(id);
-          }
-          return true;
-        }, false);
+        this.pendingWindows.delete(id);
+        const instance = this.windows.get(id);
+        if (instance) {
+          instance.destroy();
+          this.windows.delete(id);
+        }
+        return true;
       },
 
       UpdateWindow: (id: WindowId, props: IPCWindowProps) => {
         this.debugLog("←", "UpdateWindow", id, props);
-        return withValidation(() => {
-          const instance = this.windows.get(id);
-          if (!instance) return false;
-          const filteredProps = filterAllowedProps(
-            props,
-            this.config.devWarnings,
-          );
-          instance.updateProps(
-            filteredProps as unknown as Parameters<
-              typeof instance.updateProps
-            >[0],
-          );
-          return true;
-        }, false);
+        const instance = this.windows.get(id);
+        if (!instance) return false;
+        const filteredProps = filterAllowedProps(
+          props,
+          this.config.devWarnings,
+        );
+        instance.updateProps(
+          filteredProps as unknown as Parameters<
+            typeof instance.updateProps
+          >[0],
+        );
+        return true;
       },
 
       DestroyWindow: (id: WindowId) => {
         this.debugLog("←", "DestroyWindow", id);
-        return withValidation(() => {
-          const instance = this.windows.get(id);
-          if (!instance) return false;
-          instance.destroy();
-          this.windows.delete(id);
-          return true;
-        }, false);
+        const instance = this.windows.get(id);
+        if (!instance) return false;
+        instance.destroy();
+        this.windows.delete(id);
+        return true;
       },
 
       WindowAction: (id: WindowId, action: IPCWindowAction) => {
         this.debugLog("←", "WindowAction", id, action);
-        return withValidation(() => {
-          const instance = this.windows.get(id);
-          if (!instance) return false;
+        const instance = this.windows.get(id);
+        if (!instance) return false;
 
-          switch (action.type) {
-            case "focus":
-              instance.focus();
-              break;
-            case "blur":
-              instance.blur();
-              break;
-            case "minimize":
-              instance.minimize();
-              break;
-            case "maximize":
-              instance.maximize();
-              break;
-            case "unmaximize":
-              instance.unmaximize();
-              break;
-            case "close":
-              instance.close();
-              break;
-            case "forceClose":
-              instance.forceClose();
-              break;
-            case "setBounds":
-              if (action.bounds) instance.setBounds(action.bounds);
-              break;
-            case "setTitle":
-              if (action.title !== undefined) instance.setTitle(action.title);
-              break;
-            case "enterFullscreen":
-              instance.enterFullscreen();
-              break;
-            case "exitFullscreen":
-              instance.exitFullscreen();
-              break;
-            case "show":
-              instance.show();
-              break;
-            case "hide":
-              instance.hide();
-              break;
-          }
-          return true;
-        }, false);
+        switch (action.type) {
+          case "focus":
+            instance.focus();
+            break;
+          case "blur":
+            instance.blur();
+            break;
+          case "minimize":
+            instance.minimize();
+            break;
+          case "maximize":
+            instance.maximize();
+            break;
+          case "unmaximize":
+            instance.unmaximize();
+            break;
+          case "close":
+            instance.close();
+            break;
+          case "forceClose":
+            instance.forceClose();
+            break;
+          case "setBounds":
+            if (action.bounds) instance.setBounds(action.bounds);
+            break;
+          case "setTitle":
+            if (action.title !== undefined) instance.setTitle(action.title);
+            break;
+          case "enterFullscreen":
+            instance.enterFullscreen();
+            break;
+          case "exitFullscreen":
+            instance.exitFullscreen();
+            break;
+          case "show":
+            instance.show();
+            break;
+          case "hide":
+            instance.hide();
+            break;
+        }
+        return true;
       },
 
       GetWindowState: (id: WindowId) => {
         this.debugLog("←", "GetWindowState", id);
-        return withValidation(() => {
-          return this.windows.get(id)?.getState() ?? null;
-        }, null);
+        return this.windows.get(id)?.getState() ?? null;
       },
     };
   }
