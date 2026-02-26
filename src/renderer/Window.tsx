@@ -220,10 +220,14 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         ipcProps.showOnCreate = false;
         const registered = await provider.registerWindow(windowId, ipcProps);
         if (!registered) {
-          devWarning(
-            `${name ? `[${name}] ` : ""}RegisterWindow rejected by main process — ` +
-              `likely hit maxWindows (50) or maxPendingWindows (100) limit.`,
-          );
+          // If the bridge is missing, the provider already warned — don't
+          // pile on with a misleading "maxWindows" message.
+          if (provider.hasBridge) {
+            devWarning(
+              `${name ? `[${name}] ` : ""}RegisterWindow rejected by main process — ` +
+                `likely hit maxWindows (50) or maxPendingWindows (100) limit.`,
+            );
+          }
           return;
         }
         if (cancelled) return;

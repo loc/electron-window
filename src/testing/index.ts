@@ -354,6 +354,7 @@ export function MockWindowProvider({
 
   const contextValue = useMemo<WindowProviderContextValue>(
     () => ({
+      hasBridge: true,
       registerWindow,
       unregisterWindow,
       updateWindow,

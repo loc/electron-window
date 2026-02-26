@@ -51,7 +51,7 @@ Changing these after pool creation has no effect — recreate the pool instead.
 | ------------- | -------- | ------- | ---------------------------------------------------- |
 | `minIdle`     | `number` | `1`     | Minimum windows to keep warm in the pool             |
 | `maxIdle`     | `number` | `3`     | Maximum idle windows to retain                       |
-| `idleTimeout` | `number` | `5000`  | Milliseconds before excess idle windows are destroyed |
+| `idleTimeout` | `number` | `30000` | Milliseconds before excess idle windows are destroyed |
 
 ### Style injection (`options.injectStyles`)
 
@@ -71,11 +71,17 @@ const overlayPool = createWindowPool(
 
 ## `<PooledWindow>` Props
 
-`PooledWindow` accepts all the same props as `<Window>` except creation-only shape props (those are fixed by the pool). All other props — `alwaysOnTop`, `title`, event handlers, etc. — can vary per use.
+`PooledWindow` accepts most `<Window>` props except creation-only shape props (those are fixed by the pool). Behavior props — `alwaysOnTop`, `title`, event handlers, etc. — can vary per use and update live while open.
+
+**Not applicable to pooled windows:**
+- Shape props (`transparent`, `frame`, `titleBarStyle`, `vibrancy`) — fixed by the pool definition
+- `targetDisplay` — pool windows are pre-created; this only affects placement at creation time
+- `persistBounds` — pool windows are reused; per-key persistence doesn't fit the model
+- `recreateOnShapeChange` — pool shape is immutable
 
 | Prop   | Type         | Description                     |
 | ------ | ------------ | ------------------------------- |
 | `pool` | `WindowPoolDefinition` | Pool created by `createWindowPool` |
 | `open` | `boolean`    | Acquire or release from pool    |
 
-All other [`<Window>` props](/electron-window/guides/props/) are supported except the shape props set on the pool.
+All other [`<Window>` props](/electron-window/guides/props/) are supported.

@@ -330,6 +330,13 @@ export class WindowManager {
         // Don't destroy it.
         return;
       }
+      // Defense-in-depth: setWindowOpenHandler already verified ownership
+      // before allowing the window, and did-create-window is scoped to this
+      // WebContents. But re-verify here in case future refactors weaken the
+      // outer gates.
+      if (pending.ownerWebContentsId !== webContents.id) {
+        return;
+      }
 
       this.pendingWindows.delete(windowId);
 
@@ -521,6 +528,13 @@ export class WindowManager {
               "Maximum active windows reached. Registration rejected.",
             );
           }
+          return false;
+        }
+        // Defense-in-depth: reject if this ID is already pending for a
+        // different owner. Crypto-random IDs make collision infeasible, but
+        // this closes any overwrite-via-known-ID vector.
+        const existing = this.pendingWindows.get(id);
+        if (existing && existing.ownerWebContentsId !== senderId) {
           return false;
         }
         const filteredProps = filterAllowedProps(

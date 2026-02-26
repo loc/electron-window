@@ -39,10 +39,30 @@ export function createDeferred<T>(): Deferred<T> {
 }
 
 /**
- * Generate a unique window ID
+ * Generate a cryptographically-random window ID. The ownership model in
+ * WindowManager relies on ID unpredictability (a renderer that guesses
+ * another's window ID could otherwise attempt cross-owner operations).
+ *
+ * `crypto.randomUUID()` is secure-context-only in browsers — fine for
+ * file://, app://, https://, and http://localhost (all secure contexts).
+ * For http://<remote> renderers (rare), fall back to `crypto.getRandomValues`
+ * which is NOT secure-context-gated. Both are on the Web Crypto API.
  */
 export function generateWindowId(): string {
-  return `win_${crypto.randomUUID()}`;
+  if (typeof crypto?.randomUUID === "function") {
+    return `win_${crypto.randomUUID()}`;
+  }
+  if (typeof crypto?.getRandomValues === "function") {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    return `win_${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+  }
+  // Never falls back to Math.random() — that would silently weaken the
+  // ownership guarantee in exactly the (rare) case where a remote origin
+  // is involved. Fail loudly instead.
+  throw new Error(
+    "@loc/electron-window requires the Web Crypto API. " +
+      "Load your renderer from file://, a custom registered protocol, https://, or http://localhost.",
+  );
 }
 
 /**

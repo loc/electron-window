@@ -38,6 +38,14 @@ export const WindowContext = createContext<WindowContextValue | null>(null);
  * Context for the root WindowProvider
  */
 export interface WindowProviderContextValue {
+  /**
+   * Whether the preload bridge is present (globalThis.electron_window exists).
+   * When false, all IPC calls no-op and return their fallbacks. Callers can
+   * check this to avoid emitting misleading "rejected by main" warnings —
+   * the provider already warned about the missing preload.
+   */
+  hasBridge: boolean;
+
   /** Pre-register props with main process before calling window.open */
   registerWindow: (
     id: WindowId,

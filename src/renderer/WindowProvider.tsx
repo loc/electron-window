@@ -1,4 +1,5 @@
 import {
+  useInsertionEffect,
   useCallback,
   useMemo,
   useRef,
@@ -35,10 +36,15 @@ export function WindowProvider({
   debug = false,
   devWarnings,
 }: WindowProviderProps): ReactElement {
-  if (devWarnings !== undefined) {
-    (globalThis as Record<string, unknown>).__ELECTRON_WINDOW_DEV__ =
-      devWarnings;
-  }
+  // Set the dev-flag global before any child effects run. useInsertionEffect
+  // fires before layout effects, so devWarning() in children's effects sees it.
+  // (Was a render-body side effect — moved here for Concurrent Mode hygiene.)
+  useInsertionEffect(() => {
+    if (devWarnings !== undefined) {
+      (globalThis as Record<string, unknown>).__ELECTRON_WINDOW_DEV__ =
+        devWarnings;
+    }
+  }, [devWarnings]);
 
   const eventListeners = useRef<
     Map<WindowId, Set<(event: WindowEvent) => void>>
@@ -211,6 +217,7 @@ export function WindowProvider({
 
   const contextValue = useMemo<WindowProviderContextValue>(
     () => ({
+      hasBridge: api !== null,
       registerWindow,
       unregisterWindow,
       updateWindow,
@@ -220,6 +227,7 @@ export function WindowProvider({
       subscribeToEvents,
     }),
     [
+      api,
       registerWindow,
       unregisterWindow,
       updateWindow,

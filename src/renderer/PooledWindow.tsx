@@ -442,6 +442,11 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
       }
 
       prevPropsRef.current = currentProps;
+      // `rest` is a new object every render, so this effect runs per-render
+      // once isReady. The diff above short-circuits (no IPC when nothing
+      // changed), so the overhead is ~20 shallow compares. Intentional —
+      // listing every changeable prop individually would be brittle against
+      // PROP_REGISTRY additions.
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isReady, windowId, provider, rest, title, visible]);
 

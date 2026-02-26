@@ -5,46 +5,77 @@ description: "How @loc/electron-window restricts renderer access to window creat
 
 Electron's security model requires that sensitive `BrowserWindow` options — particularly `webPreferences` — are never controllable from renderer code. This library enforces that boundary.
 
+## Enforced security floor
+
+The library enforces a non-negotiable baseline on **every child window**, regardless of consumer config:
+
+- `nodeIntegration: false`
+- `contextIsolation: true`
+- `sandbox: true` (default — can be explicitly set to `false` via `defaultWindowOptions.webPreferences.sandbox`)
+
+Beyond this floor, `webPreferences` is only configurable via `setupWindowManager` in the main process. Renderer-supplied props cannot reach `webPreferences` — they're filtered through an allowlist before touching `BrowserWindow`.
+
 ## What the renderer cannot control
 
-- **`webPreferences`** — only configurable via `setupWindowManager` in the main process. Renderer-supplied props cannot override `nodeIntegration`, `contextIsolation`, `preload`, or any other `webPreferences` field.
-- **Arbitrary URLs** — child windows can only load `about:blank`. Any attempt to navigate to an arbitrary URL is rejected.
+- **`webPreferences`** — main-process-only. Renderer props can't override `nodeIntegration`, `contextIsolation`, `preload`, etc.
+- **Arbitrary URLs** — child windows load only `about:blank`. Other URLs rejected by `setWindowOpenHandler`.
 
-## How it works
+## Origin allowlist
 
-All props sent from the renderer to the main process pass through an allowlist before reaching `BrowserWindow`. Props not on the allowlist are silently dropped. This means a compromised renderer cannot escalate privileges by sending unexpected window options.
+Two mechanisms restrict which renderer origins can use the IPC surface:
 
-IPC messages are validated via schema with origin and frame checks on every call.
-
-## Rate limits
-
-Window creation is rate-limited to prevent runaway loops or denial-of-service from renderer code.
-
-| Option              | Default | Description                              |
-| ------------------- | ------- | ---------------------------------------- |
-| `maxPendingWindows` | `100`   | Max windows waiting to be created        |
-| `maxWindows`        | `50`    | Max total open windows at once           |
-
-Configure these via `setupWindowManager`:
+**Runtime** — works whether or not you bundle your main process:
 
 ```ts
-const manager = setupWindowManager({
-  maxPendingWindows: 5,
-  maxWindows: 20,
-  defaultWindowOptions: {
-    webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
-    },
-  },
+setupWindowManager({
+  allowedOrigins: ["app://main", "file://"],
 });
 ```
 
+Validated **per IPC call** against the parent renderer's top-frame origin. Unset → permissive (dev warning). `["*"]` → explicitly allow all.
+
+**Build-time** — if you bundle both main and preload, define a constant in your bundler:
+
+```js
+// vite / esbuild / webpack DefinePlugin — for BOTH main and preload builds
+define: {
+  __ELECTRON_WINDOW_ALLOWED_ORIGINS__: JSON.stringify(["app://main", "file://"]),
+}
+```
+
+This additionally gates the **preload**: on a wrong origin, `window.electron_window` is never exposed. The check runs in the EIPC validator layer against `event.senderFrame.url` (the correct frame).
+
+## Per-WebContents ownership
+
+A renderer can only mutate windows **it registered**. If you `setupForWindow` on multiple parent windows, each is isolated — WebContents B cannot `DestroyWindow`, `UpdateWindow`, or `WindowAction` on WebContents A's child windows, even with knowledge of the window ID.
+
+`setWindowOpenHandler` also verifies ownership: a different WebContents calling `window.open("about:blank", stolenId)` is denied.
+
+## Rate limits & TTL
+
+Window creation is rate-limited and pending registrations have a TTL to prevent orphaned-registration DoS:
+
+| Option              | Default | Description                              |
+| ------------------- | ------- | ---------------------------------------- |
+| `maxPendingWindows` | `100`   | Max windows awaiting creation            |
+| `maxWindows`        | `50`    | Max total open windows                   |
+| Pending TTL         | 10s     | Stale pending entries auto-evicted       |
+
+The 10-second TTL is typically invisible (the `RegisterWindow` → `window.open` handshake takes microseconds). If debugging with a breakpoint between register and open, the entry may expire — reopen the window.
+
+## Window IDs
+
+IDs are generated via `crypto.randomUUID()` (falling back to `crypto.getRandomValues` in non-secure contexts). 122 bits of entropy makes guessing infeasible — cross-WebContents attacks require **observation** (DevTools, leaked state), not brute force.
+
 ## Summary
 
-| Threat                          | Mitigation                                      |
-| ------------------------------- | ----------------------------------------------- |
-| Renderer overrides webPreferences | Only configurable in main process             |
-| Arbitrary URL navigation        | Rejected — child windows only load about:blank  |
-| Unexpected IPC props            | Allowlist filtering before BrowserWindow        |
-| IPC spoofing                    | Origin and frame validation on every message    |
-| Runaway window creation         | Configurable rate limits                        |
+| Threat                              | Mitigation                                                                      |
+| ----------------------------------- | ------------------------------------------------------------------------------- |
+| Renderer overrides `webPreferences` | Main-process-only + enforced floor (`nodeIntegration: false`, etc.)             |
+| Arbitrary URL navigation            | `about:blank` only; others denied                                               |
+| Unexpected IPC props                | Allowlist filtering before `BrowserWindow`                                      |
+| IPC from iframes                    | EIPC-generated `is_main_frame` validator — rejected before handlers run         |
+| Wrong-origin renderer               | `allowedOrigins` (runtime, per-call) or `__ELECTRON_WINDOW_ALLOWED_ORIGINS__`   |
+| Cross-renderer window control       | Per-WebContents ownership checks on every mutation                              |
+| Runaway window creation             | `maxPendingWindows`, `maxWindows`, 10s pending TTL                              |
+| Guessable window IDs                | `crypto.randomUUID()` — 122 bits of entropy                                     |

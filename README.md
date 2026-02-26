@@ -251,7 +251,7 @@ function App() {
 
 On `open={true}`: acquires a pre-warmed window from the pool (instant). On `open={false}`: hides and returns to pool (no destroy/recreate cost).
 
-Shape props (`transparent`, `frame`, `titleBarStyle`, `vibrancy`) and `injectStyles` are fixed by the pool definition. All other props work per-use: `defaultWidth`/`defaultHeight` size the window on each acquire, and behavior props (`alwaysOnTop`, `opacity`, etc.) update live while open.
+Shape props (`transparent`, `frame`, `titleBarStyle`, `vibrancy`) and `injectStyles` are fixed by the pool definition. Most other props work per-use: `defaultWidth`/`defaultHeight` size the window on each acquire, and behavior props (`alwaysOnTop`, `opacity`, etc.) update live while open. `targetDisplay` and `persistBounds` are no-ops on pooled windows (they only affect creation/persistence, and pool windows are pre-created and reused).
 
 ## Common Patterns
 
