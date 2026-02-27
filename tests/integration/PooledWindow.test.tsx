@@ -747,6 +747,86 @@ describe("<PooledWindow>", () => {
     pool.destroy();
   });
 
+  // C1 regression guard: release() must NOT include visible:true in the
+  // prop-reset payload — WindowInstance.updateProps treats visible:true as
+  // a show() call, which would un-hide the released window (idle pool
+  // windows visible on screen).
+  it("release() prop-reset payload excludes visible (idle windows stay hidden)", async () => {
+    const { RendererWindowPool } =
+      await import("../../src/renderer/RendererWindowPool.js");
+    const { POOL_RELEASE_PROP_DEFAULTS } =
+      await import("../../src/shared/types.js");
+
+    // The defaults object must NOT contain visible — this is the primary
+    // guard against regressing the show-on-release bug.
+    expect(POOL_RELEASE_PROP_DEFAULTS).not.toHaveProperty("visible");
+
+    // And verify release() actually sends this payload (not a stale copy).
+    const registerWindow = vi.fn(async () => true);
+    const unregisterWindow = vi.fn(async () => {});
+    const updateWindow = vi.fn(async () => {});
+    const windowAction = vi.fn(async () => {});
+
+    const pool = new RendererWindowPool({
+      shape: {},
+      config: { minIdle: 1, maxIdle: 2 },
+      registerWindow,
+      unregisterWindow,
+      updateWindow,
+      windowAction,
+    });
+
+    await pool.warmUp();
+    const entry = await pool.acquire();
+    await pool.release(entry.id);
+
+    // updateWindow should have been called with the reset defaults
+    const resetCall = updateWindow.mock.calls.find(
+      (c) => c[0] === entry.id && typeof c[1] === "object",
+    );
+    expect(resetCall).toBeDefined();
+    const payload = resetCall![1] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("visible");
+    // Spot-check that the reset DOES include the props that prevent leaks
+    expect(payload.closable).toBe(true);
+    expect(payload.alwaysOnTop).toBe(false);
+    expect(payload.opacity).toBe(1);
+
+    pool.destroy();
+  });
+
+  // C2 regression guard: behavior props must reset on release. Snapshot the
+  // defaults keys so removals break this test.
+  it("POOL_RELEASE_PROP_DEFAULTS includes all leak-prone behavior props", async () => {
+    const { POOL_RELEASE_PROP_DEFAULTS } =
+      await import("../../src/shared/types.js");
+    // If you remove a key from this list, a Use-A-sets-X-Use-B-inherits-it
+    // leak will re-appear. Think carefully before removing any.
+    const keys = Object.keys(POOL_RELEASE_PROP_DEFAULTS).sort();
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        "closable",
+        "alwaysOnTop",
+        "opacity",
+        "resizable",
+        "movable",
+        "minimizable",
+        "maximizable",
+        "focusable",
+        "skipTaskbar",
+        "fullscreen",
+        "fullscreenable",
+        "ignoreMouseEvents",
+        "visibleOnAllWorkspaces",
+        "showInactive",
+        "minWidth",
+        "minHeight",
+        "maxWidth",
+        "maxHeight",
+      ]),
+    );
+  });
+
   // B6. injectStyles: false in pool definition suppresses style injection
   it("respects injectStyles: false from pool definition (B6)", async () => {
     const pool = createWindowPool({}, { minIdle: 0 }, { injectStyles: false });

@@ -1566,3 +1566,47 @@ describe("<Window> visible prop", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Regression: style subscriber leak on open toggle (H1 from third fresh-eyes)
+// ---------------------------------------------------------------------------
+describe("<Window> style subscriber cleanup on open toggle", () => {
+  beforeEach(() => {
+    resetMockWindows();
+    resetMockWindowsGlobal();
+  });
+
+  it("does not leak style subscribers across open→false→open cycles", async () => {
+    // The open={false} teardown path must call styleCleanupRef — otherwise
+    // each open cycle adds a subscriber that's never removed. The shape-change
+    // and unmount paths already did this; open=false was the gap.
+    const { __getStyleSubscriberCount } =
+      await import("../../src/renderer/windowUtils.js");
+
+    function ToggleApp() {
+      const [open, setOpen] = useState(false);
+      return (
+        <MockWindowProvider>
+          <button onClick={() => setOpen((o) => !o)}>Toggle</button>
+          <Window open={open}>
+            <div>content</div>
+          </Window>
+        </MockWindowProvider>
+      );
+    }
+
+    render(<ToggleApp />);
+    const baseline = __getStyleSubscriberCount();
+
+    // Toggle open→close three times
+    for (let i = 0; i < 3; i++) {
+      fireEvent.click(screen.getByText("Toggle")); // open
+      await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
+      fireEvent.click(screen.getByText("Toggle")); // close
+      await waitFor(() => expect(getGlobalMockWindows().size).toBe(0));
+    }
+
+    // Subscriber count should be back to baseline — not baseline+3
+    expect(__getStyleSubscriberCount()).toBe(baseline);
+  });
+});

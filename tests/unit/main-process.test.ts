@@ -833,6 +833,31 @@ describe("WindowInstance updateProps — PROP_SETTERS dispatch", () => {
     instance.updateProps({ visible: true });
     expect(bw.show).toHaveBeenCalled();
   });
+
+  it("does NOT call show()/hide() when visible is re-sent at its current value", () => {
+    // Regression guard for the oldVisible-capture fix (WindowInstance.ts:361).
+    // The loop processes `visible` (it's in CHANGEABLE_BEHAVIOR_PROPS) and
+    // stores it in currentProps BEFORE the explicit show/hide block runs.
+    // Without capturing oldVisible before the loop, the same-value guard
+    // always saw 'unchanged' and skipped, meaning visible:true ALWAYS called
+    // show() even when already visible (e.g., pool prop-reset payload).
+    const { instance, bw } = createWindowInstance({ visible: true });
+    // Constructor calls show() (showOnCreate default true) — clear that.
+    bw.show.mockClear();
+    bw.showInactive.mockClear();
+    bw.hide.mockClear();
+
+    instance.updateProps({ visible: true }); // same value — should no-op
+    expect(bw.show).not.toHaveBeenCalled();
+    expect(bw.showInactive).not.toHaveBeenCalled();
+    expect(bw.hide).not.toHaveBeenCalled();
+
+    // And once it actually changes, it fires exactly once
+    instance.updateProps({ visible: false });
+    expect(bw.hide).toHaveBeenCalledTimes(1);
+    instance.updateProps({ visible: false }); // no-op
+    expect(bw.hide).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1024,6 +1049,65 @@ describe("WindowInstance action methods", () => {
       width: 1200,
       height: 600,
     });
+  });
+
+  it("setBounds rejects NaN/Infinity and uses current value as fallback", () => {
+    // Security: renderer-supplied bounds arrive with only `typeof number`
+    // validation from IPC. NaN/Infinity passed to native setBounds has
+    // undefined behavior on some platforms.
+    const { instance, bw } = createWindowInstance();
+    bw.getBounds.mockReturnValue({ x: 10, y: 20, width: 800, height: 600 });
+    instance.setBounds({
+      x: NaN,
+      y: Infinity,
+      width: -Infinity,
+      height: Number.NaN,
+    });
+    const call = bw.setBounds.mock.calls[0]?.[0] as {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+    // All values should be finite (fallback to current)
+    expect(Number.isFinite(call.x)).toBe(true);
+    expect(Number.isFinite(call.y)).toBe(true);
+    expect(Number.isFinite(call.width)).toBe(true);
+    expect(Number.isFinite(call.height)).toBe(true);
+    // Width/height fell back to current (NaN/±Inf rejected)
+    expect(call.width).toBe(800);
+    expect(call.height).toBe(600);
+  });
+
+  it("setBounds clamps dimensions to MAX_DIMENSION (32767)", () => {
+    // Prevents GPU memory exhaustion from gigantic dims (X11's signed
+    // 16-bit limit is the cross-platform safe ceiling).
+    const { instance, bw } = createWindowInstance();
+    bw.getBounds.mockReturnValue({ x: 0, y: 0, width: 800, height: 600 });
+    instance.setBounds({ width: 999999, height: 999999 });
+    const call = bw.setBounds.mock.calls[0]?.[0] as {
+      width: number;
+      height: number;
+    };
+    expect(call.width).toBeLessThanOrEqual(32767);
+    expect(call.height).toBeLessThanOrEqual(32767);
+  });
+
+  it("updateProps routes bounds through sanitized setBounds (not direct)", () => {
+    // Security: the prop-diff path (UpdateWindow IPC) was calling
+    // browserWindow.setBounds() directly, bypassing our NaN/Infinity/
+    // off-screen sanitization. A compromised renderer could send hostile
+    // values via UpdateWindow to bypass the WindowAction setBounds guards.
+    const { instance, bw } = createWindowInstance();
+    bw.getBounds.mockReturnValue({ x: 0, y: 0, width: 800, height: 600 });
+    instance.updateProps({ width: Infinity, x: NaN } as never);
+    const call = bw.setBounds.mock.calls[0]?.[0] as {
+      x: number;
+      width: number;
+    };
+    expect(Number.isFinite(call.x)).toBe(true);
+    expect(Number.isFinite(call.width)).toBe(true);
+    expect(call.width).toBe(800); // Infinity rejected → fallback
   });
 
   it("setTitle delegates to browserWindow.setTitle()", () => {
@@ -1633,5 +1717,79 @@ describe("per-WebContents ownership enforcement", () => {
     expect(implB.GetWindowState("a-win")).toBeNull();
     // A can read its own
     expect(implA.GetWindowState("a-win")).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: child window security + parent-destroyed cleanup
+// ---------------------------------------------------------------------------
+
+describe("child window security and parent lifecycle", () => {
+  function setupAndCreateChild() {
+    (globalThis as Record<string, unknown>).__lastImpl__ = undefined;
+    const manager = new WindowManager({ devWarnings: false });
+    const parent = createMockParentWindow();
+    manager.setupForWindow(
+      parent as unknown as import("electron").BrowserWindow,
+    );
+    const impl = getLastImpl();
+
+    impl.RegisterWindow("child", {} as never);
+    const openHandler = parent.webContents.setWindowOpenHandler.mock
+      .calls[0]?.[0] as (arg: { frameName: string; url: string }) => unknown;
+    openHandler({ frameName: "child", url: "about:blank" });
+
+    const didCreate = parent.webContents.on.mock.calls.find(
+      (c) => c[0] === "did-create-window",
+    )?.[1] as (bw: unknown, details: { frameName: string }) => void;
+    const childBW = createMockBrowserWindow();
+    didCreate(childBW, { frameName: "child" });
+
+    return { manager, parent, childBW };
+  }
+
+  it("child windows get a deny-all setWindowOpenHandler", () => {
+    // Security: without this, a compromised parent renderer can spawn a
+    // child via the library, then use that child to window.open arbitrary
+    // URLs — bypassing the parent's about:blank-only restriction. Children
+    // are portal targets, not independent renderers; grandchild windows
+    // are not a supported use case.
+    const { childBW } = setupAndCreateChild();
+
+    const childHandler = (
+      childBW.webContents.setWindowOpenHandler as ReturnType<typeof vi.fn>
+    ).mock.calls[0]?.[0] as
+      | ((details: { url: string }) => { action: string })
+      | undefined;
+    expect(childHandler).toBeDefined();
+
+    // Any URL — including about:blank — is denied from a child.
+    expect(childHandler!({ url: "https://evil.example" })).toEqual({
+      action: "deny",
+    });
+    expect(childHandler!({ url: "about:blank" })).toEqual({
+      action: "deny",
+    });
+  });
+
+  it("parent WebContents 'destroyed' cleans up owned child windows", () => {
+    // A renderer that opens N windows then crashes would otherwise leave
+    // N orphaned BrowserWindows in the manager's map with no controller.
+    const { manager, parent, childBW } = setupAndCreateChild();
+
+    expect(manager.getAllWindows()).toHaveLength(1);
+
+    // Fire the 'destroyed' callback that setupForWebContents registered
+    const destroyedCb = (
+      parent.webContents.once as ReturnType<typeof vi.fn>
+    ).mock.calls.find((c) => c[0] === "destroyed")?.[1] as
+      | (() => void)
+      | undefined;
+    expect(destroyedCb).toBeDefined();
+    destroyedCb!();
+
+    // Child should be destroyed and removed from the manager's map
+    expect(childBW.destroy).toHaveBeenCalled();
+    expect(manager.getAllWindows()).toHaveLength(0);
   });
 });
