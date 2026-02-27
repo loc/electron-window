@@ -194,6 +194,8 @@ enum WindowEventType {
     UserCloseRequested = "userCloseRequested"
     DisplayChanged = "displayChanged"
     Ready = "ready"
+    Shown = "shown"
+    Hidden = "hidden"
 }
 
 structure WindowEvent {

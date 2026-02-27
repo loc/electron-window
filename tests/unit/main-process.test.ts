@@ -68,7 +68,7 @@ function createMockBrowserWindow() {
     close: vi.fn(),
     destroy: vi.fn(),
 
-    webContents: { id: 1 },
+    webContents: { id: 1, setWindowOpenHandler: vi.fn() },
   };
 
   return bw;

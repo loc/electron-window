@@ -59,10 +59,12 @@ export function usePersistedBounds(
     saveDebounceMs = 500,
   } = options;
 
+  // Window.tsx passes "" when persistBounds is unset — skip storage entirely.
+  const enabled = key !== "";
   const storageKey = `${STORAGE_PREFIX}${key}`;
 
   const [persistedBounds, setPersistedBounds] = useState<Bounds | null>(() =>
-    readFromStorage(storageKey),
+    enabled ? readFromStorage(storageKey) : null,
   );
 
   const debouncedSave = useMemo(
@@ -82,8 +84,12 @@ export function usePersistedBounds(
 
   // Re-read storage when the key changes (useState initializer only runs on mount)
   useEffect(() => {
+    if (!enabled) {
+      setPersistedBounds(null);
+      return;
+    }
     setPersistedBounds(readFromStorage(storageKey));
-  }, [storageKey]);
+  }, [enabled, storageKey]);
 
   // Cancel any pending debounced save when debouncedSave is replaced (key/debounce changed)
   // This prevents a stale save from writing to the old key after the key prop changes.

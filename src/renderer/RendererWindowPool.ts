@@ -5,6 +5,7 @@ import type {
   TitleBarStyle,
   VibrancyType,
 } from "../shared/types.js";
+import { CHANGEABLE_BEHAVIOR_PROP_DEFAULTS } from "../shared/types.js";
 import { waitForWindowReady, initWindowDocument } from "./windowUtils.js";
 
 /**
@@ -36,6 +37,7 @@ export interface RendererWindowPoolOptions {
     props: Record<string, unknown>,
   ) => Promise<boolean>;
   unregisterWindow: (id: string) => Promise<void>;
+  updateWindow: (id: string, props: Record<string, unknown>) => Promise<void>;
   windowAction: (id: string, action: { type: string }) => Promise<void>;
 }
 
@@ -63,6 +65,7 @@ export class RendererWindowPool {
 
   private registerWindow: RendererWindowPoolOptions["registerWindow"];
   private unregisterWindow: RendererWindowPoolOptions["unregisterWindow"];
+  private updateWindow: RendererWindowPoolOptions["updateWindow"];
   private windowAction: RendererWindowPoolOptions["windowAction"];
   private readonly debug: boolean;
   private readonly injectStyles: InjectStylesMode;
@@ -77,6 +80,7 @@ export class RendererWindowPool {
     this.idleTimeoutMs = options.config?.idleTimeout ?? 30000;
     this.registerWindow = options.registerWindow;
     this.unregisterWindow = options.unregisterWindow;
+    this.updateWindow = options.updateWindow;
     this.windowAction = options.windowAction;
     this.debug = options.debug ?? false;
     this.injectStyles = options.injectStyles ?? "auto";
@@ -90,10 +94,12 @@ export class RendererWindowPool {
   rebind(options: {
     registerWindow: RendererWindowPoolOptions["registerWindow"];
     unregisterWindow: RendererWindowPoolOptions["unregisterWindow"];
+    updateWindow: RendererWindowPoolOptions["updateWindow"];
     windowAction: RendererWindowPoolOptions["windowAction"];
   }): void {
     this.registerWindow = options.registerWindow;
     this.unregisterWindow = options.unregisterWindow;
+    this.updateWindow = options.updateWindow;
     this.windowAction = options.windowAction;
   }
 
@@ -130,9 +136,9 @@ export class RendererWindowPool {
     try {
       const id = generateWindowId();
 
-      // showOnCreate: false keeps the BrowserWindow hidden until we explicitly show it.
-      // closable: false prevents the main process from destroying the window when the
-      // user clicks X — the renderer handles close by releasing back to the pool.
+      // showOnCreate: false keeps the BrowserWindow hidden until we explicitly
+      // show it. hideOnClose: true makes the X button hide (not destroy) —
+      // the renderer handles close by releasing back to the pool.
       const ok = await this.registerWindow(id, {
         ...this.shape,
         showOnCreate: false,
@@ -140,20 +146,27 @@ export class RendererWindowPool {
       });
       if (!ok) return;
 
-      if (this.isDestroyed) return;
+      if (this.isDestroyed) {
+        void this.unregisterWindow(id);
+        return;
+      }
 
       const childWindow = window.open("about:blank", id, "");
-      if (!childWindow) return;
+      if (!childWindow) {
+        void this.unregisterWindow(id);
+        return;
+      }
 
       try {
         await waitForWindowReady(childWindow, () => this.isDestroyed);
       } catch {
-        childWindow.close();
+        // hideOnClose makes childWindow.close() a no-op — use unregister.
+        void this.unregisterWindow(id);
         return;
       }
 
       if (this.isDestroyed) {
-        childWindow.close();
+        void this.unregisterWindow(id);
         return;
       }
 
@@ -286,6 +299,16 @@ export class RendererWindowPool {
       // Main process may be gone during shutdown — fall through to DOM cleanup
     }
 
+    // Reset behavior props to defaults — prevents state leaking between uses
+    // (e.g., Use A sets closable=false, Use B's close button is disabled).
+    // Sent before hide so the window is in a known state by the time it's
+    // back in the idle queue.
+    try {
+      await this.updateWindow(id, { ...CHANGEABLE_BEHAVIOR_PROP_DEFAULTS });
+    } catch {
+      // Main process may be gone during shutdown — fall through
+    }
+
     // Clean the DOM to prevent data leakage between pool window uses.
     // React unmounts portal content when PooledWindow nulls the target,
     // but imperative DOM changes made via useWindowDocument() persist
@@ -311,27 +334,20 @@ export class RendererWindowPool {
       if (child !== container) child.remove();
     }
 
+    this.idle.push(entry);
+    this.debugLog("released to idle", id);
+
     // Always recycle the released window. If idle is at capacity (e.g., due to
     // a concurrent-acquire race creating an extra replenishment window), evict
     // the oldest idle window to make room. The released window is preferred
     // because it was just in active use (warm, validated).
-    if (this.idle.length >= this.maxIdle) {
+    if (this.idle.length > this.maxIdle) {
       const evicted = this.idle.shift();
       if (evicted) {
         this.debugLog("evicting oldest idle to make room", evicted.id);
-        evicted.styleCleanup();
-        evicted.childWindow.close();
-        void this.unregisterWindow(evicted.id);
-        const timer = this.idleTimers.get(evicted.id);
-        if (timer) {
-          clearTimeout(timer);
-          this.idleTimers.delete(evicted.id);
-        }
+        this.destroyEntry(evicted);
       }
     }
-
-    this.idle.push(entry);
-    this.debugLog("released to idle", id);
 
     if (this.idle.length > this.minIdle && this.idleTimeoutMs > 0) {
       const timer = setTimeout(() => {
@@ -339,6 +355,23 @@ export class RendererWindowPool {
       }, this.idleTimeoutMs);
       this.idleTimers.set(id, timer);
     }
+  }
+
+  /**
+   * Destroy a pool entry. Pool windows have hideOnClose: true, so
+   * childWindow.close() would be a no-op (preventDefaulted + hidden +
+   * spurious userCloseRequested event). We rely solely on unregisterWindow →
+   * BrowserWindow.destroy() which bypasses the close handler. styleCleanup
+   * must run explicitly since destroy() doesn't fire unload.
+   */
+  private destroyEntry(entry: PoolEntry): void {
+    entry.styleCleanup();
+    const timer = this.idleTimers.get(entry.id);
+    if (timer) {
+      clearTimeout(timer);
+      this.idleTimers.delete(entry.id);
+    }
+    void this.unregisterWindow(entry.id);
   }
 
   private evictIdle(id: string): void {
@@ -351,11 +384,7 @@ export class RendererWindowPool {
     const index = this.idle.findIndex((e) => e.id === id);
     if (index !== -1) {
       const [entry] = this.idle.splice(index, 1);
-      if (entry) {
-        entry.styleCleanup();
-        entry.childWindow.close();
-        void this.unregisterWindow(id);
-      }
+      if (entry) this.destroyEntry(entry);
     }
     this.idleTimers.delete(id);
   }
@@ -372,16 +401,12 @@ export class RendererWindowPool {
     this.idleTimers.clear();
 
     for (const entry of this.idle) {
-      entry.styleCleanup();
-      entry.childWindow.close();
-      void this.unregisterWindow(entry.id);
+      this.destroyEntry(entry);
     }
     this.idle.length = 0;
 
     for (const entry of this.active.values()) {
-      entry.styleCleanup();
-      entry.childWindow.close();
-      void this.unregisterWindow(entry.id);
+      this.destroyEntry(entry);
     }
     this.active.clear();
   }

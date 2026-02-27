@@ -42,6 +42,9 @@ const PROP_SETTERS: Record<
   string,
   (win: BrowserWindow, value: unknown) => void
 > = {
+  // title is excluded from CHANGEABLE_BEHAVIOR_PROPS (set via document.title
+  // in the renderer instead), but the setter here remains for the
+  // WindowAction {type: "setTitle"} path which routes through the handle.
   title: (win, v) => win.setTitle(v as string),
   backgroundColor: (win, v) => win.setBackgroundColor(v as string),
   opacity: (win, v) => win.setOpacity(v as number),
@@ -284,6 +287,14 @@ export class WindowInstance {
       if (!this.isDestroyed)
         this.onEvent({ type: WindowEventType.Restored, id: this.id });
     });
+    win.on("show", () => {
+      if (!this.isDestroyed)
+        this.onEvent({ type: WindowEventType.Shown, id: this.id });
+    });
+    win.on("hide", () => {
+      if (!this.isDestroyed)
+        this.onEvent({ type: WindowEventType.Hidden, id: this.id });
+    });
 
     win.on("enter-full-screen", () => {
       if (!this.isDestroyed)
@@ -380,12 +391,14 @@ export class WindowInstance {
       "height" in newProps;
 
     if (boundsChanged) {
-      const currentBounds = this.browserWindow.getBounds();
-      this.browserWindow.setBounds({
-        x: newProps.x ?? currentBounds.x,
-        y: newProps.y ?? currentBounds.y,
-        width: newProps.width ?? currentBounds.width,
-        height: newProps.height ?? currentBounds.height,
+      // Route through this.setBounds() for sanitization (NaN/Infinity
+      // rejection, on-screen clamping) — renderer-supplied bounds arrive
+      // here via UpdateWindow IPC with only `typeof number` validation.
+      this.setBounds({
+        x: newProps.x,
+        y: newProps.y,
+        width: newProps.width,
+        height: newProps.height,
       });
     }
   }

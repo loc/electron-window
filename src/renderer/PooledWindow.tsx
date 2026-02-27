@@ -185,6 +185,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
           injectStyles: poolDef.injectStyles,
           registerWindow: provider.registerWindow,
           unregisterWindow: provider.unregisterWindow,
+          updateWindow: provider.updateWindow,
           windowAction: provider.windowAction,
         });
         poolInstances.set(poolDef, instance);
@@ -195,6 +196,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
       instance.rebind({
         registerWindow: provider.registerWindow,
         unregisterWindow: provider.unregisterWindow,
+        updateWindow: provider.updateWindow,
         windowAction: provider.windowAction,
       });
       return instance;
@@ -382,9 +384,12 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
       return () => {
         cancelled = true;
       };
-      // Intentionally minimal — prop changes are handled by a separate effect
+      // Minimal deps — prop changes are handled by the diff effect below.
+      // `pool` is included so changing the pool prop releases the old
+      // window and acquires from the new pool (otherwise the component
+      // would be stuck with a released entry until open toggles).
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [open]);
+    }, [open, pool]);
 
     // Fire onReady and (if visible) show the window AFTER React has committed
     // portal content. onReady is decoupled from show — a window mounted with
@@ -418,11 +423,15 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
         childWindowRef.current.document.title = title;
       }
 
-      // Diff changeable behavior props
+      // Diff changeable behavior props. `visible` defaults to true when
+      // undefined (respects documented default), so false→undefined re-shows.
       const changedBehaviorProps: Record<string, unknown> = {};
       for (const prop of CHANGEABLE_BEHAVIOR_PROPS) {
         const prevValue = prevProps[prop];
-        const currentValue = currentProps[prop];
+        let currentValue = currentProps[prop];
+        if (prop === "visible" && currentValue === undefined) {
+          currentValue = true;
+        }
         if (prevValue !== currentValue && currentValue !== undefined) {
           changedBehaviorProps[prop] = currentValue;
         }
@@ -472,17 +481,14 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
       };
     }, [pool]);
 
-    useImperativeHandle(ref, () => {
-      if (!isReady || !windowId) return NOT_READY_HANDLE;
-      const state = lifecycle.windowState;
+    // Stable method refs (parity with Window.tsx) — don't depend on
+    // windowState, so method identity only changes on windowId/provider.
+    const stateRef = useRef(lifecycle.windowState);
+    stateRef.current = lifecycle.windowState;
+
+    const handleMethods = useMemo(() => {
+      if (!windowId) return null;
       return {
-        id: windowId,
-        isReady: true,
-        isFocused: state?.isFocused ?? false,
-        isMaximized: state?.isMaximized ?? false,
-        isMinimized: state?.isMinimized ?? false,
-        isFullscreen: state?.isFullscreen ?? false,
-        bounds: state?.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
         focus: () => void provider.windowAction(windowId, { type: "focus" }),
         blur: () => void provider.windowAction(windowId, { type: "blur" }),
         minimize: () =>
@@ -493,14 +499,14 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
           void provider.windowAction(windowId, { type: "unmaximize" }),
         toggleMaximize: () =>
           void provider.windowAction(windowId, {
-            type: state?.isMaximized ? "unmaximize" : "maximize",
+            type: stateRef.current?.isMaximized ? "unmaximize" : "maximize",
           }),
         close: () => void provider.windowAction(windowId, { type: "close" }),
         forceClose: () =>
           void provider.windowAction(windowId, { type: "forceClose" }),
-        setBounds: (bounds) =>
+        setBounds: (bounds: Partial<import("../shared/types.js").Bounds>) =>
           void provider.windowAction(windowId, { type: "setBounds", bounds }),
-        setTitle: (t) => {
+        setTitle: (t: string) => {
           if (childWindowRef.current) childWindowRef.current.document.title = t;
           void provider.windowAction(windowId, { type: "setTitle", title: t });
         },
@@ -509,7 +515,22 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
         exitFullscreen: () =>
           void provider.windowAction(windowId, { type: "exitFullscreen" }),
       };
-    }, [isReady, windowId, lifecycle.windowState, provider, childWindowRef]);
+    }, [windowId, provider]);
+
+    useImperativeHandle(ref, () => {
+      if (!isReady || !windowId || !handleMethods) return NOT_READY_HANDLE;
+      const state = stateRef.current;
+      return {
+        id: windowId,
+        isReady: true,
+        isFocused: state?.isFocused ?? false,
+        isMaximized: state?.isMaximized ?? false,
+        isMinimized: state?.isMinimized ?? false,
+        isFullscreen: state?.isFullscreen ?? false,
+        bounds: state?.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
+        ...handleMethods,
+      };
+    }, [isReady, windowId, handleMethods, lifecycle.windowState]);
 
     if (!portalTarget) return null;
 

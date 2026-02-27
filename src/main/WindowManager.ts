@@ -363,6 +363,13 @@ export class WindowManager {
 
       this.pendingWindows.delete(windowId);
 
+      // Child windows are portal targets, not independent renderers. Deny
+      // any window.open() from inside them — otherwise a compromised parent
+      // could spawn a child via the library, then use that child to
+      // window.open arbitrary URLs (bypassing the parent's about:blank-only
+      // restriction). Grandchild windows are not a supported use case.
+      childBW.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+
       const instance = new WindowInstance({
         id: windowId,
         browserWindow: childBW,

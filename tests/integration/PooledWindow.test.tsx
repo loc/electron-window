@@ -543,6 +543,7 @@ describe("<PooledWindow>", () => {
       await import("../../src/renderer/RendererWindowPool.js");
 
     const unregisterWindow = vi.fn(async () => {});
+    const updateWindow = vi.fn(async () => {});
     const windowAction = vi.fn(async () => {});
     const registerWindow = vi.fn(async () => true);
 
@@ -551,6 +552,7 @@ describe("<PooledWindow>", () => {
       config: { minIdle: 1, maxIdle: 1 },
       registerWindow,
       unregisterWindow,
+      updateWindow,
       windowAction,
     });
 
@@ -708,6 +710,7 @@ describe("<PooledWindow>", () => {
 
     const registerWindow = vi.fn(async () => true);
     const unregisterWindow = vi.fn(async () => {});
+    const updateWindow = vi.fn(async () => {});
     const windowAction = vi.fn(async () => {});
 
     // minIdle=2, maxIdle=3: warmup creates 2 idle. Acquiring both triggers
@@ -718,6 +721,7 @@ describe("<PooledWindow>", () => {
       config: { minIdle: 2, maxIdle: 3 },
       registerWindow,
       unregisterWindow,
+      updateWindow,
       windowAction,
     });
 

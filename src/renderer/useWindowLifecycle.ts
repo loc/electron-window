@@ -13,15 +13,19 @@ import type {
 import { debounce } from "../shared/utils.js";
 import { BOUNDS_CHANGE_DEBOUNCE_MS } from "./windowUtils.js";
 
-/** A not-ready handle with no-op methods, used before the window is ready */
-export const NOT_READY_HANDLE: WindowHandle = {
+/**
+ * A not-ready handle with no-op methods, used before the window is ready.
+ * Frozen — this is a shared singleton across all windows; mutation would
+ * affect every window's pre-ready ref.
+ */
+export const NOT_READY_HANDLE: WindowHandle = Object.freeze({
   id: "",
   isReady: false,
   isFocused: false,
   isMaximized: false,
   isMinimized: false,
   isFullscreen: false,
-  bounds: { x: 0, y: 0, width: 0, height: 0 },
+  bounds: Object.freeze({ x: 0, y: 0, width: 0, height: 0 }),
   focus: () => {},
   blur: () => {},
   minimize: () => {},
@@ -34,7 +38,7 @@ export const NOT_READY_HANDLE: WindowHandle = {
   setTitle: () => {},
   enterFullscreen: () => {},
   exitFullscreen: () => {},
-};
+});
 
 export interface WindowLifecycleOptions {
   windowId: WindowId | null;
@@ -192,6 +196,12 @@ export function useWindowLifecycle(
         case "restored":
           patchState({ isMinimized: false });
           onRestoreRef.current?.();
+          break;
+        case "shown":
+          patchState({ isVisible: true });
+          break;
+        case "hidden":
+          patchState({ isVisible: false });
           break;
         case "enterFullscreen":
           patchState({ isFullscreen: true });

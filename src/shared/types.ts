@@ -204,16 +204,52 @@ export const CHANGEABLE_BEHAVIOR_PROPS: ReadonlySet<string> = new Set(
           "defaultX",
           "defaultY",
           "center",
-          // Meta / renderer-only props
+          // Meta / renderer-only props. showInactive IS included — it has
+          // no direct setter but updateProps stores it in currentProps where
+          // WindowInstance.show() reads it on the next show/hide cycle.
           "title",
           "targetDisplay",
           "name",
           "showOnCreate",
           "hideOnClose",
-          "showInactive",
         ].includes(prop),
     ),
 );
+
+/**
+ * Default values for changeable behavior props. Applied when a pool window
+ * is released to prevent state leaking between uses (e.g., Use A sets
+ * closable=false, Use B mysteriously can't close the window).
+ *
+ * Only props with meaningful non-undefined defaults are listed. Props like
+ * opacity/backgroundColor have no library-wide default — they're reset to
+ * Electron's default only by omitting them from the next updateWindow call,
+ * which the pool handles by explicitly sending these.
+ */
+export const CHANGEABLE_BEHAVIOR_PROP_DEFAULTS: Readonly<
+  Record<string, unknown>
+> = {
+  resizable: true,
+  movable: true,
+  minimizable: true,
+  maximizable: true,
+  closable: true,
+  focusable: true,
+  alwaysOnTop: false,
+  skipTaskbar: false,
+  fullscreen: false,
+  fullscreenable: true,
+  ignoreMouseEvents: false,
+  visibleOnAllWorkspaces: false,
+  visible: true,
+  opacity: 1,
+  showInactive: false,
+  // min/max constraints: 0 means "no constraint" in Electron
+  minWidth: 0,
+  minHeight: 0,
+  maxWidth: 0,
+  maxHeight: 0,
+};
 
 /**
  * Creation-only props that are also renderer-allowed — these are the pool's
@@ -585,6 +621,8 @@ export type WindowEvent =
   | { type: "unmaximized"; id: WindowId }
   | { type: "minimized"; id: WindowId }
   | { type: "restored"; id: WindowId }
+  | { type: "shown"; id: WindowId }
+  | { type: "hidden"; id: WindowId }
   | { type: "enterFullscreen"; id: WindowId }
   | { type: "leaveFullscreen"; id: WindowId }
   | { type: "boundsChanged"; id: WindowId; bounds: Bounds }

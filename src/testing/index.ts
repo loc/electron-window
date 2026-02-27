@@ -101,6 +101,8 @@ type SimulatedEvent =
   | { type: "unmaximized" }
   | { type: "minimized" }
   | { type: "restored" }
+  | { type: "shown" }
+  | { type: "hidden" }
   | { type: "enterFullscreen" }
   | { type: "leaveFullscreen" }
   | { type: "boundsChanged"; bounds: Bounds }
@@ -232,6 +234,13 @@ export function MockWindowProvider({
   const unregisterWindow = useCallback(async (id: WindowId) => {
     mockStore.windows.delete(id);
     mockStore.listeners.delete(id);
+    // Mirror real behavior: UnregisterWindow → BrowserWindow.destroy() →
+    // renderer's Window proxy .closed = true. The window.open mock (in
+    // tests/setup.ts) tracks windows by name; close it so tests that
+    // assert on getGlobalMockWindows().size see the window gone.
+    const mockWindows = (globalThis as Record<string, unknown>)
+      .__mockWindows__ as Map<string, { close: () => void }> | undefined;
+    mockWindows?.get(id)?.close();
   }, []);
 
   const updateWindow = useCallback(

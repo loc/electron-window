@@ -109,6 +109,10 @@ export const Window = forwardRef<WindowRef, WindowProps>(
     const [windowId, setWindowId] = useState<WindowId>(() =>
       generateWindowId(),
     );
+    // Ref mirror of windowId for stable-closure cleanup (unmount effect has
+    // empty deps; closure would otherwise capture the initial ID only).
+    const windowIdRef = useRef(windowId);
+    windowIdRef.current = windowId;
 
     // The DOM element in the child window that React portals into
     const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
@@ -190,9 +194,9 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         // Only tear down if we actually opened something. Initial mount with
         // open={false} has nothing to clean up.
         if (childWindowRef.current || hasRegisteredRef.current) {
-          if (childWindowRef.current && !childWindowRef.current.closed) {
-            childWindowRef.current.close();
-          }
+          // Don't call childWindow.close() — with closable={false} it's
+          // preventDefaulted (no-op). unregisterWindow → destroy() bypasses
+          // the close handler and is the authoritative teardown path.
           childWindowRef.current = null;
           setPortalTarget(null);
           setChildDocument(null);
@@ -359,19 +363,12 @@ export const Window = forwardRef<WindowRef, WindowProps>(
 
         if (changedCreationOnlyProps.length > 0) {
           if (recreateOnShapeChange) {
-            // Release the style subscriber for the old window before closing.
-            // close() fires unload (which also cleans up), but we want
-            // deterministic cleanup before the new window's setup runs.
+            // Release the style subscriber for the old window before destroy.
             styleCleanupRef.current?.();
             styleCleanupRef.current = null;
-            if (childWindowRef.current && !childWindowRef.current.closed) {
-              childWindowRef.current.close();
-            }
+            // Don't call childWindow.close() — closable={false} would block it.
+            // unregisterWindow → destroy() is the reliable teardown path.
             childWindowRef.current = null;
-            // Explicitly unregister the old windowId — close() will eventually
-            // trigger the main-process 'closed' event which deletes from the
-            // windows map, but that's async and races with the new window's
-            // register. Also handles closable=false preventing close.
             if (hasRegisteredRef.current) {
               hasRegisteredRef.current = false;
               void provider.unregisterWindow(windowId);
@@ -451,26 +448,25 @@ export const Window = forwardRef<WindowRef, WindowProps>(
       prevPropsRef.current = props;
     }, [props, isReady, recreateOnShapeChange, provider, windowId]);
 
-    // Cleanup on unmount
+    // Cleanup on unmount only (empty deps). The open effect handles windowId
+    // changes — having windowId in deps here would fire cleanup during
+    // recreateOnShapeChange when the shape-change handler already cleaned up.
     useEffect(() => {
       return () => {
         lifecycle.debouncedBoundsChange.current.cancel();
         // Release the style subscriber before destroying — unregisterWindow
-        // calls BrowserWindow.destroy() which does NOT fire unload, so the
-        // unload path's styleCleanup won't run.
+        // calls BrowserWindow.destroy() which does NOT fire unload.
         styleCleanupRef.current?.();
         styleCleanupRef.current = null;
-        if (childWindowRef.current && !childWindowRef.current.closed) {
-          childWindowRef.current.close();
-        }
+        // Don't call childWindow.close() — closable={false} would block it.
         childWindowRef.current = null;
         if (hasRegisteredRef.current) {
           hasRegisteredRef.current = false;
-          void provider.unregisterWindow(windowId);
+          void provider.unregisterWindow(windowIdRef.current);
         }
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [windowId]);
+    }, []);
 
     // Fire onReady and (if visible) show the window AFTER React has committed
     // portal content to the DOM. onReady is decoupled from show — a window
