@@ -243,6 +243,8 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
         // won't run in that case, so explicitly remove from pool tracking.
         const destroyedId = entryRef.current?.id;
         entryRef.current = null;
+        pendingShowRef.current = null;
+        prevPropsRef.current = null;
         childWindowRef.current = null;
         setPortalTarget(null);
         setChildDocument(null);
@@ -257,9 +259,10 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
     useEffect(() => {
       if (!open) {
         if (entryRef.current) {
-          prevPropsRef.current = null;
           const idToRelease = entryRef.current.id;
           entryRef.current = null;
+          pendingShowRef.current = null;
+          prevPropsRef.current = null;
           childWindowRef.current = null;
           setPortalTarget(null);
           setChildDocument(null);
@@ -381,13 +384,30 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
       }
 
       acquireWindow();
+      // Cleanup fires on open→false, pool change, AND unmount. In all cases,
+      // release the acquired entry (if any) to the captured pool and reset
+      // state fully so the next acquire starts clean. The captured `pool`
+      // closure is the OLD pool on pool-change — correct, that's where the
+      // entry belongs.
       return () => {
         cancelled = true;
+        if (entryRef.current) {
+          const idToRelease = entryRef.current.id;
+          entryRef.current = null;
+          pendingShowRef.current = null;
+          prevPropsRef.current = null;
+          childWindowRef.current = null;
+          setPortalTarget(null);
+          setChildDocument(null);
+          setWindowId(null);
+          setIsReady(false);
+          lifecycle.setWindowState(null);
+          void pool.release(idToRelease);
+        }
       };
       // Minimal deps — prop changes are handled by the diff effect below.
       // `pool` is included so changing the pool prop releases the old
-      // window and acquires from the new pool (otherwise the component
-      // would be stuck with a released entry until open toggles).
+      // window and acquires from the new pool.
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open, pool]);
 
@@ -468,18 +488,14 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isReady, windowId, provider, rest, title, visible]);
 
-    // Release and cancel debounce on unmount
+    // Cancel debounce on unmount. Release is handled by the acquire effect's
+    // cleanup above (which fires on unmount too since its deps will have
+    // changed-or-unmounted by then).
     useEffect(() => {
       return () => {
         lifecycle.debouncedBoundsChange.current.cancel();
-        if (entryRef.current) {
-          void pool.release(entryRef.current.id);
-          entryRef.current = null;
-        }
-        childWindowRef.current = null;
-        // Intentionally do NOT destroy the pool — it outlives individual mounts
       };
-    }, [pool]);
+    }, []);
 
     // Stable method refs (parity with Window.tsx) — don't depend on
     // windowState, so method identity only changes on windowId/provider.

@@ -217,18 +217,16 @@ export const CHANGEABLE_BEHAVIOR_PROPS: ReadonlySet<string> = new Set(
 );
 
 /**
- * Default values for changeable behavior props. Applied when a pool window
- * is released to prevent state leaking between uses (e.g., Use A sets
- * closable=false, Use B mysteriously can't close the window).
+ * Default values for behavior props that should reset on pool release.
+ * Prevents state leaking between uses (e.g., Use A sets closable=false,
+ * Use B mysteriously can't close the window).
  *
- * Only props with meaningful non-undefined defaults are listed. Props like
- * opacity/backgroundColor have no library-wide default — they're reset to
- * Electron's default only by omitting them from the next updateWindow call,
- * which the pool handles by explicitly sending these.
+ * Intentionally EXCLUDES `visible` — the pool hides the window explicitly
+ * via windowAction({type:"hide"}) and must not include visible:true in
+ * the reset payload (WindowInstance.updateProps treats visible:true as
+ * a show() call, which would un-hide the released window).
  */
-export const CHANGEABLE_BEHAVIOR_PROP_DEFAULTS: Readonly<
-  Record<string, unknown>
-> = {
+export const POOL_RELEASE_PROP_DEFAULTS: Readonly<Record<string, unknown>> = {
   resizable: true,
   movable: true,
   minimizable: true,
@@ -241,7 +239,6 @@ export const CHANGEABLE_BEHAVIOR_PROP_DEFAULTS: Readonly<
   fullscreenable: true,
   ignoreMouseEvents: false,
   visibleOnAllWorkspaces: false,
-  visible: true,
   opacity: 1,
   showInactive: false,
   // min/max constraints: 0 means "no constraint" in Electron

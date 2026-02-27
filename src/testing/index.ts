@@ -143,6 +143,12 @@ export function simulateMockWindowEvent(
     case "restored":
       window.state.isMinimized = false;
       break;
+    case "shown":
+      window.state.isVisible = true;
+      break;
+    case "hidden":
+      window.state.isVisible = false;
+      break;
     case "enterFullscreen":
       window.state.isFullscreen = true;
       break;
@@ -329,6 +335,12 @@ export function MockWindowProvider({
           break;
         case "exitFullscreen":
           simulateMockWindowEvent(id, { type: "leaveFullscreen" });
+          break;
+        case "show":
+          simulateMockWindowEvent(id, { type: "shown" });
+          break;
+        case "hide":
+          simulateMockWindowEvent(id, { type: "hidden" });
           break;
       }
     },

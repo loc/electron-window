@@ -187,7 +187,7 @@ function WindowContent() {
 }
 ```
 
-`useCurrentWindow()` returns a `WindowHandle` with stable method references — `focus`, `close`, etc. won't change identity across renders.
+`useCurrentWindow()` returns a `WindowHandle`. The method references (`focus`, `close`, etc.) are stable across renders — safe to pass as effect deps. The handle **object** itself changes when window state changes (to reflect `isFocused`, `bounds`, etc.), so don't use the whole handle as a dep.
 
 ## Bounds Persistence
 

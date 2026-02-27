@@ -161,6 +161,13 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         ? (bounds) => persistenceRef.current.save(bounds)
         : undefined,
       onWindowClosedSetState: () => {
+        // Window destroyed from main side — it no longer exists in the
+        // main process's map, so clear hasRegisteredRef so subsequent
+        // open=false / unmount doesn't try to unregister a dead ID.
+        hasRegisteredRef.current = false;
+        styleCleanupRef.current?.();
+        styleCleanupRef.current = null;
+        pendingShowRef.current = null;
         childWindowRef.current = null;
         setPortalTarget(null);
         setChildDocument(null);
@@ -197,6 +204,9 @@ export const Window = forwardRef<WindowRef, WindowProps>(
           // Don't call childWindow.close() — with closable={false} it's
           // preventDefaulted (no-op). unregisterWindow → destroy() bypasses
           // the close handler and is the authoritative teardown path.
+          styleCleanupRef.current?.();
+          styleCleanupRef.current = null;
+          pendingShowRef.current = null;
           childWindowRef.current = null;
           setPortalTarget(null);
           setChildDocument(null);
@@ -259,11 +269,20 @@ export const Window = forwardRef<WindowRef, WindowProps>(
           devWarning(
             `[electron-window] window.open blocked for window "${windowId}"`,
           );
+          hasRegisteredRef.current = false;
           void provider.unregisterWindow(windowId);
           return;
         }
         if (cancelled) {
+          // Close this specific Window object — don't use unregisterWindow
+          // by ID here because windowId is stable across open cycles, and
+          // the next open cycle's register might land before this async
+          // unregister completes (destroying the new window). win.close()
+          // targets THIS window specifically. closable=false isn't a concern
+          // mid-creation — the window hasn't processed initial props yet.
           win.close();
+          hasRegisteredRef.current = false;
+          void provider.unregisterWindow(windowId);
           return;
         }
         childWindowRef.current = win;
@@ -274,11 +293,16 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         } catch (err) {
           devWarning(`[electron-window] ${(err as Error).message}`);
           win.close();
+          hasRegisteredRef.current = false;
+          childWindowRef.current = null;
           void provider.unregisterWindow(windowId);
           return;
         }
         if (cancelled) {
           win.close();
+          hasRegisteredRef.current = false;
+          childWindowRef.current = null;
+          void provider.unregisterWindow(windowId);
           return;
         }
 

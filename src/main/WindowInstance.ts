@@ -353,6 +353,15 @@ export class WindowInstance {
   ): void {
     if (!this.browserWindow || this.isDestroyed) return;
 
+    // Capture old visible BEFORE the loop updates currentProps — the loop
+    // processes `visible` (it's in CHANGEABLE_BEHAVIOR_PROPS) and stores it
+    // without calling show/hide (no setter in PROP_SETTERS), so by the time
+    // we reach the explicit handling below, currentProps.visible already
+    // reflects the new value.
+    const oldVisible = (this.currentProps as Record<string, unknown>)[
+      "visible"
+    ];
+
     for (const [key, value] of Object.entries(newProps)) {
       if (this.currentProps[key as keyof typeof this.currentProps] === value) {
         continue;
@@ -373,15 +382,15 @@ export class WindowInstance {
       (this.currentProps as Record<string, unknown>)[key] = value;
     }
 
-    // Handle visible prop explicitly (not a simple setter)
-    if ("visible" in newProps) {
+    // Handle visible prop explicitly (not a simple setter). Only act if the
+    // value actually changed — prevents a spurious show()/hide() when
+    // visible is re-sent at its current value.
+    if ("visible" in newProps && newProps.visible !== oldVisible) {
       if (newProps.visible === false) {
         this.browserWindow.hide();
       } else {
         this.show();
       }
-      (this.currentProps as Record<string, unknown>)["visible"] =
-        newProps.visible;
     }
 
     const boundsChanged =

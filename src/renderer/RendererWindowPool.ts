@@ -5,7 +5,7 @@ import type {
   TitleBarStyle,
   VibrancyType,
 } from "../shared/types.js";
-import { CHANGEABLE_BEHAVIOR_PROP_DEFAULTS } from "../shared/types.js";
+import { POOL_RELEASE_PROP_DEFAULTS } from "../shared/types.js";
 import { waitForWindowReady, initWindowDocument } from "./windowUtils.js";
 
 /**
@@ -251,14 +251,13 @@ export class RendererWindowPool {
     try {
       await waitForWindowReady(childWindow, () => this.isDestroyed);
     } catch {
-      // Close the orphan before re-throwing — without this the BrowserWindow
-      // stays alive, hidden, with a stale pendingWindows entry (10s GC).
-      childWindow.close();
+      // hideOnClose: true makes childWindow.close() a no-op that fires
+      // spurious userCloseRequested. unregisterWindow → destroy() is the
+      // reliable path.
       void this.unregisterWindow(id);
       throw new Error("Timed out waiting for pool window to be ready");
     }
     if (this.isDestroyed) {
-      childWindow.close();
       void this.unregisterWindow(id);
       throw new Error("Pool destroyed during acquire");
     }
@@ -286,48 +285,48 @@ export class RendererWindowPool {
    * BrowserWindow alive for the next acquire.
    */
   async release(id: string): Promise<void> {
+    if (this.isDestroyed) return;
     const entry = this.active.get(id);
     if (!entry) return;
 
     this.active.delete(id);
 
-    // Hide first, then clean DOM. The hide gives React time to unmount
-    // the portal content before we clear the container.
+    // Reset behavior props BEFORE hiding — prevents state leaking between
+    // uses (e.g., Use A sets closable=false, Use B can't close). The reset
+    // payload intentionally excludes `visible` — updateProps treats
+    // visible:true as show(), which would un-hide the released window.
+    try {
+      await this.updateWindow(id, { ...POOL_RELEASE_PROP_DEFAULTS });
+    } catch {
+      // Main process may be gone during shutdown — fall through
+    }
+
+    // Now hide. This gives React time to unmount portal content before
+    // we clear the container.
     try {
       await this.windowAction(id, { type: "hide" });
     } catch {
       // Main process may be gone during shutdown — fall through to DOM cleanup
     }
 
-    // Reset behavior props to defaults — prevents state leaking between uses
-    // (e.g., Use A sets closable=false, Use B's close button is disabled).
-    // Sent before hide so the window is in a known state by the time it's
-    // back in the idle queue.
-    try {
-      await this.updateWindow(id, { ...CHANGEABLE_BEHAVIOR_PROP_DEFAULTS });
-    } catch {
-      // Main process may be gone during shutdown — fall through
+    if (this.isDestroyed) {
+      // destroy() raced us — don't push to idle, just clean up this entry.
+      this.destroyEntry(entry);
+      return;
     }
 
     // Clean the DOM to prevent data leakage between pool window uses.
     // React unmounts portal content when PooledWindow nulls the target,
     // but imperative DOM changes made via useWindowDocument() persist
-    // across reuse. We clear: #root contents (redundant with React unmount
-    // but catches imperative children), body classes, and non-root body
-    // children. <head> is left alone — the style subscriber manages
-    // stylesheets there, and clearing them would break style sync on the
-    // next acquire.
-    //
-    // NOTE: Module-level state (globals, timers, RAF loops) set by the
-    // previous use CANNOT be cleaned up here — consumers using
-    // useWindowDocument() imperatively are responsible for their own
-    // cleanup in onClose or useEffect cleanup. Document this caveat.
+    // across reuse. <head> is left alone — the style subscriber manages
+    // stylesheets there, and clearing them would break style sync.
     const doc = entry.childWindow.document;
     const container = doc.getElementById("root");
     if (container) {
       container.innerHTML = "";
     }
     doc.body.className = "";
+    doc.title = "";
     // Remove any body children other than #root (e.g., portals that
     // previous consumer appended directly)
     for (const child of Array.from(doc.body.children)) {
