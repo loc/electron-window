@@ -21,16 +21,18 @@ import { waitForWindowReady, initWindowDocument } from "./windowUtils.js";
 import { useWindowLifecycle, NOT_READY_HANDLE } from "./useWindowLifecycle.js";
 
 /**
- * Extract the window shape (creation-only props) for change detection
+ * Extract the window shape (creation-only props) for change detection.
+ * Includes ALL creation-only props with undefined for unset ones, so that
+ * `transparent: true → undefined` (removal) is detectable as a change.
  */
 function getWindowShape(
   props: Omit<WindowProps, "children">,
 ): Record<string, unknown> {
   const shape: Record<string, unknown> = {};
   for (const prop of CREATION_ONLY_PROPS) {
-    if (prop in props) {
-      shape[prop] = props[prop as keyof typeof props];
-    }
+    // Always include the key — undefined is a distinct shape value.
+    // Without this, `transparent: true → undefined` goes undetected.
+    shape[prop] = props[prop as keyof typeof props];
   }
   return shape;
 }
@@ -137,6 +139,13 @@ export const Window = forwardRef<WindowRef, WindowProps>(
     const initialShapeRef = useRef<Record<string, unknown> | null>(null);
     const persistenceRef = useRef(persistence);
     persistenceRef.current = persistence;
+    // Fresh-props ref for reads inside openWindow()'s async body — avoids
+    // capturing stale props from the effect-closure snapshot when
+    // waitForWindowReady is polling and props change mid-flight (which
+    // would set initialShapeRef to a stale shape → spurious recreate on
+    // the very next render).
+    const propsRef = useRef(props);
+    propsRef.current = props;
 
     const lifecycle = useWindowLifecycle({
       windowId: isReady ? windowId : null,
@@ -169,6 +178,8 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         styleCleanupRef.current = null;
         pendingShowRef.current = null;
         childWindowRef.current = null;
+        initialShapeRef.current = null;
+        prevPropsRef.current = null;
         setPortalTarget(null);
         setChildDocument(null);
         setIsReady(false);
@@ -208,6 +219,8 @@ export const Window = forwardRef<WindowRef, WindowProps>(
           styleCleanupRef.current = null;
           pendingShowRef.current = null;
           childWindowRef.current = null;
+          initialShapeRef.current = null;
+          prevPropsRef.current = null;
           setPortalTarget(null);
           setChildDocument(null);
           setIsReady(false);
@@ -317,7 +330,11 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         // call it — BrowserWindow.destroy() doesn't fire unload.
         styleCleanupRef.current = styleCleanup;
         win.addEventListener("unload", () => {
-          styleCleanup();
+          // Use the ref, not the closure — other teardown paths
+          // (onWindowClosedSetState, open=false) may have already called
+          // and nulled it. The cleanup itself is idempotent today, but
+          // this keeps the single-source-of-truth invariant.
+          styleCleanupRef.current?.();
           styleCleanupRef.current = null;
           if (!cancelled) {
             childWindowRef.current = null;
@@ -328,9 +345,11 @@ export const Window = forwardRef<WindowRef, WindowProps>(
           }
         });
 
-        // Store initial shape for change detection
-        initialShapeRef.current = getWindowShape(props);
-        prevPropsRef.current = props;
+        // Store initial shape for change detection. Read from propsRef
+        // (not closure `props`) so mid-open prop changes don't set a
+        // stale baseline → spurious recreate on first diff.
+        initialShapeRef.current = getWindowShape(propsRef.current);
+        prevPropsRef.current = propsRef.current;
 
         lifecycle.setWindowState({
           id: windowId,
@@ -378,9 +397,12 @@ export const Window = forwardRef<WindowRef, WindowProps>(
       if (initialShapeRef.current) {
         const currentShape = getWindowShape(props);
         const changedCreationOnlyProps: string[] = [];
-
-        for (const [key, value] of Object.entries(currentShape)) {
-          if (initialShapeRef.current[key] !== value) {
+        // Iterate CREATION_ONLY_PROPS (not currentShape entries) so removal
+        // (undefined in current, defined in initial) is caught. getWindowShape
+        // now always includes all keys, so either iteration works, but this
+        // is defensive against future shape-function changes.
+        for (const key of CREATION_ONLY_PROPS) {
+          if (initialShapeRef.current[key] !== currentShape[key]) {
             changedCreationOnlyProps.push(key);
           }
         }
@@ -393,6 +415,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(
             // Don't call childWindow.close() — closable={false} would block it.
             // unregisterWindow → destroy() is the reliable teardown path.
             childWindowRef.current = null;
+            pendingShowRef.current = null;
             if (hasRegisteredRef.current) {
               hasRegisteredRef.current = false;
               void provider.unregisterWindow(windowId);
@@ -484,6 +507,9 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         styleCleanupRef.current = null;
         // Don't call childWindow.close() — closable={false} would block it.
         childWindowRef.current = null;
+        pendingShowRef.current = null;
+        initialShapeRef.current = null;
+        prevPropsRef.current = null;
         if (hasRegisteredRef.current) {
           hasRegisteredRef.current = false;
           void provider.unregisterWindow(windowIdRef.current);

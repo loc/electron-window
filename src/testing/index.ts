@@ -272,6 +272,15 @@ export function MockWindowProvider({
           height: (props.height as number) ?? window.state.bounds.height,
         };
       }
+      // Mirror real WindowInstance.updateProps: visible triggers show()/hide()
+      // which emit shown/hidden events. Without this, tests can't observe
+      // visible-prop-driven visibility transitions.
+      if ("visible" in props && props.visible !== window.state.isVisible) {
+        simulateMockWindowEvent(
+          id,
+          props.visible === false ? { type: "hidden" } : { type: "shown" },
+        );
+      }
     },
     [],
   );
@@ -368,6 +377,11 @@ export function MockWindowProvider({
 
       return () => {
         listeners?.delete(callback);
+        // Match real WindowProvider: clean up empty listener sets so the
+        // map doesn't grow unbounded across mount/unmount cycles.
+        if (listeners?.size === 0) {
+          mockStore.listeners.delete(id);
+        }
       };
     },
     [],

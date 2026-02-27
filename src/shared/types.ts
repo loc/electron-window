@@ -217,14 +217,43 @@ export const CHANGEABLE_BEHAVIOR_PROPS: ReadonlySet<string> = new Set(
 );
 
 /**
+ * Props that CAN change live but have no clean reset API in Electron, so
+ * the pool cannot reliably restore them to a neutral default on release.
+ * These leak across pool uses — consumers should avoid setting them on
+ * PooledWindow if they can't tolerate the leak, or explicitly reset them
+ * themselves via the prop on every acquire.
+ *
+ * - `trafficLightPosition`: setWindowButtonPosition(null) resets on macOS,
+ *   but our setter early-returns on falsy. Would need setter refactor.
+ * - `titleBarOverlay`: no reset API in Electron — once set, stays set.
+ * - `backgroundColor`: no "reset to system default" value; empty string
+ *   behavior is undefined.
+ * - `alwaysOnTopLevel`: derived from alwaysOnTop string normalization.
+ *   The stale value in currentProps is dormant (setter only fires on
+ *   change) but it's still a state-leak. Cleared by updateProps when
+ *   alwaysOnTop is set to false (see WindowInstance.updateProps).
+ */
+export const POOL_NON_RESETTABLE_PROPS: ReadonlySet<string> = new Set([
+  "trafficLightPosition",
+  "titleBarOverlay",
+  "backgroundColor",
+  "alwaysOnTopLevel",
+]);
+
+/**
  * Default values for behavior props that should reset on pool release.
  * Prevents state leaking between uses (e.g., Use A sets closable=false,
  * Use B mysteriously can't close the window).
  *
- * Intentionally EXCLUDES `visible` — the pool hides the window explicitly
- * via windowAction({type:"hide"}) and must not include visible:true in
- * the reset payload (WindowInstance.updateProps treats visible:true as
- * a show() call, which would un-hide the released window).
+ * Intentionally EXCLUDES:
+ * - `visible` — the pool hides explicitly via windowAction({type:"hide"});
+ *   including visible:true would un-hide the released window.
+ * - `POOL_NON_RESETTABLE_PROPS` — no clean reset API (see above).
+ *
+ * INVARIANT (enforced by test): every prop in CHANGEABLE_BEHAVIOR_PROPS
+ * must be either in this object OR in POOL_NON_RESETTABLE_PROPS OR be
+ * `visible`. Adding a new changeable prop breaks the test until you
+ * decide which bucket it belongs in.
  */
 export const POOL_RELEASE_PROP_DEFAULTS: Readonly<Record<string, unknown>> = {
   resizable: true,

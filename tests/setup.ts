@@ -54,8 +54,15 @@ class MockWindow {
     this._eventListeners.get(type)?.delete(listener);
   }
 
-  // Simulate the user closing the window via OS chrome (fires unload handlers then marks closed)
+  // Simulate the user closing the window via OS chrome.
+  // Order matches browser/Electron: beforeunload → closed=true → unload.
+  // The pool's unload listener checks `if (childWindow.closed)` — if we
+  // fire unload before setting closed, that check fails and the pool's
+  // cleanup doesn't run.
   simulateUnload() {
+    this.onbeforeunload?.();
+    this.closed = true;
+    mockWindows.delete(this.name);
     const listeners = this._eventListeners.get("unload");
     if (listeners) {
       for (const listener of listeners) {
@@ -66,8 +73,6 @@ class MockWindow {
         }
       }
     }
-    this.onbeforeunload?.();
-    this.close();
   }
 
   close() {

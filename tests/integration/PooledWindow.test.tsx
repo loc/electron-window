@@ -797,34 +797,34 @@ describe("<PooledWindow>", () => {
 
   // C2 regression guard: behavior props must reset on release. Snapshot the
   // defaults keys so removals break this test.
-  it("POOL_RELEASE_PROP_DEFAULTS includes all leak-prone behavior props", async () => {
-    const { POOL_RELEASE_PROP_DEFAULTS } =
-      await import("../../src/shared/types.js");
-    // If you remove a key from this list, a Use-A-sets-X-Use-B-inherits-it
-    // leak will re-appear. Think carefully before removing any.
-    const keys = Object.keys(POOL_RELEASE_PROP_DEFAULTS).sort();
-    expect(keys).toEqual(
-      expect.arrayContaining([
-        "closable",
-        "alwaysOnTop",
-        "opacity",
-        "resizable",
-        "movable",
-        "minimizable",
-        "maximizable",
-        "focusable",
-        "skipTaskbar",
-        "fullscreen",
-        "fullscreenable",
-        "ignoreMouseEvents",
-        "visibleOnAllWorkspaces",
-        "showInactive",
-        "minWidth",
-        "minHeight",
-        "maxWidth",
-        "maxHeight",
-      ]),
-    );
+  it("POOL_RELEASE_PROP_DEFAULTS covers every CHANGEABLE_BEHAVIOR_PROP (except documented exclusions)", async () => {
+    // Systematic invariant check: every prop that can change live must
+    // either have a reset default OR be documented as non-resettable OR
+    // be `visible` (excluded for the show()-on-release reason).
+    //
+    // If you add a prop to CHANGEABLE_BEHAVIOR_PROPS (via PROP_REGISTRY),
+    // this test forces you to decide which bucket it belongs in — it won't
+    // pass until you either add a default or add to the non-resettable set.
+    const {
+      POOL_RELEASE_PROP_DEFAULTS,
+      POOL_NON_RESETTABLE_PROPS,
+      CHANGEABLE_BEHAVIOR_PROPS,
+    } = await import("../../src/shared/types.js");
+
+    const defaultKeys = new Set(Object.keys(POOL_RELEASE_PROP_DEFAULTS));
+    const uncovered: string[] = [];
+    for (const prop of CHANGEABLE_BEHAVIOR_PROPS) {
+      if (prop === "visible") continue; // intentional — see C1 fix
+      if (defaultKeys.has(prop)) continue;
+      if (POOL_NON_RESETTABLE_PROPS.has(prop)) continue;
+      uncovered.push(prop);
+    }
+
+    // If this fails, a prop leaks across pool uses. Add it to
+    // POOL_RELEASE_PROP_DEFAULTS (with its neutral default) or to
+    // POOL_NON_RESETTABLE_PROPS (with a comment explaining why it
+    // can't be reset).
+    expect(uncovered).toEqual([]);
   });
 
   // B6. injectStyles: false in pool definition suppresses style injection

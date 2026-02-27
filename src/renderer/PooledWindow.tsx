@@ -168,6 +168,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
       onDisplayChange,
       title,
       visible,
+      name,
       ...rest
     },
     ref,
@@ -210,6 +211,27 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
     const visibleRef = useRef(visible);
     visibleRef.current = visible;
     const prevPropsRef = useRef<Record<string, unknown> | null>(null);
+
+    // Warn about controlled bounds without onBoundsChange (parity with Window)
+    const hasWarnedAboutControlledBoundsRef = useRef(false);
+    useEffect(() => {
+      if (hasWarnedAboutControlledBoundsRef.current) return;
+      const r = rest as Record<string, unknown>;
+      const hasControlledBounds =
+        r.width !== undefined ||
+        r.height !== undefined ||
+        r.x !== undefined ||
+        r.y !== undefined;
+      if (hasControlledBounds && !onBoundsChange) {
+        devWarning(
+          `${name ? `[${name}] ` : ""}Using controlled bounds (width/height/x/y) without onBoundsChange.\n` +
+            "The window will revert to prop values when user resizes.\n" +
+            "Use defaultWidth/defaultHeight for initial-only bounds, or add onBoundsChange for two-way sync.",
+        );
+        hasWarnedAboutControlledBoundsRef.current = true;
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [rest, onBoundsChange]);
 
     // Tracks the currently-acquired pool entry so release() has the right id
     const entryRef = useRef<{
@@ -282,15 +304,10 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
           entry = await pool.acquire();
         } catch (err) {
           devWarning(
-            `[electron-window] PooledWindow: pool.acquire() failed — ${err instanceof Error ? err.message : String(err)}`,
+            `${name ? `[${name}] ` : ""}PooledWindow: pool.acquire() failed — ${err instanceof Error ? err.message : String(err)}`,
           );
-          // Reset so the component is in a clean state; toggling open will retry.
-          entryRef.current = null;
-          childWindowRef.current = null;
-          setPortalTarget(null);
-          setChildDocument(null);
-          setWindowId(null);
-          setIsReady(false);
+          // State was never set (acquire is the first async op) — component
+          // is already in a clean state. Toggling open will retry.
           return;
         }
 

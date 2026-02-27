@@ -75,8 +75,17 @@ export class RendererWindowPool {
 
   constructor(options: RendererWindowPoolOptions) {
     this.shape = options.shape;
-    this.minIdle = options.config?.minIdle ?? 1;
-    this.maxIdle = options.config?.maxIdle ?? 3;
+    const minIdle = options.config?.minIdle ?? 1;
+    const maxIdle = options.config?.maxIdle ?? 3;
+    if (maxIdle < minIdle) {
+      // Without this, the single-shift eviction on release leaves the pool
+      // permanently above maxIdle. Fail early with a clear message.
+      throw new Error(
+        `[electron-window] Pool config invalid: maxIdle (${maxIdle}) must be >= minIdle (${minIdle})`,
+      );
+    }
+    this.minIdle = minIdle;
+    this.maxIdle = maxIdle;
     this.idleTimeoutMs = options.config?.idleTimeout ?? 30000;
     this.registerWindow = options.registerWindow;
     this.unregisterWindow = options.unregisterWindow;
@@ -228,56 +237,67 @@ export class RendererWindowPool {
       return entry;
     }
 
-    // Pool exhausted — create on the fly (slower path)
+    // Pool exhausted — create on the fly (slower path). Track in inFlight
+    // so concurrent acquires and the debugLog both see accurate counts.
     this.debugLog("exhausted, creating on-the-fly");
-    const id = generateWindowId();
-    const ok = await this.registerWindow(id, {
-      ...this.shape,
-      showOnCreate: false,
-      hideOnClose: true,
-    });
-    if (!ok) throw new Error("RegisterWindow rejected by main process");
-    if (this.isDestroyed) {
-      void this.unregisterWindow(id);
-      throw new Error("Pool destroyed during acquire");
-    }
-
-    const childWindow = window.open("about:blank", id, "");
-    if (!childWindow) {
-      void this.unregisterWindow(id);
-      throw new Error("window.open returned null");
-    }
-
+    this.inFlight++;
     try {
-      await waitForWindowReady(childWindow, () => this.isDestroyed);
-    } catch {
-      // hideOnClose: true makes childWindow.close() a no-op that fires
-      // spurious userCloseRequested. unregisterWindow → destroy() is the
-      // reliable path.
-      void this.unregisterWindow(id);
-      throw new Error("Timed out waiting for pool window to be ready");
-    }
-    if (this.isDestroyed) {
-      void this.unregisterWindow(id);
-      throw new Error("Pool destroyed during acquire");
-    }
-
-    const { container: portalTarget, cleanup: styleCleanup } =
-      initWindowDocument(childWindow.document, {
-        injectStyles: this.injectStyles,
+      const id = generateWindowId();
+      const ok = await this.registerWindow(id, {
+        ...this.shape,
+        showOnCreate: false,
+        hideOnClose: true,
       });
-    const newEntry: PoolEntry = { id, childWindow, portalTarget, styleCleanup };
-    this.active.set(id, newEntry);
-
-    // Handle external destruction for on-the-fly windows too
-    childWindow.addEventListener("unload", () => {
-      if (childWindow.closed) {
-        styleCleanup();
-        this.handleWindowDestroyed(id);
+      if (!ok) throw new Error("RegisterWindow rejected by main process");
+      if (this.isDestroyed) {
+        void this.unregisterWindow(id);
+        throw new Error("Pool destroyed during acquire");
       }
-    });
 
-    return newEntry;
+      const childWindow = window.open("about:blank", id, "");
+      if (!childWindow) {
+        void this.unregisterWindow(id);
+        throw new Error("window.open returned null");
+      }
+
+      try {
+        await waitForWindowReady(childWindow, () => this.isDestroyed);
+      } catch {
+        // hideOnClose: true makes childWindow.close() a no-op that fires
+        // spurious userCloseRequested. unregisterWindow → destroy() is the
+        // reliable path.
+        void this.unregisterWindow(id);
+        throw new Error("Timed out waiting for pool window to be ready");
+      }
+      if (this.isDestroyed) {
+        void this.unregisterWindow(id);
+        throw new Error("Pool destroyed during acquire");
+      }
+
+      const { container: portalTarget, cleanup: styleCleanup } =
+        initWindowDocument(childWindow.document, {
+          injectStyles: this.injectStyles,
+        });
+      const newEntry: PoolEntry = {
+        id,
+        childWindow,
+        portalTarget,
+        styleCleanup,
+      };
+      this.active.set(id, newEntry);
+
+      // Handle external destruction for on-the-fly windows too
+      childWindow.addEventListener("unload", () => {
+        if (childWindow.closed) {
+          styleCleanup();
+          this.handleWindowDestroyed(id);
+        }
+      });
+
+      return newEntry;
+    } finally {
+      this.inFlight--;
+    }
   }
 
   /**
@@ -383,7 +403,11 @@ export class RendererWindowPool {
     const index = this.idle.findIndex((e) => e.id === id);
     if (index !== -1) {
       const [entry] = this.idle.splice(index, 1);
-      if (entry) this.destroyEntry(entry);
+      // destroyEntry handles idleTimers.delete — don't double-delete below.
+      if (entry) {
+        this.destroyEntry(entry);
+        return;
+      }
     }
     this.idleTimers.delete(id);
   }

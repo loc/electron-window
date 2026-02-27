@@ -410,6 +410,15 @@ export class WindowInstance {
         height: newProps.height,
       });
     }
+
+    // When alwaysOnTop is set to false, clear the stale level from
+    // currentProps. Otherwise the dormant value could be resurrected by
+    // future code that reads currentProps.alwaysOnTopLevel (e.g., pool
+    // reuse). The level is derived from string normalization of alwaysOnTop
+    // and is meaningless once alwaysOnTop=false.
+    if (newProps.alwaysOnTop === false) {
+      delete (this.currentProps as Record<string, unknown>)["alwaysOnTopLevel"];
+    }
   }
 
   getState(): WindowState {
