@@ -17,6 +17,24 @@ import {
   devWarning,
 } from "../shared/utils.js";
 
+// Hard caps on setBounds values. Electron clamps internally on most platforms
+// but NaN/Infinity have undefined behavior, and gigantic dimensions can cause
+// GPU memory exhaustion. The 32767 cap matches X11's signed 16-bit dimension
+// limit — safe ceiling for cross-platform.
+const MAX_DIMENSION = 32767;
+const MIN_DIMENSION = 1;
+
+/** Reject NaN/Infinity, clamp to sane range. */
+function sanitizeBoundsValue(
+  v: number | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (v === undefined || !Number.isFinite(v)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(v)));
+}
+
 /**
  * Prop to Electron setter method mapping
  */
@@ -439,16 +457,66 @@ export class WindowInstance {
     }
   }
 
+  /**
+   * Set window bounds. Rejects NaN/Infinity/extreme values (renderer-supplied
+   * bounds arrive here via the WindowAction IPC — no prior validation beyond
+   * `typeof number`). Off-screen positions are clamped to the union of display
+   * workAreas to prevent a compromised renderer from hiding its own window
+   * under other apps (clickjacking setup) or exhausting GPU memory.
+   */
   setBounds(bounds: Partial<Bounds>): void {
-    if (this.browserWindow && !this.isDestroyed) {
-      const current = this.browserWindow.getBounds();
-      this.browserWindow.setBounds({
-        x: bounds.x ?? current.x,
-        y: bounds.y ?? current.y,
-        width: bounds.width ?? current.width,
-        height: bounds.height ?? current.height,
+    if (!this.browserWindow || this.isDestroyed) return;
+    const current = this.browserWindow.getBounds();
+
+    const width = sanitizeBoundsValue(
+      bounds.width,
+      current.width,
+      MIN_DIMENSION,
+      MAX_DIMENSION,
+    );
+    const height = sanitizeBoundsValue(
+      bounds.height,
+      current.height,
+      MIN_DIMENSION,
+      MAX_DIMENSION,
+    );
+
+    // Clamp x/y so at least a 100px sliver stays on some display — keeps
+    // the window grabbable. Uses the union of all workAreas rather than
+    // a single display, since multi-monitor setups span arbitrary coords.
+    const displays = screen.getAllDisplays();
+    let x = sanitizeBoundsValue(
+      bounds.x,
+      current.x,
+      -MAX_DIMENSION,
+      MAX_DIMENSION,
+    );
+    let y = sanitizeBoundsValue(
+      bounds.y,
+      current.y,
+      -MAX_DIMENSION,
+      MAX_DIMENSION,
+    );
+    if (displays.length > 0) {
+      const GRIP = 100;
+      const anyOverlap = displays.some((d) => {
+        const wa = d.workArea;
+        return (
+          x + width > wa.x + GRIP &&
+          x < wa.x + wa.width - GRIP &&
+          y + height > wa.y + GRIP &&
+          y < wa.y + wa.height - GRIP
+        );
       });
+      if (!anyOverlap) {
+        // Fallback: center on primary
+        const p = screen.getPrimaryDisplay().workArea;
+        x = p.x + Math.round((p.width - width) / 2);
+        y = p.y + Math.round((p.height - height) / 2);
+      }
     }
+
+    this.browserWindow.setBounds({ x, y, width, height });
   }
 
   setTitle(title: string): void {

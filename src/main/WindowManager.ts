@@ -202,9 +202,12 @@ export class WindowManager {
     if (this.config.allowedOrigins.includes("*")) return true;
 
     const url = sender.mainFrame.url;
-    // Pre-navigation state (setup ran before loadURL). Actual IPC can't fire
-    // until the page loads, so this check is really for the first real call.
-    if (!url || url === "about:blank") return true;
+    // Empty url means setupForWindow was called before loadURL/loadFile —
+    // the renderer hasn't navigated yet, so no IPC can have fired. Allow.
+    // We do NOT allow about:blank here: a page can navigate itself to
+    // about:blank to bypass the allowlist. Only the truly pre-load empty
+    // string is a safe pass.
+    if (!url) return true;
 
     try {
       const parsedOrigin = new URL(url).origin;
@@ -267,6 +270,26 @@ export class WindowManager {
       WindowManagerIPC.for(webContents).setImplementation(impl);
 
     dispatchers.set(webContents, dispatcher);
+
+    // When the parent WebContents is destroyed (crash, navigation away,
+    // explicit close), clean up its child windows. Without this, a renderer
+    // that opens N windows then crashes leaves N orphaned BrowserWindows
+    // in the map with no controller.
+    webContents.once("destroyed", () => {
+      const ownerId = webContents.id;
+      for (const [id, entry] of this.pendingWindows) {
+        if (entry.ownerWebContentsId === ownerId) {
+          this.pendingWindows.delete(id);
+        }
+      }
+      for (const [id, entry] of this.windows) {
+        if (entry.ownerWebContentsId === ownerId) {
+          entry.instance.destroy();
+          this.windows.delete(id);
+        }
+      }
+      dispatchers.delete(webContents);
+    });
 
     webContents.setWindowOpenHandler((details) => {
       const { frameName, url } = details;

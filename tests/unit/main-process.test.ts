@@ -112,6 +112,7 @@ function createMockWebContents(opts: { id?: number; url?: string } = {}) {
     },
     setWindowOpenHandler: vi.fn(),
     on: vi.fn(),
+    once: vi.fn(),
     send: vi.fn(),
     isDestroyed: vi.fn(() => false),
   };
@@ -1469,22 +1470,26 @@ describe("allowedOrigins — parent renderer origin validation", () => {
     expect(impl.RegisterWindow("w1", {} as never)).toBe(true);
   });
 
-  it("allows pre-navigation state (empty url / about:blank) — setup before loadURL", () => {
+  it("allows empty-url pre-navigation state — setup before loadURL", () => {
     // Mirrors the documented example: setupForWindow(win) BEFORE loadURL().
-    // At that moment mainFrame.url is "" or "about:blank". Real IPC can't
-    // fire until the page loads, but the implementation is created eagerly.
-    // Previously this would return a stub that rejects everything (regression).
+    // At that moment mainFrame.url is "" (empty). Real IPC can't fire until
+    // the page loads, but the implementation is created eagerly. Only the
+    // truly empty string is allowed — about:blank is REJECTED because a page
+    // can navigate itself there to bypass the allowlist.
     const implEmpty = setupWithOrigin(
       { devWarnings: false, allowedOrigins: ["app://main"] },
       "",
     );
     expect(implEmpty.RegisterWindow("w1", {} as never)).toBe(true);
+  });
 
-    const implBlank = setupWithOrigin(
+  it("rejects about:blank when allowedOrigins is set — page can navigate there", () => {
+    const impl = setupWithOrigin(
       { devWarnings: false, allowedOrigins: ["app://main"] },
       "about:blank",
     );
-    expect(implBlank.RegisterWindow("w2", {} as never)).toBe(true);
+    // about:blank is not app://main — reject
+    expect(impl.RegisterWindow("w1", {} as never)).toBe(false);
   });
 
   it("re-validates per call — navigation to a different origin is caught", () => {

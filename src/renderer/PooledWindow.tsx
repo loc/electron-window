@@ -111,8 +111,17 @@ export function destroyWindowPool(poolDef: WindowPoolDefinition): void {
 
 // Props owned by the pool's shape definition — consumers can't override these per-use
 type PoolShapeProps = "transparent" | "frame" | "titleBarStyle" | "vibrancy";
-// Props that don't apply to pooled windows
-type PoolExcludedProps = PoolShapeProps | "recreateOnShapeChange";
+// Props that don't apply to pooled windows:
+// - recreateOnShapeChange: pool shape is immutable
+// - targetDisplay: pool windows are pre-created; only affects creation-time placement
+// - persistBounds: pool windows are reused; per-key persistence doesn't fit
+// - injectStyles: fixed at pool creation time (third arg to createWindowPool)
+type PoolExcludedProps =
+  | PoolShapeProps
+  | "recreateOnShapeChange"
+  | "targetDisplay"
+  | "persistBounds"
+  | "injectStyles";
 
 export interface PooledWindowProps extends Omit<
   BaseWindowProps,

@@ -191,19 +191,18 @@ export const CHANGEABLE_BEHAVIOR_PROPS: ReadonlySet<string> = new Set(
     .filter(
       (prop) =>
         ![
-          // Geometry — handled via explicit bounds IPC, not the changeable-props loop
+          // Controlled geometry — handled via explicit bounds IPC in the diff
+          // effect, not the changeable-props loop. min/max constraints ARE
+          // included (they have setters in PROP_SETTERS and can change live).
           "width",
           "height",
           "x",
           "y",
+          // Default geometry — creation-time only, no setter
           "defaultWidth",
           "defaultHeight",
           "defaultX",
           "defaultY",
-          "minWidth",
-          "maxWidth",
-          "minHeight",
-          "maxHeight",
           "center",
           // Meta / renderer-only props
           "title",
@@ -240,10 +239,16 @@ export interface BaseWindowProps {
   /**
    * Called when the user initiates a close (e.g., clicks the X button).
    *
-   * This is a notification, not an interceptor — the window closes immediately
-   * and this callback fires so you can sync your `open` state back to `false`.
-   * To prevent close, set `closable={false}` proactively (e.g.,
-   * `closable={!hasUnsavedChanges}`).
+   * Fires during Electron's `close` event — the window is about to close
+   * but hasn't yet. Use this to sync your `open` state back to `false`.
+   * The window will close on its own; your `open={false}` is for your
+   * state consistency, not to drive the close.
+   *
+   * This is a notification, not an interceptor. To prevent close, set
+   * `closable={false}` proactively (e.g., `closable={!hasUnsavedChanges}`).
+   *
+   * `onClose` (a separate callback) fires after the window is fully
+   * destroyed, for any reason (user, programmatic, unmount).
    */
   onUserClose?: () => void;
 

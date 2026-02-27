@@ -3,6 +3,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useMemo,
   forwardRef,
   useImperativeHandle,
 } from "react";
@@ -117,7 +118,10 @@ export const Window = forwardRef<WindowRef, WindowProps>(
     const pendingShowRef = useRef<string | null>(null);
     const visibleRef = useRef(visible);
     visibleRef.current = visible;
-    const unregisteredRef = useRef(false);
+    // Tracks whether registerWindow actually succeeded for the current windowId.
+    // Gates cleanup paths so we don't unregister never-registered IDs (e.g.,
+    // initial mount with open={false}) or double-unregister.
+    const hasRegisteredRef = useRef(false);
 
     const childWindowRef = useRef<globalThis.Window | null>(null);
     // Stores the style-injection cleanup returned by initWindowDocument so
@@ -183,20 +187,25 @@ export const Window = forwardRef<WindowRef, WindowProps>(
     // Open/close the child window
     useEffect(() => {
       if (!open) {
-        if (childWindowRef.current && !childWindowRef.current.closed) {
-          childWindowRef.current.close();
+        // Only tear down if we actually opened something. Initial mount with
+        // open={false} has nothing to clean up.
+        if (childWindowRef.current || hasRegisteredRef.current) {
+          if (childWindowRef.current && !childWindowRef.current.closed) {
+            childWindowRef.current.close();
+          }
+          childWindowRef.current = null;
+          setPortalTarget(null);
+          setChildDocument(null);
+          setIsReady(false);
+          lifecycle.setWindowState(null);
+          if (hasRegisteredRef.current) {
+            hasRegisteredRef.current = false;
+            void provider.unregisterWindow(windowId);
+          }
         }
-        childWindowRef.current = null;
-        setPortalTarget(null);
-        setChildDocument(null);
-        setIsReady(false);
-        lifecycle.setWindowState(null);
-        unregisteredRef.current = true;
-        void provider.unregisterWindow(windowId);
         return;
       }
 
-      unregisteredRef.current = false;
       let cancelled = false;
 
       async function openWindow() {
@@ -230,7 +239,15 @@ export const Window = forwardRef<WindowRef, WindowProps>(
           }
           return;
         }
-        if (cancelled) return;
+        hasRegisteredRef.current = true;
+        if (cancelled) {
+          // Effect cleanup already fired (synchronously on open→false), but
+          // its unregister found nothing because the register hadn't completed
+          // yet. Clean up the now-stale pending entry.
+          hasRegisteredRef.current = false;
+          void provider.unregisterWindow(windowId);
+          return;
+        }
 
         // 2. Open the window — Electron's setWindowOpenHandler intercepts this
         const win = window.open("about:blank", windowId, "");
@@ -351,6 +368,14 @@ export const Window = forwardRef<WindowRef, WindowProps>(
               childWindowRef.current.close();
             }
             childWindowRef.current = null;
+            // Explicitly unregister the old windowId — close() will eventually
+            // trigger the main-process 'closed' event which deletes from the
+            // windows map, but that's async and races with the new window's
+            // register. Also handles closable=false preventing close.
+            if (hasRegisteredRef.current) {
+              hasRegisteredRef.current = false;
+              void provider.unregisterWindow(windowId);
+            }
             setPortalTarget(null);
             setChildDocument(null);
             setIsReady(false);
@@ -379,11 +404,17 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         childWindowRef.current.document.title = props.title;
       }
 
-      // Collect changeable behavior prop updates for IPC
+      // Collect changeable behavior prop updates for IPC.
+      // `visible` uses its default (true) when prop is undefined — so going
+      // from false→undefined means "show" (respects the documented default),
+      // not "no change". Other props treat undefined as "don't send".
       const changedBehaviorProps: Record<string, unknown> = {};
       for (const prop of CHANGEABLE_BEHAVIOR_PROPS) {
         const prevValue = prevProps[prop as keyof typeof prevProps];
-        const currentValue = props[prop as keyof typeof props];
+        let currentValue = props[prop as keyof typeof props];
+        if (prop === "visible" && currentValue === undefined) {
+          currentValue = true;
+        }
         if (prevValue !== currentValue && currentValue !== undefined) {
           changedBehaviorProps[prop] = currentValue;
         }
@@ -433,7 +464,8 @@ export const Window = forwardRef<WindowRef, WindowProps>(
           childWindowRef.current.close();
         }
         childWindowRef.current = null;
-        if (!unregisteredRef.current) {
+        if (hasRegisteredRef.current) {
+          hasRegisteredRef.current = false;
           void provider.unregisterWindow(windowId);
         }
       };
@@ -460,17 +492,17 @@ export const Window = forwardRef<WindowRef, WindowProps>(
       }
     }, [isReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    useImperativeHandle(ref, () => {
-      if (!isReady || !windowId) return NOT_READY_HANDLE;
-      const state = lifecycle.windowState;
+    // Stable method refs — don't depend on windowState, so the handle object
+    // identity only changes when windowId/provider change (rare). State fields
+    // on the handle still reflect current values via getter closures reading
+    // from the ref. This matches useCurrentWindow's behavior and keeps the
+    // README promise that "method references won't change identity".
+    const stateRef = useRef(lifecycle.windowState);
+    stateRef.current = lifecycle.windowState;
+
+    const handleMethods = useMemo(() => {
+      if (!windowId) return null;
       return {
-        id: windowId,
-        isReady: true,
-        isFocused: state?.isFocused ?? false,
-        isMaximized: state?.isMaximized ?? false,
-        isMinimized: state?.isMinimized ?? false,
-        isFullscreen: state?.isFullscreen ?? false,
-        bounds: state?.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
         focus: () => void provider.windowAction(windowId, { type: "focus" }),
         blur: () => void provider.windowAction(windowId, { type: "blur" }),
         minimize: () =>
@@ -481,14 +513,14 @@ export const Window = forwardRef<WindowRef, WindowProps>(
           void provider.windowAction(windowId, { type: "unmaximize" }),
         toggleMaximize: () =>
           void provider.windowAction(windowId, {
-            type: state?.isMaximized ? "unmaximize" : "maximize",
+            type: stateRef.current?.isMaximized ? "unmaximize" : "maximize",
           }),
         close: () => void provider.windowAction(windowId, { type: "close" }),
         forceClose: () =>
           void provider.windowAction(windowId, { type: "forceClose" }),
-        setBounds: (bounds) =>
+        setBounds: (bounds: Partial<import("../shared/types.js").Bounds>) =>
           void provider.windowAction(windowId, { type: "setBounds", bounds }),
-        setTitle: (t) => {
+        setTitle: (t: string) => {
           if (childWindowRef.current) childWindowRef.current.document.title = t;
           void provider.windowAction(windowId, { type: "setTitle", title: t });
         },
@@ -497,7 +529,22 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         exitFullscreen: () =>
           void provider.windowAction(windowId, { type: "exitFullscreen" }),
       };
-    }, [isReady, windowId, lifecycle.windowState, provider, childWindowRef]);
+    }, [windowId, provider]);
+
+    useImperativeHandle(ref, () => {
+      if (!isReady || !windowId || !handleMethods) return NOT_READY_HANDLE;
+      const state = stateRef.current;
+      return {
+        id: windowId,
+        isReady: true,
+        isFocused: state?.isFocused ?? false,
+        isMaximized: state?.isMaximized ?? false,
+        isMinimized: state?.isMinimized ?? false,
+        isFullscreen: state?.isFullscreen ?? false,
+        bounds: state?.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
+        ...handleMethods,
+      };
+    }, [isReady, windowId, handleMethods, lifecycle.windowState]);
 
     // Portal keeps children in the parent React tree while rendering into the child window DOM
     if (!portalTarget) return null;

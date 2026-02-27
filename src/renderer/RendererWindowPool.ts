@@ -224,18 +224,30 @@ export class RendererWindowPool {
       hideOnClose: true,
     });
     if (!ok) throw new Error("RegisterWindow rejected by main process");
+    if (this.isDestroyed) {
+      void this.unregisterWindow(id);
+      throw new Error("Pool destroyed during acquire");
+    }
 
     const childWindow = window.open("about:blank", id, "");
-    if (!childWindow) throw new Error("window.open returned null");
+    if (!childWindow) {
+      void this.unregisterWindow(id);
+      throw new Error("window.open returned null");
+    }
 
     try {
-      await waitForWindowReady(childWindow);
+      await waitForWindowReady(childWindow, () => this.isDestroyed);
     } catch {
       // Close the orphan before re-throwing — without this the BrowserWindow
       // stays alive, hidden, with a stale pendingWindows entry (10s GC).
       childWindow.close();
       void this.unregisterWindow(id);
       throw new Error("Timed out waiting for pool window to be ready");
+    }
+    if (this.isDestroyed) {
+      childWindow.close();
+      void this.unregisterWindow(id);
+      throw new Error("Pool destroyed during acquire");
     }
 
     const { container: portalTarget, cleanup: styleCleanup } =
@@ -275,12 +287,28 @@ export class RendererWindowPool {
     }
 
     // Clean the DOM to prevent data leakage between pool window uses.
-    // React unmounts portal content, but imperative DOM changes, global
-    // variables, and timers from the previous use could persist.
+    // React unmounts portal content when PooledWindow nulls the target,
+    // but imperative DOM changes made via useWindowDocument() persist
+    // across reuse. We clear: #root contents (redundant with React unmount
+    // but catches imperative children), body classes, and non-root body
+    // children. <head> is left alone — the style subscriber manages
+    // stylesheets there, and clearing them would break style sync on the
+    // next acquire.
+    //
+    // NOTE: Module-level state (globals, timers, RAF loops) set by the
+    // previous use CANNOT be cleaned up here — consumers using
+    // useWindowDocument() imperatively are responsible for their own
+    // cleanup in onClose or useEffect cleanup. Document this caveat.
     const doc = entry.childWindow.document;
     const container = doc.getElementById("root");
     if (container) {
       container.innerHTML = "";
+    }
+    doc.body.className = "";
+    // Remove any body children other than #root (e.g., portals that
+    // previous consumer appended directly)
+    for (const child of Array.from(doc.body.children)) {
+      if (child !== container) child.remove();
     }
 
     // Always recycle the released window. If idle is at capacity (e.g., due to

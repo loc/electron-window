@@ -147,11 +147,25 @@ export function useWindowLifecycle(
       // Helper: apply a patch to windowStateRef and schedule the React state
       // update. We update the ref first so that getSnapshot() returns the new
       // value synchronously when we notify useSyncExternalStore listeners below.
+      // Preserves the `bounds` object reference when the patch doesn't touch
+      // bounds — this keeps useWindowBounds() stable across focus/blur/etc
+      // events. Without this, every event creates a new windowState object
+      // with a new bounds reference, causing useSyncExternalStore to re-render
+      // useWindowBounds() consumers on unrelated events.
       function patchState(patch: Partial<WindowState>): void {
-        if (windowStateRef.current) {
-          windowStateRef.current = { ...windowStateRef.current, ...patch };
+        const prev = windowStateRef.current;
+        if (prev) {
+          const next = { ...prev, ...patch };
+          // Reuse the old bounds object unless the patch explicitly changed it
+          if (patch.bounds === undefined) next.bounds = prev.bounds;
+          windowStateRef.current = next;
         }
-        setWindowState((prev) => (prev ? { ...prev, ...patch } : prev));
+        setWindowState((s) => {
+          if (!s) return s;
+          const next = { ...s, ...patch };
+          if (patch.bounds === undefined) next.bounds = s.bounds;
+          return next;
+        });
       }
 
       switch (event.type) {
