@@ -19,7 +19,23 @@ function WindowContent() {
 }
 ```
 
+### `WindowHandle` state
+
+Read-only snapshots. The handle object identity changes when these change — don't use the whole handle as an effect dependency.
+
+| Field          | Type      | Description                                           |
+| -------------- | --------- | ----------------------------------------------------- |
+| `id`           | `string`  | The window ID                                         |
+| `isReady`      | `boolean` | `false` until the window is created and content mounted. Methods are no-ops until this is `true`. |
+| `isFocused`    | `boolean` | Window has focus                                      |
+| `isMaximized`  | `boolean` | Window is maximized                                   |
+| `isMinimized`  | `boolean` | Window is minimized                                   |
+| `isFullscreen` | `boolean` | Window is fullscreen                                  |
+| `bounds`       | `Bounds`  | Current `{ x, y, width, height }`                     |
+
 ### `WindowHandle` methods
+
+Method references are stable across renders — safe to pass as effect dependencies or event handlers.
 
 | Method                     | Description                            |
 | -------------------------- | -------------------------------------- |
@@ -36,6 +52,19 @@ function WindowContent() {
 | `enterFullscreen()`        | Enter fullscreen mode                  |
 | `exitFullscreen()`         | Exit fullscreen mode                   |
 
+### `useIsInsideWindow()`
+
+Returns `true` if the component is rendering inside a `<Window>`'s children, `false` otherwise. Unlike the other hooks, this doesn't throw when called outside a `<Window>` — use it to conditionally render components that call `useCurrentWindow()` and friends.
+
+```tsx
+function StatusBar() {
+  const inside = useIsInsideWindow();
+  if (!inside) return <span>Main window</span>;
+  const focused = useWindowFocused(); // safe — we checked
+  return <span>{focused ? "Focused" : "Blurred"}</span>;
+}
+```
+
 ## Reactive State Hooks
 
 Each hook re-renders only when its specific value changes.
@@ -48,9 +77,11 @@ Each hook re-renders only when its specific value changes.
 | `useWindowFullscreen()` | `boolean`                                          | Whether in fullscreen mode      |
 | `useWindowVisible()`  | `boolean`                                            | Whether the window is visible   |
 | `useWindowBounds()`   | `{ x: number; y: number; width: number; height: number }` | Current bounds            |
-| `useWindowDisplay()`  | `{ id: number; bounds: Bounds; workArea: Bounds; scaleFactor: number }` | Current display |
-| `useWindowState()`    | `WindowState`                                        | Full window state object        |
-| `useWindowDocument()` | `Document`                                           | The child window's Document (see [Integration Notes](/electron-window/guides/patterns/#integration-notes)) |
+| `useWindowDisplay()`  | `DisplayInfo \| null`                                | Current display — `null` until the window has moved at least once |
+| `useWindowState()`    | `WindowState \| null`                                | Full window state object — `null` before the window is ready |
+| `useWindowDocument()` | `Document \| null`                                   | The child window's Document (see [Integration Notes](/electron-window/guides/patterns/#integration-notes)) |
+
+`DisplayInfo` has the shape `{ id: number; bounds: Bounds; workArea: Bounds; scaleFactor: number }`.
 
 ```tsx
 function WindowContent() {
@@ -78,8 +109,10 @@ const { bounds, save, clear } = usePersistedBounds("my-window", {
 });
 ```
 
-| Return value | Type         | Description                                 |
-| ------------ | ------------ | ------------------------------------------- |
-| `bounds`     | `Partial<Bounds>` | Saved bounds, or defaults if none saved |
-| `save`       | `(bounds) => void` | Persist current bounds               |
-| `clear`      | `() => void` | Remove saved bounds                         |
+| Return value | Type                                                                  | Description                                 |
+| ------------ | --------------------------------------------------------------------- | ------------------------------------------- |
+| `bounds`     | `{ defaultWidth?, defaultHeight?, defaultX?, defaultY? }`             | Saved bounds (mapped to `default*` prop names) or the defaults you passed. Spread directly into `<Window>`. |
+| `save`       | `(bounds: Bounds) => void`                                            | Persist current bounds. Debounced (default 500ms). |
+| `clear`      | `() => void`                                                          | Remove saved bounds                         |
+
+The `bounds` keys are `defaultWidth`/`defaultHeight`/`defaultX`/`defaultY` — not `width`/`height`/`x`/`y` — so that `{...bounds}` spreads cleanly onto `<Window>` without accidentally creating a controlled window.

@@ -58,7 +58,7 @@
     "docs:dev": "cd docs && yarn dev",
     "docs:build": "cd docs && yarn build",
     "clean": "rm -rf dist",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "yarn build"
   },
   "peerDependencies": {
     "electron": ">=30.0.0",
@@ -96,6 +96,10 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/loc/electron-window.git"
+  },
+  "homepage": "https://loc.github.io/electron-window/",
+  "bugs": {
+    "url": "https://github.com/loc/electron-window/issues"
   },
   "keywords": [
     "electron",

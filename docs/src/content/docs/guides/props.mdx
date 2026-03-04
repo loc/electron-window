@@ -43,7 +43,11 @@ The `default*` / controlled split follows React's `defaultValue` / `value` patte
 | `backgroundColor` | `string`  | —       | Background color.                                    |
 | `opacity`         | `number`  | —       | Window opacity (0.0–1.0).                            |
 
-**Creation-only** props cannot change after the window is created. Changing them logs a dev warning. Set `recreateOnShapeChange` to destroy and recreate the window instead.
+**Creation-only** props cannot change after the window is created. Changing them logs a dev warning. Set `recreateOnShapeChange` to destroy and recreate the window instead — note that this unmounts and remounts all children, so any `useState`/`useRef` inside them resets.
+
+:::note[`open={false}` and unload listeners]
+Setting `open={false}` destroys the window via `BrowserWindow.destroy()`, which does **not** fire `beforeunload`/`unload`. If you attach those listeners via `useWindowDocument()`, they'll fire on user-initiated close (X button) but not on programmatic close.
+:::
 
 ## Behavior
 
@@ -63,6 +67,7 @@ The `default*` / controlled split follows React's `defaultValue` / `value` patte
 | `visibleOnAllWorkspaces` | `boolean`                     | `false` |
 
 `AlwaysOnTopLevel` is a string union: `"normal" | "floating" | "torn-off-menu" | "modal-panel" | "main-menu" | "status" | "pop-up-menu" | "screen-saver"`. Higher levels float above lower ones. `true` is equivalent to `"floating"`.
+
 ## Events
 
 | Prop                                     | Fires when                          |

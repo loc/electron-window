@@ -43,13 +43,21 @@ define: {
 }
 ```
 
-This additionally gates the **preload**: on a wrong origin, `window.electron_window` is never exposed. The check runs in the EIPC validator layer against `event.senderFrame.url` (the correct frame).
+This additionally gates the **preload**: on a wrong origin, `window.electron_window` is never exposed. The check runs in the generated IPC validator against `event.senderFrame.url` (the correct frame).
 
 ## Per-WebContents ownership
 
 A renderer can only mutate windows **it registered**. If you `setupForWindow` on multiple parent windows, each is isolated — WebContents B cannot `DestroyWindow`, `UpdateWindow`, or `WindowAction` on WebContents A's child windows, even with knowledge of the window ID.
 
 `setWindowOpenHandler` also verifies ownership: a different WebContents calling `window.open("about:blank", stolenId)` is denied.
+
+## Grandchild windows
+
+Child windows created by `<Window>` have a blanket `setWindowOpenHandler(() => ({ action: "deny" }))`. Any `window.open()` from **inside a child window's document** returns `null`.
+
+This doesn't affect nested `<Window>` components — they call `window.open()` from the **parent renderer's** context (React runs in the parent; only the DOM is portaled into the child). But third-party libraries that call `element.ownerDocument.defaultView.open(...)` from inside a child window's DOM will be blocked.
+
+A dev warning fires when this happens, naming the denied URL.
 
 ## Rate limits & TTL
 
@@ -74,7 +82,7 @@ IDs are generated via `crypto.randomUUID()` (falling back to `crypto.getRandomVa
 | Renderer overrides `webPreferences` | Main-process-only + enforced floor (`nodeIntegration: false`, etc.)             |
 | Arbitrary URL navigation            | `about:blank` only; others denied                                               |
 | Unexpected IPC props                | Allowlist filtering before `BrowserWindow`                                      |
-| IPC from iframes                    | EIPC-generated `is_main_frame` validator — rejected before handlers run         |
+| IPC from iframes                    | Main-frame-only validator in the IPC layer — rejected before handlers run       |
 | Wrong-origin renderer               | `allowedOrigins` (runtime, per-call) or `__ELECTRON_WINDOW_ALLOWED_ORIGINS__`   |
 | Cross-renderer window control       | Per-WebContents ownership checks on every mutation                              |
 | Runaway window creation             | `maxPendingWindows`, `maxWindows`, 10s pending TTL                              |

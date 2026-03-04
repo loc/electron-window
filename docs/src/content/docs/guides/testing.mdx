@@ -41,10 +41,25 @@ test("opens settings window", async () => {
 
 Returns an array of all open mock windows. Each entry has:
 
-| Property | Type     | Description                   |
-| -------- | -------- | ----------------------------- |
-| `id`     | `string` | Unique window identifier      |
-| `props`  | `object` | The props passed to `<Window>` |
+| Property | Type          | Description                                        |
+| -------- | ------------- | -------------------------------------------------- |
+| `id`     | `string`      | Unique window identifier                           |
+| `props`  | `object`      | The props passed to `<Window>`                     |
+| `state`  | `WindowState` | Live window state — assert on `isFocused`, `bounds`, etc. |
+| `events` | `WindowEvent[]` | Event log — everything fired on this window        |
+
+### `getMockWindow(id)` / `getMockWindowByName(name)`
+
+Retrieve a single window. `getMockWindowByName` matches the `name` prop on `<Window>` — cleaner than `getMockWindows()[0]` when you have multiple windows:
+
+```tsx
+<Window open name="settings" title="Settings">...</Window>
+<Window open name="editor" title="Editor">...</Window>
+
+// in the test
+const settings = getMockWindowByName("settings");
+expect(settings?.props.title).toBe("Settings");
+```
 
 ### `resetMockWindows()`
 
@@ -97,6 +112,8 @@ test("handles bounds change", async () => {
 | `"unmaximized"`        | —                                 | Window restored from maximized   |
 | `"minimized"`          | —                                 | Window minimized                 |
 | `"restored"`           | —                                 | Window restored from minimized   |
+| `"shown"`              | —                                 | Window became visible            |
+| `"hidden"`             | —                                 | Window was hidden                |
 | `"enterFullscreen"`    | —                                 | Window entered fullscreen        |
 | `"leaveFullscreen"`    | —                                 | Window exited fullscreen         |
 | `"boundsChanged"`      | `bounds: { x, y, width, height }` | Window resized or moved          |
@@ -104,3 +121,12 @@ test("handles bounds change", async () => {
 | `"displayChanged"`     | `display: DisplayInfo`            | Window moved to another monitor  |
 | `"closed"`             | —                                 | Window was destroyed             |
 | `"ready"`              | —                                 | Window ready and content mounted |
+
+### Convenience wrappers
+
+For the common cases, there are thin wrappers that save a few keystrokes:
+
+```tsx
+simulateMockUserClose(id);            // = simulateMockWindowEvent(id, { type: "userCloseRequested" })
+simulateMockResize(id, bounds);       // = simulateMockWindowEvent(id, { type: "boundsChanged", bounds })
+```

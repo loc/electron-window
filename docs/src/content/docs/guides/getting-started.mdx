@@ -9,6 +9,12 @@ description: "Install @loc/electron-window and wire up the three required files.
 npm install @loc/electron-window
 ```
 
+## How it works
+
+`<Window open>` in your React tree calls `window.open()`. The main process intercepts that via `setWindowOpenHandler`, creates a `BrowserWindow` with the props you pre-registered over IPC, and hands back a blank document. React then **portals** your children into that document — so they stay in the parent React tree (your context providers keep working), but their DOM lives in the child window.
+
+Understanding this helps with the edge cases: `window` in your component code is the *parent renderer's* `window` (React runs there), but `element.ownerDocument` is the *child's* document (DOM lives there). See [Patterns → Integration Notes](/electron-window/guides/patterns/#integration-notes) when you hit this.
+
 ## Setup
 
 Three files — one per Electron process.
@@ -17,6 +23,8 @@ Three files — one per Electron process.
 
 ```ts
 // main.ts
+import path from "node:path";
+import { app, BrowserWindow } from "electron";
 import { setupWindowManager } from "@loc/electron-window/main";
 
 const manager = setupWindowManager({
@@ -26,10 +34,19 @@ const manager = setupWindowManager({
     },
   },
 });
-manager.setupForWindow(mainWindow);
+
+app.whenReady().then(() => {
+  const mainWindow = new BrowserWindow({
+    webPreferences: { preload: path.join(__dirname, "preload.js") },
+  });
+  manager.setupForWindow(mainWindow);
+  mainWindow.loadFile("index.html");
+});
 ```
 
 `setupWindowManager` is the only place where `webPreferences` can be configured. The renderer cannot override them. See [Security](/electron-window/guides/security/) for details.
+
+`setupForWindow` accepts a `BrowserWindow`, `WebContentsView`, or bare `WebContents` — useful if your parent renderer is a `WebContentsView` rather than a top-level window.
 
 ### Preload script
 
@@ -44,6 +61,7 @@ This sets up the IPC bridge between the main and renderer processes.
 
 ```tsx
 // renderer
+import { useState } from "react";
 import { WindowProvider, Window } from "@loc/electron-window";
 
 function App() {
@@ -68,6 +86,67 @@ function App() {
 
 `WindowProvider` must wrap all `<Window>` usage. Children of `<Window>` live in the parent React tree — Redux stores, theme providers, routers, and context all work inside child windows without extra wiring.
 
+#### `<WindowProvider>` props
+
+| Prop          | Type      | Default                             | Description                                                                 |
+| ------------- | --------- | ----------------------------------- | --------------------------------------------------------------------------- |
+| `devWarnings` | `boolean` | `true` when `NODE_ENV==="development"` | Enable dev warnings. Set explicitly in sandboxed renderers where `process.env` isn't available. |
+| `debug`       | `boolean` | `false`                             | Log every IPC call and event to the console.                                |
+
+In a sandboxed renderer (the library's default), `process.env.NODE_ENV` is `undefined` — dev warnings won't fire unless you set `<WindowProvider devWarnings>` explicitly.
+
+## Allowing external links
+
+By default, the library denies any `window.open()` from the parent renderer that isn't an `about:blank` managed window. This means `<a target="_blank">` silently fails. To route external URLs to the system browser, pass a fallback handler:
+
+```ts
+import { shell } from "electron";
+
+manager.setupForWindow(mainWindow, {
+  fallbackWindowOpenHandler: ({ url }) => {
+    if (url.startsWith("https://")) shell.openExternal(url);
+    return { action: "deny" };
+  },
+});
+```
+
+Without this, a dev warning fires: `"window.open to <url> denied. Not a managed window and no fallbackWindowOpenHandler provided."`
+
+## Main-process API
+
+`setupWindowManager` returns (and `getWindowManager()` retrieves) a `WindowManager` instance. Useful for tray menus, "close all windows", or anything else in the main process that needs to touch child windows:
+
+```ts
+import { getWindowManager } from "@loc/electron-window/main";
+
+const manager = getWindowManager();
+
+// All managed child windows
+for (const win of manager.getAllWindows()) {
+  win.focus();              // or .close(), .minimize(), .destroy(), ...
+  const state = win.getState();  // { id, bounds, isFocused, isVisible, ... }
+}
+
+// One window by ID
+const instance = manager.getWindow(someId);
+instance?.window?.setBounds({ width: 800, height: 600 });  // raw BrowserWindow
+```
+
+`WindowInstance` wraps a `BrowserWindow` with the library's lifecycle methods. `instance.window` gives you the underlying Electron object if you need something the wrapper doesn't expose.
+
+## Troubleshooting
+
+**Window doesn't appear / nothing happens:**
+
+- `<WindowProvider>` wrapping your app? `<Window>` won't mount without it.
+- Preload bundled? The import is side-effect-only — most bundlers need `sideEffects` in package.json or explicit inclusion. Check the renderer console for "preload bridge not found".
+- `webPreferences.contextIsolation: true`? The `contextBridge` API requires it. The "preload bridge not found" warning lists this as a possible cause.
+- `manager.setupForWindow(mainWindow)` called **before** `loadFile`/`loadURL`? The `setWindowOpenHandler` needs to be registered before the renderer runs.
+
+**"hit maxWindows (50)" with no obvious cause:** Usually a `<PooledWindow>` with an unstable `pool` prop (inline `createWindowPool()`, `useMemo` with changing deps, or HMR without `destroyWindowPool` in `import.meta.hot.dispose`). See [Pooling → Pool lifetime](/electron-window/guides/pooling/#pool-lifetime--cleanup).
+
+**Styles missing in child window:** `injectStyles: "auto"` copies `<style>`/`<link>` tags from the parent's `<head>`. CSS-in-JS frameworks that inject styles elsewhere need `injectStyles: false` + their own injection logic.
+
 ## Entry Points
 
 | Import                         | Use                                 |
@@ -81,4 +160,8 @@ function App() {
 
 - [Props Reference](/electron-window/guides/props/) — all `<Window>` props
 - [Hooks](/electron-window/guides/hooks/) — reactive window state
-- [Patterns](/electron-window/guides/patterns/) — common recipes
+- [Pooling](/electron-window/guides/pooling/) — pre-warm windows for instant display
+- [Persistence](/electron-window/guides/persistence/) — save/restore bounds across sessions
+- [Testing](/electron-window/guides/testing/) — mock providers and event simulation
+- [Security](/electron-window/guides/security/) — origin allowlist, ownership, enforced webPreferences
+- [Patterns](/electron-window/guides/patterns/) — common recipes and integration notes

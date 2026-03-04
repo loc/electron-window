@@ -8,8 +8,9 @@ hero:
     - text: Get Started
       link: /electron-window/guides/getting-started/
       icon: right-arrow
-    - text: API Reference
-      link: /electron-window/api/
+    - text: GitHub
+      link: https://github.com/loc/electron-window
+      icon: external
       variant: minimal
 ---
 
@@ -45,5 +46,15 @@ import { CardGrid, Card } from '@astrojs/starlight/components';
     Mock providers, mock windows, and event simulation for unit tests.
 
     [Testing Guide →](/electron-window/guides/testing/)
+  </Card>
+  <Card title="Security" icon="seti:lock">
+    Enforced `webPreferences`, origin allowlist, per-renderer ownership.
+
+    [Security Model →](/electron-window/guides/security/)
+  </Card>
+  <Card title="Patterns" icon="open-book">
+    Unsaved-changes prompts, window refs, Radix/Framer integration notes.
+
+    [Common Patterns →](/electron-window/guides/patterns/)
   </Card>
 </CardGrid>

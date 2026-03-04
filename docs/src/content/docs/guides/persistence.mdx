@@ -44,14 +44,37 @@ function PersistentWindow({ children }) {
 }
 ```
 
+### Options
+
+| Option           | Type     | Default | Description                               |
+| ---------------- | -------- | ------- | ----------------------------------------- |
+| `defaultWidth`   | `number` | —       | Width when nothing is saved               |
+| `defaultHeight`  | `number` | —       | Height when nothing is saved              |
+| `defaultX`       | `number` | —       | X position when nothing is saved          |
+| `defaultY`       | `number` | —       | Y position when nothing is saved          |
+| `saveDebounceMs` | `number` | `500`   | Debounce for `save()` — writes coalesce   |
+
 ### Return values
 
-| Value    | Type                  | Description                                   |
-| -------- | --------------------- | --------------------------------------------- |
-| `bounds` | `Partial<Bounds>`     | Saved bounds, or defaults if nothing is saved |
-| `save`   | `(bounds) => void`    | Persist new bounds (pass directly to `onBoundsChange`) |
-| `clear`  | `() => void`          | Remove saved bounds, revert to defaults       |
+| Value    | Type                                                          | Description                                   |
+| -------- | ------------------------------------------------------------- | --------------------------------------------- |
+| `bounds` | `{ defaultWidth?, defaultHeight?, defaultX?, defaultY? }`     | Saved bounds mapped to `default*` prop names, or the defaults you passed. Spread directly into `<Window {...bounds}>`. |
+| `save`   | `(bounds: Bounds) => void`                                    | Persist new bounds (pass directly to `onBoundsChange`). Debounced. |
+| `clear`  | `() => void`                                                  | Remove saved bounds, revert to defaults       |
+
+The `bounds` keys are `defaultWidth`/`defaultHeight`/`defaultX`/`defaultY` — not `width`/`height`/`x`/`y` — so spreading them doesn't accidentally create a controlled window.
+
+## Clearing bounds without the hook
+
+For "reset all settings" or logout flows where you don't have the hook mounted:
+
+```ts
+import { clearPersistedBounds, clearAllPersistedBounds } from "@loc/electron-window";
+
+clearPersistedBounds("settings");  // one key
+clearAllPersistedBounds();         // every key this library has stored
+```
 
 ## Storage
 
-Bounds are stored in `localStorage` under a namespaced key derived from the persistence key you provide. The stored value includes `x`, `y`, `width`, and `height`.
+Bounds are stored in `localStorage` under a namespaced key (`electron-window:bounds:<your-key>`). The stored value includes `x`, `y`, `width`, and `height`.

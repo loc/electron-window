@@ -12,10 +12,10 @@ Without pooling, each `open={true}` creates a new `BrowserWindow` and loads its 
 ```tsx
 import { PooledWindow, createWindowPool } from "@loc/electron-window";
 
-// Create once at module level
+// Create once at module level — NOT inside a component
 const overlayPool = createWindowPool(
   { transparent: true, frame: false }, // shape — creation-only props
-  { minIdle: 1, maxIdle: 3, idleTimeout: 5000 }, // pool config
+  { minIdle: 1, maxIdle: 3, idleTimeout: 30000 }, // pool config
 );
 
 function App() {
@@ -73,8 +73,9 @@ const overlayPool = createWindowPool(
 
 `PooledWindow` accepts most `<Window>` props except creation-only shape props (those are fixed by the pool). Behavior props — `alwaysOnTop`, `title`, event handlers, etc. — can vary per use and update live while open.
 
-**Not applicable to pooled windows:**
+**Not applicable to pooled windows** (TypeScript error if passed):
 - Shape props (`transparent`, `frame`, `titleBarStyle`, `vibrancy`) — fixed by the pool definition
+- `injectStyles` — fixed by the pool definition (third arg to `createWindowPool`)
 - `targetDisplay` — pool windows are pre-created; this only affects placement at creation time
 - `persistBounds` — pool windows are reused; per-key persistence doesn't fit the model
 - `recreateOnShapeChange` — pool shape is immutable
@@ -85,3 +86,81 @@ const overlayPool = createWindowPool(
 | `open` | `boolean`    | Acquire or release from pool    |
 
 All other [`<Window>` props](/electron-window/guides/props/) are supported.
+
+:::caution[Props that leak across reuses]
+Most behavior props are reset to defaults when a window is released back to the pool. A few can't be reset reliably and **leak from one use to the next**: `trafficLightPosition`, `titleBarOverlay`, `backgroundColor`. If you set these on a `<PooledWindow>`, set them on *every* use of that pool — don't rely on the default being restored.
+:::
+
+## Close button behavior
+
+Pool windows use `hideOnClose` internally. When the user clicks the X button:
+
+1. The window **hides** (doesn't destroy)
+2. `onUserClose` fires
+3. `onClose` does **not** fire (the `BrowserWindow` still exists)
+
+This differs from `<Window>`, where clicking X destroys the window and `onClose` fires. The typical pattern is the same though — your `onUserClose` handler sets `open={false}`, which releases the window back to the pool:
+
+```tsx
+<PooledWindow pool={overlayPool} open={show} onUserClose={() => setShow(false)}>
+```
+
+`onClose` fires only when the underlying `BrowserWindow` is actually destroyed — via `destroyWindowPool()`, main-process shutdown, or eviction when idle exceeds `maxIdle`.
+
+## Pool lifetime & cleanup
+
+**Pools outlive React.** The pool instance is cached against the `WindowPoolDefinition` object's identity and shared across every `<PooledWindow>` that receives it. Unmounting `<PooledWindow>` — or even `<WindowProvider>` — does **not** destroy the pool's idle `BrowserWindow`s. They stay hidden and warm, ready for the next mount.
+
+This is usually what you want: the whole point of pooling is that the window already exists when you need it. But there are cases where you need to explicitly tear down a pool.
+
+### Keep the `pool` prop stable
+
+The pool cache is keyed by object identity. If the `WindowPoolDefinition` you pass to `<PooledWindow pool={...}>` changes identity, the library creates a **new** pool — and the old pool's idle windows are orphaned in the main process with nothing to clean them up.
+
+```tsx
+// DON'T — new pool every render, leaks one hidden window per render
+<PooledWindow pool={createWindowPool({})} open={show}>
+
+// DON'T — new pool whenever `userId` changes, leaks per user-switch
+const pool = useMemo(() => createWindowPool({}), [userId]);
+
+// DO — module-scope constant, stable for the life of the bundle
+const overlayPool = createWindowPool({});
+function App() {
+  return <PooledWindow pool={overlayPool} open={show}>...</PooledWindow>;
+}
+```
+
+A dev-mode warning fires if `<PooledWindow>` sees a second distinct pool identity. The eventual production symptom is the `maxWindows` limit (50 by default) being hit with no obvious cause.
+
+### `destroyWindowPool(poolDef)`
+
+Destroys all idle **and** active windows belonging to a pool and removes it from the cache. Call this when the pool will genuinely never be used again:
+
+```tsx
+import { destroyWindowPool } from "@loc/electron-window";
+
+// Route/feature teardown — you're done with the overlay feature entirely
+useEffect(() => {
+  return () => destroyWindowPool(overlayPool);
+}, []);
+```
+
+Calling this while a `<PooledWindow>` is mounted and open will close the user's window out from under them. The next `open={true}` throws `"Pool has been destroyed"` (caught and dev-warned by `<PooledWindow>`). Only call it when no consumer is mounted.
+
+### HMR
+
+HMR re-evaluating the module that defines your pool creates a fresh `WindowPoolDefinition` object — same identity-churn leak as inline creation, just slower. Dispose the old pool before the module reloads:
+
+```tsx
+const overlayPool = createWindowPool(
+  { transparent: true, frame: false },
+  { minIdle: 1 },
+);
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => destroyWindowPool(overlayPool));
+}
+```
+
+If you have several pools in one module, dispose each. The library has no way to do this automatically — it doesn't know which module owns which pool.

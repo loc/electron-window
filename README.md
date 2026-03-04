@@ -16,6 +16,8 @@ Three files — one per Electron process:
 
 ```ts
 // main.ts
+import path from "node:path";
+import { app, BrowserWindow } from "electron";
 import { setupWindowManager } from "@loc/electron-window/main";
 
 const manager = setupWindowManager({
@@ -25,7 +27,14 @@ const manager = setupWindowManager({
     },
   },
 });
-manager.setupForWindow(mainWindow);
+
+app.whenReady().then(() => {
+  const mainWindow = new BrowserWindow({
+    /* ... */
+  });
+  manager.setupForWindow(mainWindow);
+  mainWindow.loadFile("index.html");
+});
 ```
 
 ### `setupWindowManager` options
@@ -46,6 +55,7 @@ import "@loc/electron-window/preload";
 
 ```tsx
 // renderer
+import { useState } from "react";
 import { WindowProvider, Window } from "@loc/electron-window";
 
 function App() {
@@ -181,8 +191,8 @@ function WindowContent() {
   const isFullscreen = useWindowFullscreen();
   const isVisible = useWindowVisible();
   const bounds = useWindowBounds(); // { x, y, width, height }
-  const display = useWindowDisplay(); // { id, bounds, workArea, scaleFactor }
-  const state = useWindowState(); // full WindowState object
+  const display = useWindowDisplay(); // DisplayInfo | null
+  const state = useWindowState(); // WindowState | null
   const doc = useWindowDocument(); // child window's Document — for UI lib portal containers
 }
 ```
@@ -235,7 +245,7 @@ import { PooledWindow, createWindowPool } from "@loc/electron-window";
 // Create once at module level
 const overlayPool = createWindowPool(
   { transparent: true, frame: false }, // shape (creation-only props)
-  { minIdle: 1, maxIdle: 3, idleTimeout: 5000 }, // pool config
+  { minIdle: 1, maxIdle: 3, idleTimeout: 30000 }, // pool config
   { injectStyles: "auto" }, // optional: "auto" | false | (doc) => void
 );
 
@@ -251,7 +261,9 @@ function App() {
 
 On `open={true}`: acquires a pre-warmed window from the pool (instant). On `open={false}`: hides and returns to pool (no destroy/recreate cost).
 
-Shape props (`transparent`, `frame`, `titleBarStyle`, `vibrancy`) and `injectStyles` are fixed by the pool definition. Most other props work per-use: `defaultWidth`/`defaultHeight` size the window on each acquire, and behavior props (`alwaysOnTop`, `opacity`, etc.) update live while open. `targetDisplay` and `persistBounds` are no-ops on pooled windows (they only affect creation/persistence, and pool windows are pre-created and reused).
+Shape props (`transparent`, `frame`, `titleBarStyle`, `vibrancy`) and `injectStyles` are fixed by the pool definition. Most other props work per-use: `defaultWidth`/`defaultHeight` size the window on each acquire, and behavior props (`alwaysOnTop`, `opacity`, etc.) update live while open. `targetDisplay`, `persistBounds`, and `recreateOnShapeChange` are not accepted on `<PooledWindow>` (TypeScript error) — pool windows are pre-created and reused, so these don't fit the model.
+
+**[Full pooling guide →](https://loc.github.io/electron-window/guides/pooling/)** — pool lifetime, `destroyWindowPool`, HMR handling, and the close-button behavior difference vs `<Window>`.
 
 ## Common Patterns
 
@@ -354,7 +366,7 @@ test("handles bounds change", async () => {
 - `webPreferences` cannot be set from the renderer — only via `setupWindowManager` in the main process. The library enforces `nodeIntegration: false`, `contextIsolation: true`, and `sandbox: true` (default) on all child windows regardless of consumer config.
 - All renderer-supplied props are filtered through an allowlist before reaching `BrowserWindow`
 - Child windows can only open `about:blank` — arbitrary URLs are rejected
-- IPC main-frame-only enforcement via EIPC-generated validators (iframes cannot call the API)
+- IPC main-frame-only enforcement in the generated IPC layer (iframes cannot call the API)
 - **Per-WebContents ownership**: a renderer can only mutate (`UpdateWindow`/`DestroyWindow`/`WindowAction`) windows it registered. If you `setupForWindow` on multiple parent windows, each is isolated.
 - Rate limits on window creation (`maxPendingWindows`, `maxWindows`, 10-second TTL on pending registrations)
 - Window IDs are crypto-random (`crypto.randomUUID()`)
@@ -381,6 +393,8 @@ define: {
 ```
 
 Both mechanisms validate the same thing (the main frame's origin, since iframes are already blocked). Use the build-time define for the extra preload-side gate; use the runtime config if you don't bundle your main process.
+
+**[Full security guide →](https://loc.github.io/electron-window/guides/security/)**
 
 ## Entry Points
 
