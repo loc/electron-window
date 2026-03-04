@@ -109,8 +109,12 @@ export function destroyWindowPool(poolDef: WindowPoolDefinition): void {
   }
 }
 
-// Props owned by the pool's shape definition — consumers can't override these per-use
-type PoolShapeProps = "transparent" | "frame" | "titleBarStyle" | "vibrancy";
+// Props owned by the pool's shape definition — consumers can't override these
+// per-use. DERIVED from PoolShape (the interface is the source of truth) so
+// adding a prop there automatically excludes it here. There's also a runtime
+// set POOL_SHAPE_PROPS in shared/types.ts derived from PROP_REGISTRY — a test
+// asserts these three stay in sync.
+type PoolShapeProps = keyof PoolShape;
 // Props that don't apply to pooled windows:
 // - recreateOnShapeChange: pool shape is immutable
 // - targetDisplay: pool windows are pre-created; only affects creation-time placement
@@ -175,10 +179,30 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
   ) {
     const provider = useWindowProviderContext();
 
+    // Detect unstable poolDef identity (inline/useMemo-with-deps/HMR). Each
+    // identity change creates a NEW RendererWindowPool + warmUp() → N hidden
+    // BrowserWindows. The OLD pool is GC'd but its windows are main-process
+    // owned — nothing unregisters them. Eventual symptom: "hit maxWindows
+    // (50)", miles from the root cause. Warn on the SECOND distinct poolDef
+    // this component instance sees.
+    const hasCreatedPoolRef = useRef(false);
+    const hasWarnedPoolChurnRef = useRef(false);
+
     // Share one pool instance per pool definition across all mounts.
     const pool = useMemo(() => {
       let instance = poolInstances.get(poolDef);
       if (!instance) {
+        if (hasCreatedPoolRef.current && !hasWarnedPoolChurnRef.current) {
+          hasWarnedPoolChurnRef.current = true;
+          devWarning(
+            `${name ? `[${name}] ` : ""}PooledWindow \`pool\` prop identity changed. ` +
+              "Each change leaks hidden BrowserWindows (old pool's idle windows are never unregistered). " +
+              "Define the pool at module scope, not inline: " +
+              "`const myPool = createWindowPool(...)` outside any component. " +
+              "If this is HMR, add `import.meta.hot?.dispose(() => destroyWindowPool(myPool))`.",
+          );
+        }
+        hasCreatedPoolRef.current = true;
         instance = new RendererWindowPool({
           shape: poolDef.shape,
           config: poolDef.config,
@@ -263,34 +287,35 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
         // The window was destroyed (possibly via BrowserWindow.destroy() from
         // main, which does NOT fire unload). The pool's own unload listener
         // won't run in that case, so explicitly remove from pool tracking.
+        // The hook already called resetLifecycle() internally for 'closed' —
+        // we only reset our own component-owned state here.
         const destroyedId = entryRef.current?.id;
-        entryRef.current = null;
-        pendingShowRef.current = null;
-        prevPropsRef.current = null;
-        childWindowRef.current = null;
-        setPortalTarget(null);
-        setChildDocument(null);
-        setWindowId(null);
-        setIsReady(false);
+        resetComponentState();
         if (destroyedId) pool.notifyDestroyed(destroyedId);
-        // Hook resets its own windowState internally via the 'closed' case
       },
     });
+
+    // Single place that resets PooledWindow-owned state. Call this from
+    // EVERY teardown path. Hook-owned state (windowState, displayInfo,
+    // debounce) is reset by lifecycle.resetLifecycle() — call both.
+    function resetComponentState(): void {
+      entryRef.current = null;
+      pendingShowRef.current = null;
+      prevPropsRef.current = null;
+      childWindowRef.current = null;
+      setPortalTarget(null);
+      setChildDocument(null);
+      setWindowId(null);
+      setIsReady(false);
+    }
 
     // Acquire on open=true, release on open=false
     useEffect(() => {
       if (!open) {
         if (entryRef.current) {
           const idToRelease = entryRef.current.id;
-          entryRef.current = null;
-          pendingShowRef.current = null;
-          prevPropsRef.current = null;
-          childWindowRef.current = null;
-          setPortalTarget(null);
-          setChildDocument(null);
-          setWindowId(null);
-          setIsReady(false);
-          lifecycle.setWindowState(null);
+          resetComponentState();
+          lifecycle.resetLifecycle();
           void pool.release(idToRelease);
         }
         return;
@@ -410,15 +435,8 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
         cancelled = true;
         if (entryRef.current) {
           const idToRelease = entryRef.current.id;
-          entryRef.current = null;
-          pendingShowRef.current = null;
-          prevPropsRef.current = null;
-          childWindowRef.current = null;
-          setPortalTarget(null);
-          setChildDocument(null);
-          setWindowId(null);
-          setIsReady(false);
-          lifecycle.setWindowState(null);
+          resetComponentState();
+          lifecycle.resetLifecycle();
           void pool.release(idToRelease);
         }
       };
@@ -505,13 +523,16 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isReady, windowId, provider, rest, title, visible]);
 
-    // Cancel debounce on unmount. Release is handled by the acquire effect's
-    // cleanup above (which fires on unmount too since its deps will have
-    // changed-or-unmounted by then).
+    // Unmount-only safety net for hook state. The acquire effect's cleanup
+    // above normally calls resetLifecycle() (which cancels the debounce),
+    // but only when entryRef is set. If acquire failed or was cancelled,
+    // there's no entry — yet a late boundsChanged debounce from an earlier
+    // open-cycle could still be pending. Always cancel on unmount.
     useEffect(() => {
       return () => {
-        lifecycle.debouncedBoundsChange.current.cancel();
+        lifecycle.resetLifecycle();
       };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // Stable method refs (parity with Window.tsx) — don't depend on

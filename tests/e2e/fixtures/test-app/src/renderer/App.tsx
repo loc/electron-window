@@ -2,6 +2,8 @@ import React, { useState, useRef, useCallback } from "react";
 import {
   WindowProvider,
   Window,
+  PooledWindow,
+  createWindowPool,
   type WindowRef,
 } from "../../../../../../src/renderer/index.js";
 
@@ -28,6 +30,9 @@ declare global {
       }>;
       clearEvents: () => void;
       getWindowRef: () => WindowRef | null;
+      // Pool ghost paint repro
+      setPoolContent: (content: string) => void;
+      getPoolContent: () => string;
     };
   }
 }
@@ -43,6 +48,8 @@ export function App() {
   const windowRef = useRef<WindowRef>(null);
   // Use ref to avoid closure issues with getEvents
   const eventsRef = useRef<TestEvent[]>([]);
+  const [poolContent, setPoolContent] = useState("A");
+  const poolContentRef = useRef("A");
 
   const addEvent = useCallback((type: string, data?: unknown) => {
     const newEvent = { type, timestamp: Date.now(), data };
@@ -75,6 +82,11 @@ export function App() {
         setState((prev) => ({ ...prev, events: [] }));
       },
       getWindowRef: () => windowRef.current,
+      setPoolContent: (content: string) => {
+        poolContentRef.current = content;
+        setPoolContent(content);
+      },
+      getPoolContent: () => poolContentRef.current,
     };
   }, []);
 
@@ -360,7 +372,115 @@ export function App() {
             <div>Bounds change content</div>
           </Window>
         )}
+
+        {state.scenario === "pooled-window" && (
+          <PooledWindowScenario
+            open={state.windowOpen}
+            poolContent={poolContent}
+            onReady={handleReady}
+            onUserClose={handleUserClose}
+          />
+        )}
       </div>
     </WindowProvider>
+  );
+}
+
+// ─── Pool ghost paint repro ─────────────────────────────────────────────────
+//
+// Creates a pool with minIdle=1. When open=true, acquires a window and renders
+// high-contrast content (red for "A", blue for "B"). The ghost paint manifests
+// as a flash of the OLD color when switching content after a release/re-acquire.
+
+const ghostPool = createWindowPool({}, { minIdle: 1, maxIdle: 2 });
+
+function PooledWindowScenario({
+  open,
+  poolContent,
+  onReady,
+  onUserClose,
+}: {
+  open: boolean;
+  poolContent: string;
+  onReady: () => void;
+  onUserClose: () => void;
+}) {
+  const isA = poolContent === "A";
+  const bg = isA ? "#ff0000" : "#0000ff";
+  const label = isA ? "CONTENT A (RED)" : "CONTENT B (BLUE)";
+
+  // Generate a heavy DOM to make paint time noticeable.
+  // 500 grid items with box-shadows + border-radius force compositing work.
+  const heavyItems = [];
+  for (let i = 0; i < 500; i++) {
+    heavyItems.push(
+      <div
+        key={i}
+        style={{
+          width: 60,
+          height: 60,
+          background: isA
+            ? `hsl(${(i * 3) % 360}, 80%, 50%)`
+            : `hsl(${(i * 3 + 180) % 360}, 80%, 50%)`,
+          borderRadius: 8,
+          boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "white",
+          fontSize: 10,
+          fontWeight: "bold",
+        }}
+      >
+        {i}
+      </div>,
+    );
+  }
+
+  return (
+    <PooledWindow
+      pool={ghostPool}
+      open={open}
+      onReady={onReady}
+      onUserClose={onUserClose}
+      defaultWidth={800}
+      defaultHeight={600}
+      title={`Pool: ${poolContent}`}
+    >
+      <div
+        data-testid="pool-content"
+        data-content={poolContent}
+        style={{
+          width: "100%",
+          height: "100%",
+          background: bg,
+          padding: 20,
+          overflow: "auto",
+        }}
+      >
+        <h1
+          style={{
+            color: "white",
+            fontSize: 48,
+            fontWeight: "bold",
+            fontFamily: "system-ui, sans-serif",
+            textAlign: "center",
+            marginBottom: 20,
+            textShadow: "0 2px 4px rgba(0,0,0,0.5)",
+          }}
+        >
+          {label}
+        </h1>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(60px, 1fr))",
+            gap: 8,
+          }}
+        >
+          {heavyItems}
+        </div>
+      </div>
+    </PooledWindow>
   );
 }

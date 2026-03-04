@@ -656,6 +656,43 @@ describe("WindowInstance event emission", () => {
 // ---------------------------------------------------------------------------
 
 describe("WindowInstance updateProps — PROP_SETTERS dispatch", () => {
+  // E1 regression guard: one setter throwing must NOT abort the batch.
+  // Pool release sends the full POOL_RELEASE_PROP_DEFAULTS every time —
+  // a throw at prop N would skip props N+1.. AND leave currentProps[N]
+  // stale → next release throws at the same spot → permanent wedge.
+  it("continues applying remaining props when one setter throws", () => {
+    const { instance, bw } = createWindowInstance();
+
+    bw.setOpacity.mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+
+    // Insertion order matters: opacity throws, resizable comes after.
+    // Without per-setter catch, setResizable never runs.
+    expect(() =>
+      instance.updateProps({ opacity: 0.5, resizable: false }),
+    ).not.toThrow();
+
+    expect(bw.setResizable).toHaveBeenCalledWith(false);
+  });
+
+  it("updates currentProps for a throwing setter to break retry-throws-again loop", () => {
+    const { instance, bw } = createWindowInstance();
+
+    bw.setOpacity.mockImplementation(() => {
+      throw new Error("boom");
+    });
+
+    instance.updateProps({ opacity: 0.5 });
+    // Second call with the SAME value should be a no-op (currentProps was
+    // updated despite the throw) — the early-continue at the value comparison
+    // skips the setter entirely. Without this, every pool release re-throws.
+    bw.setOpacity.mockClear();
+    instance.updateProps({ opacity: 0.5 });
+
+    expect(bw.setOpacity).not.toHaveBeenCalled();
+  });
+
   it("calls setTitle when title changes", () => {
     const { instance, bw } = createWindowInstance({ title: "old" });
     instance.updateProps({ title: "New Title" });

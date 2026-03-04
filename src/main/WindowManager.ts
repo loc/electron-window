@@ -92,7 +92,7 @@ export interface WindowManagerConfig {
    *
    * This validates the **parent renderer's** origin (where you called
    * `setupForWindow`). Iframe-within-renderer enforcement is separately
-   * handled by the EIPC `AppOrigin` validator and is always main-frame-only.
+   * handled by the generated IPC validator and is always main-frame-only.
    */
   allowedOrigins?: string[];
 
@@ -123,7 +123,7 @@ interface ResolvedConfig {
  * intercepts the new window via setWindowOpenHandler / did-create-window and wraps it.
  *
  * Security model:
- * - Iframe enforcement (main-frame-only) is handled by the EIPC-generated
+ * - Iframe enforcement (main-frame-only) is handled by the generated IPC
  *   `AppOrigin` validator — it runs before these handlers at the IPC layer.
  * - Parent renderer origin is validated here via `allowedOrigins` config.
  * - Per-WebContents ownership: a renderer can only mutate windows it created.
@@ -181,7 +181,7 @@ export class WindowManager {
    * - sees the correct URL after loadURL/loadFile (setup often runs before)
    * - re-validates after navigation to a different origin
    *
-   * Reads sender.mainFrame.url. Since the EIPC layer already enforces
+   * Reads sender.mainFrame.url. Since the IPC layer already enforces
    * main-frame-only, this IS the origin of the frame that made the call.
    *
    * Empty/about:blank URLs (pre-navigation) are ALLOWED — the renderer can't
@@ -368,7 +368,17 @@ export class WindowManager {
       // could spawn a child via the library, then use that child to
       // window.open arbitrary URLs (bypassing the parent's about:blank-only
       // restriction). Grandchild windows are not a supported use case.
-      childBW.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+      childBW.webContents.setWindowOpenHandler(({ url }) => {
+        if (this.config.devWarnings) {
+          devWarning(
+            `window.open("${url}") from inside a <Window>/<PooledWindow> was denied. ` +
+              `Grandchild windows are not supported. Nested <Window> components are ` +
+              `fine (they open from the parent renderer), but code running INSIDE ` +
+              `a child window's document (ownerDocument.defaultView.open) is blocked.`,
+          );
+        }
+        return { action: "deny" };
+      });
 
       const instance = new WindowInstance({
         id: windowId,
@@ -513,11 +523,14 @@ export class WindowManager {
   private createImplementation(sender: WebContents): IWindowManagerImpl {
     const senderId = sender.id;
 
-    /** Verify the caller owns the given window ID. */
-    const checkOwnership = (
+    /**
+     * Verify the caller owns the given window ID. Returns a type guard so
+     * callers can use `entry` without `!` after the check passes.
+     */
+    const checkOwnership = <T extends { ownerWebContentsId: number }>(
       id: WindowId,
-      entry: { ownerWebContentsId: number } | undefined,
-    ): boolean => {
+      entry: T | undefined,
+    ): entry is T => {
       if (!entry) return false;
       if (entry.ownerWebContentsId !== senderId) {
         if (this.config.devWarnings) {
@@ -605,7 +618,7 @@ export class WindowManager {
           props,
           this.config.devWarnings,
         );
-        entry!.instance.updateProps(
+        entry.instance.updateProps(
           filteredProps as unknown as Parameters<
             WindowInstance["updateProps"]
           >[0],
@@ -618,7 +631,7 @@ export class WindowManager {
         if (!checkOrigin()) return false;
         const entry = this.windows.get(id);
         if (!checkOwnership(id, entry)) return false;
-        entry!.instance.destroy();
+        entry.instance.destroy();
         this.windows.delete(id);
         return true;
       },
@@ -628,7 +641,7 @@ export class WindowManager {
         if (!checkOrigin()) return false;
         const entry = this.windows.get(id);
         if (!checkOwnership(id, entry)) return false;
-        const instance = entry!.instance;
+        const instance = entry.instance;
 
         switch (action.type) {
           case "focus":
@@ -681,7 +694,7 @@ export class WindowManager {
         // Read-only — but bounds+title can enable clickjacking precision,
         // so gate behind ownership like the mutators.
         if (!checkOwnership(id, entry)) return null;
-        return entry!.instance.getState();
+        return entry.instance.getState();
       },
     };
   }

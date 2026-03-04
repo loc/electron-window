@@ -153,7 +153,18 @@ export class RendererWindowPool {
         showOnCreate: false,
         hideOnClose: true,
       });
-      if (!ok) return;
+      if (!ok) {
+        // Most likely maxWindows/maxPendingWindows. warmUp() fires these
+        // in parallel, so if the app has ~50 regular <Window>s open, all
+        // pool-warming registrations silently fail and the pool ends up
+        // empty. Log so it's diagnosable; the next acquire() takes the
+        // slow on-the-fly path and will replenish once slots free up.
+        this.debugLog(
+          "createIdleWindow: RegisterWindow rejected (likely maxWindows limit)",
+          id,
+        );
+        return;
+      }
 
       if (this.isDestroyed) {
         void this.unregisterWindow(id);
@@ -209,7 +220,18 @@ export class RendererWindowPool {
   async acquire(): Promise<PoolEntry> {
     if (this.isDestroyed) throw new Error("Pool has been destroyed");
 
-    const entry = this.idle.shift();
+    // Pull from idle, discarding dead entries. External destruction (e.g.,
+    // consumer's "close all windows" menu, or test clearAllState) can kill
+    // pooled windows while no <PooledWindow> is mounted to receive the
+    // `closed` IPC event — so notifyDestroyed() never runs and the pool
+    // still has dead entries in idle[]. Bounded by maxIdle.
+    let entry = this.idle.shift();
+    while (entry && entry.childWindow.closed) {
+      this.debugLog("discarding dead idle entry", entry.id);
+      this.destroyEntry(entry);
+      entry = this.idle.shift();
+    }
+
     if (entry) {
       const timer = this.idleTimers.get(entry.id);
       if (timer) {
@@ -331,6 +353,16 @@ export class RendererWindowPool {
 
     if (this.isDestroyed) {
       // destroy() raced us — don't push to idle, just clean up this entry.
+      this.destroyEntry(entry);
+      return;
+    }
+
+    // The window may have been destroyed main-side during the IPC awaits
+    // above (e.g., parent-crash cleanup). Accessing .document on a closed
+    // Window proxy throws. release() is void-ed by callers, so that throw
+    // becomes an unhandled rejection AND skips styleCleanup → subscriber leak.
+    if (entry.childWindow.closed) {
+      this.debugLog("window closed during release, discarding", id);
       this.destroyEntry(entry);
       return;
     }

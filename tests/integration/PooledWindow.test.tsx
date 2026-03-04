@@ -51,6 +51,38 @@ describe("createWindowPool", () => {
     expect(pool.config).toEqual({});
   });
 
+  it("PoolShape interface keys match POOL_SHAPE_PROPS runtime set", async () => {
+    // Completeness trap guard: there are THREE places defining "pool shape
+    // props" — the PoolShape interface (RendererWindowPool.ts), the
+    // PoolShapeProps type (PooledWindow.tsx, now derived from PoolShape),
+    // and the POOL_SHAPE_PROPS runtime set (types.ts, derived from
+    // PROP_REGISTRY). This test ties the interface to the runtime set so
+    // adding a new `allowed && creationOnly` prop to PROP_REGISTRY forces
+    // you to also update PoolShape — otherwise the prop is silently
+    // dropped at the !POOL_SHAPE_PROPS.has(key) filter on acquire.
+    const { POOL_SHAPE_PROPS } = await import("../../src/shared/types.js");
+    // Construct a PoolShape with ALL keys set to probe the interface.
+    // If you add a key to PoolShape, add it here too.
+    const allShapeKeys: Record<
+      keyof import("../../src/renderer/RendererWindowPool.js").PoolShape,
+      true
+    > = {
+      transparent: true,
+      frame: true,
+      titleBarStyle: true,
+      vibrancy: true,
+    };
+    const interfaceKeys = new Set(Object.keys(allShapeKeys));
+
+    // Runtime set must equal interface keys (both directions)
+    for (const k of POOL_SHAPE_PROPS) {
+      expect(interfaceKeys.has(k)).toBe(true);
+    }
+    for (const k of interfaceKeys) {
+      expect(POOL_SHAPE_PROPS.has(k)).toBe(true);
+    }
+  });
+
   it("createWindowPoolDefinition is a deprecated alias for createWindowPool", () => {
     const a = createWindowPool({ frame: false });
     const b = createWindowPoolDefinition({ frame: false });
@@ -853,5 +885,209 @@ describe("<PooledWindow>", () => {
       );
       expect(styleNodes.length).toBe(0);
     }
+  });
+
+  // ─── Fifth-round regression guards ─────────────────────────────────────────
+
+  // M4: External destruction while no <PooledWindow> is mounted → dead entry
+  // left in idle[]. acquire() must skip it rather than hand out a closed window.
+  it("acquire() skips dead idle entries (externally destroyed while unmounted)", async () => {
+    const { RendererWindowPool } =
+      await import("../../src/renderer/RendererWindowPool.js");
+
+    const pool = new RendererWindowPool({
+      shape: {},
+      config: { minIdle: 1, maxIdle: 2 },
+      registerWindow: vi.fn(async () => true),
+      unregisterWindow: vi.fn(async () => {}),
+      updateWindow: vi.fn(async () => {}),
+      windowAction: vi.fn(async () => {}),
+    });
+
+    await pool.warmUp();
+    expect(pool.getIdleCount()).toBe(1);
+
+    // Simulate external destruction (e.g., test clearAllState, or consumer's
+    // "close all windows" menu) while no PooledWindow is mounted to receive
+    // the `closed` IPC event.
+    for (const win of getGlobalMockWindows().values()) {
+      (win as { destroy: () => void }).destroy();
+    }
+
+    // Pool still thinks it has 1 idle — nobody told it
+    expect(pool.getIdleCount()).toBe(1);
+
+    // acquire() should detect the dead entry and fall through to on-the-fly
+    const entry = await pool.acquire();
+    expect(entry.childWindow.closed).toBe(false);
+    expect(pool.getIdleCount()).toBe(0); // dead entry was discarded, not returned
+
+    pool.destroy();
+  });
+
+  // E4: release() must guard .document access against .closed=true after the
+  // IPC awaits. Without this, accessing .document on a closed window throws
+  // and the styleCleanup leaks.
+  it("release() handles window destroyed during IPC awaits without unhandled rejection", async () => {
+    const { RendererWindowPool } =
+      await import("../../src/renderer/RendererWindowPool.js");
+
+    const unregisterWindow = vi.fn(async () => {});
+    // Make windowAction("hide") slow so we can destroy the window mid-release
+    let resolveHide: () => void;
+    const hideCalled = new Promise<void>((resolveCalled) => {
+      // windowAction isn't reached until release's first await (updateWindow)
+      // resolves (microtask). We need to wait for that before resolving hide.
+      resolveHide = resolveCalled;
+    });
+    const windowAction = vi.fn(
+      async (_id: string, action: { type: string }) => {
+        if (action.type === "hide") {
+          await hideCalled;
+        }
+      },
+    );
+
+    // maxIdle=1 suppresses acquire-time replenishment (idle+active >= maxIdle)
+    // so the idle count after release is purely from THIS entry (or not).
+    const pool = new RendererWindowPool({
+      shape: {},
+      config: { minIdle: 1, maxIdle: 1 },
+      registerWindow: vi.fn(async () => true),
+      unregisterWindow,
+      updateWindow: vi.fn(async () => {}),
+      windowAction,
+    });
+
+    await pool.warmUp();
+    const entry = await pool.acquire();
+
+    // Start release — it awaits updateWindow, then windowAction("hide")
+    const releasePromise = pool.release(entry.id);
+
+    // Wait for release to reach windowAction("hide")
+    await vi.waitFor(() =>
+      expect(windowAction).toHaveBeenCalledWith(entry.id, { type: "hide" }),
+    );
+
+    // Destroy the window while release is awaiting hide
+    (entry.childWindow as unknown as { destroy: () => void }).destroy();
+    expect(entry.childWindow.closed).toBe(true);
+
+    // Let hide resolve — release continues, reaches the .closed check
+    resolveHide!();
+
+    // If the .closed guard is missing, release()'s .document access throws
+    // and this promise rejects. We expect clean resolution.
+    await expect(releasePromise).resolves.toBeUndefined();
+
+    // destroyEntry ran: styleCleanup + unregisterWindow, entry NOT pushed to idle
+    expect(unregisterWindow).toHaveBeenCalledWith(entry.id);
+    expect(pool.getIdleCount()).toBe(0);
+
+    pool.destroy();
+  });
+
+  // F3: Debounced onBoundsChange must be cancelled on open=false, not just
+  // unmount. Otherwise a pending debounce fires the consumer's callback for
+  // a window that was already released.
+  it("cancels pending onBoundsChange debounce when open goes false", async () => {
+    const { BOUNDS_CHANGE_DEBOUNCE_MS } =
+      await import("../../src/renderer/windowUtils.js");
+    const { simulateMockWindowEvent, getMockWindows } =
+      await import("../../src/testing/index.js");
+
+    vi.useFakeTimers();
+    const pool = createWindowPool({}, { minIdle: 0 });
+    const onBoundsChange = vi.fn();
+
+    function TestApp() {
+      const [open, setOpen] = useState(true);
+      return (
+        <MockWindowProvider>
+          <button data-testid="close" onClick={() => setOpen(false)}>
+            Close
+          </button>
+          <PooledWindow pool={pool} open={open} onBoundsChange={onBoundsChange}>
+            <div data-testid="f3-content">Content</div>
+          </PooledWindow>
+        </MockWindowProvider>
+      );
+    }
+
+    render(<TestApp />);
+
+    // Flush warmup/acquire with fake timers — setTimeout(0) won't fire on its own
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+    });
+    expect(queryInPoolWindows('[data-testid="f3-content"]')).not.toBeNull();
+
+    // Fire a bounds event → starts debounce timer
+    const windowId = getMockWindows()[0]!.id;
+    act(() => {
+      simulateMockWindowEvent(windowId, {
+        type: "boundsChanged",
+        bounds: { x: 100, y: 100, width: 500, height: 400 },
+      });
+    });
+
+    // Halfway through debounce, close the window
+    act(() => {
+      vi.advanceTimersByTime(BOUNDS_CHANGE_DEBOUNCE_MS / 2);
+    });
+    fireEvent.click(document.querySelector('[data-testid="close"]')!);
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+    });
+
+    // Advance past where the debounce WOULD have fired
+    act(() => {
+      vi.advanceTimersByTime(BOUNDS_CHANGE_DEBOUNCE_MS);
+    });
+
+    // onBoundsChange should NOT have fired — resetLifecycle() cancelled it
+    expect(onBoundsChange).not.toHaveBeenCalled();
+
+    vi.useRealTimers();
+  });
+
+  // C1: Unstable poolDef identity (inline/useMemo-with-deps/HMR) should warn.
+  // Each identity change leaks hidden BrowserWindows.
+  it("dev-warns when pool prop identity changes (leaks BrowserWindows)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    function TestApp({ tick }: { tick: number }) {
+      // Deliberately WRONG — new poolDef each render
+      const pool = React.useMemo(
+        () => createWindowPool({}, { minIdle: 0 }),
+        [tick],
+      );
+      return (
+        <MockWindowProvider>
+          <PooledWindow pool={pool} open={false}>
+            <div>Content</div>
+          </PooledWindow>
+        </MockWindowProvider>
+      );
+    }
+
+    const { rerender } = render(<TestApp tick={0} />);
+    // First render creates the pool — no warning yet
+    expect(
+      warnSpy.mock.calls.some((c) =>
+        String(c[0]).includes("pool` prop identity changed"),
+      ),
+    ).toBe(false);
+
+    rerender(<TestApp tick={1} />);
+    // Second distinct poolDef → warning
+    expect(
+      warnSpy.mock.calls.some((c) =>
+        String(c[0]).includes("pool` prop identity changed"),
+      ),
+    ).toBe(true);
+
+    warnSpy.mockRestore();
   });
 });

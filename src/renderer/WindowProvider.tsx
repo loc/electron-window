@@ -63,9 +63,10 @@ export function WindowProvider({
     if (!hasWarnedAboutBridgeRef.current) {
       hasWarnedAboutBridgeRef.current = true;
       devWarning(
-        "@loc/electron-window preload bridge not found on window. " +
-          "Make sure your preload script imports '@loc/electron-window/preload' " +
-          "and is bundled (e.g., esbuild --format=cjs) before use.",
+        "@loc/electron-window preload bridge not found. Check that:\n" +
+          "  1) Your preload script imports '@loc/electron-window/preload'\n" +
+          "  2) webPreferences.contextIsolation is true (contextBridge requires it)\n" +
+          "  3) The preload bundle is CJS, not ESM (esbuild --format=cjs)",
       );
     }
     return null;
@@ -97,10 +98,10 @@ export function WindowProvider({
     console.trace(`[electron-window] → ${method} "${id}"${payload}`);
   };
 
-  // EIPC-layer validation (origin, schema, main-frame) throws on rejection.
+  // IPC-layer validation (origin, schema, main-frame) throws on rejection.
   // Without a catch here, those throws propagate through fire-and-forget
   // `void provider.X(...)` calls → unhandled promise rejections. We catch
-  // at this boundary, devWarn with the EIPC error message (which is actionable),
+  // at this boundary, devWarn with the error message (which is actionable),
   // and return a safe fallback so callers see a clean failure signal.
   const safeInvoke = async <T,>(
     // api?.Method?.() returns Promise<T> | undefined (not Promise<T|undefined>)

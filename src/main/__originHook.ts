@@ -1,5 +1,5 @@
 /**
- * Consumer-configurable origin check, called from the EIPC-generated validator
+ * Consumer-configurable origin check, called from the generated IPC validator
  * AFTER the main-frame check passes. The generated validator already verified
  * `event.senderFrame?.parent === null`, so `url` here is the top-level frame's
  * URL — the correct origin to validate.

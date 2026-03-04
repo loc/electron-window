@@ -173,19 +173,29 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         // Window destroyed from main side — it no longer exists in the
         // main process's map, so clear hasRegisteredRef so subsequent
         // open=false / unmount doesn't try to unregister a dead ID.
+        // The hook already called resetLifecycle() internally for 'closed' —
+        // we only reset our own component-owned state here.
         hasRegisteredRef.current = false;
-        styleCleanupRef.current?.();
-        styleCleanupRef.current = null;
-        pendingShowRef.current = null;
-        childWindowRef.current = null;
-        initialShapeRef.current = null;
-        prevPropsRef.current = null;
-        setPortalTarget(null);
-        setChildDocument(null);
-        setIsReady(false);
-        // Hook resets its own windowState internally via the 'closed' case
+        resetComponentState();
       },
     });
+
+    // Single place that resets Window-owned state. Call this from EVERY
+    // teardown path. Hook-owned state (windowState, displayInfo, debounce)
+    // is reset separately by lifecycle.resetLifecycle(). hasRegisteredRef
+    // is NOT reset here — each call site needs to decide whether to
+    // unregister before or after (depends on whether main already knows).
+    function resetComponentState(): void {
+      styleCleanupRef.current?.();
+      styleCleanupRef.current = null;
+      pendingShowRef.current = null;
+      childWindowRef.current = null;
+      initialShapeRef.current = null;
+      prevPropsRef.current = null;
+      setPortalTarget(null);
+      setChildDocument(null);
+      setIsReady(false);
+    }
 
     // Warn about controlled bounds without onBoundsChange
     const hasWarnedAboutControlledBoundsRef = useRef(false);
@@ -215,16 +225,8 @@ export const Window = forwardRef<WindowRef, WindowProps>(
           // Don't call childWindow.close() — with closable={false} it's
           // preventDefaulted (no-op). unregisterWindow → destroy() bypasses
           // the close handler and is the authoritative teardown path.
-          styleCleanupRef.current?.();
-          styleCleanupRef.current = null;
-          pendingShowRef.current = null;
-          childWindowRef.current = null;
-          initialShapeRef.current = null;
-          prevPropsRef.current = null;
-          setPortalTarget(null);
-          setChildDocument(null);
-          setIsReady(false);
-          lifecycle.setWindowState(null);
+          resetComponentState();
+          lifecycle.resetLifecycle();
           if (hasRegisteredRef.current) {
             hasRegisteredRef.current = false;
             void provider.unregisterWindow(windowId);
@@ -330,18 +332,16 @@ export const Window = forwardRef<WindowRef, WindowProps>(
         // call it — BrowserWindow.destroy() doesn't fire unload.
         styleCleanupRef.current = styleCleanup;
         win.addEventListener("unload", () => {
-          // Use the ref, not the closure — other teardown paths
-          // (onWindowClosedSetState, open=false) may have already called
-          // and nulled it. The cleanup itself is idempotent today, but
-          // this keeps the single-source-of-truth invariant.
-          styleCleanupRef.current?.();
-          styleCleanupRef.current = null;
           if (!cancelled) {
-            childWindowRef.current = null;
-            setPortalTarget(null);
-            setChildDocument(null);
-            setIsReady(false);
-            lifecycle.setWindowState(null);
+            resetComponentState();
+            lifecycle.resetLifecycle();
+          } else {
+            // cancelled=true means another teardown path owns state reset;
+            // we only need to ensure styleCleanup ran (the other path
+            // handles this via resetComponentState, but unload can race
+            // the cancelled→close sequence).
+            styleCleanupRef.current?.();
+            styleCleanupRef.current = null;
           }
         });
 
@@ -409,24 +409,15 @@ export const Window = forwardRef<WindowRef, WindowProps>(
 
         if (changedCreationOnlyProps.length > 0) {
           if (recreateOnShapeChange) {
-            // Release the style subscriber for the old window before destroy.
-            styleCleanupRef.current?.();
-            styleCleanupRef.current = null;
             // Don't call childWindow.close() — closable={false} would block it.
             // unregisterWindow → destroy() is the reliable teardown path.
-            childWindowRef.current = null;
-            pendingShowRef.current = null;
+            resetComponentState();
+            lifecycle.resetLifecycle();
             if (hasRegisteredRef.current) {
               hasRegisteredRef.current = false;
               void provider.unregisterWindow(windowId);
             }
-            setPortalTarget(null);
-            setChildDocument(null);
-            setIsReady(false);
-            lifecycle.setWindowState(null);
             setWindowId(generateWindowId());
-            initialShapeRef.current = null;
-            prevPropsRef.current = null;
             return;
           } else {
             for (const key of changedCreationOnlyProps) {
@@ -500,16 +491,11 @@ export const Window = forwardRef<WindowRef, WindowProps>(
     // recreateOnShapeChange when the shape-change handler already cleaned up.
     useEffect(() => {
       return () => {
-        lifecycle.debouncedBoundsChange.current.cancel();
-        // Release the style subscriber before destroying — unregisterWindow
-        // calls BrowserWindow.destroy() which does NOT fire unload.
-        styleCleanupRef.current?.();
-        styleCleanupRef.current = null;
-        // Don't call childWindow.close() — closable={false} would block it.
-        childWindowRef.current = null;
-        pendingShowRef.current = null;
-        initialShapeRef.current = null;
-        prevPropsRef.current = null;
+        // resetLifecycle cancels the debounce + clears hook state.
+        // resetComponentState releases the style subscriber (unregisterWindow
+        // → BrowserWindow.destroy() does NOT fire unload).
+        resetComponentState();
+        lifecycle.resetLifecycle();
         if (hasRegisteredRef.current) {
           hasRegisteredRef.current = false;
           void provider.unregisterWindow(windowIdRef.current);

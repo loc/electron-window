@@ -74,13 +74,24 @@ export interface WindowLifecycleOptions {
 
 export interface WindowLifecycleResult {
   windowState: WindowState | null;
-  setWindowState: React.Dispatch<React.SetStateAction<WindowState | null>>;
+  setWindowState: (next: WindowState | null) => void;
   displayInfo: DisplayInfo | null;
-  setDisplayInfo: React.Dispatch<React.SetStateAction<DisplayInfo | null>>;
   contextValue: WindowContextValue;
   debouncedBoundsChange: React.MutableRefObject<
     ReturnType<typeof debounce<(bounds: Bounds) => void>>
   >;
+  /**
+   * Reset ALL hook-owned state: windowState, displayInfo, and cancel the
+   * pending debounced onBoundsChange. Call this from every teardown path
+   * (open=false, shape-change, onWindowClosedSetState, unload, unmount).
+   * Component-owned state (refs, portalTarget, isReady) is the caller's job.
+   *
+   * Introduced after the FOURTH teardown-asymmetry bug — each teardown
+   * path was resetting a slightly different subset, and each miss was
+   * either a stale-state leak (displayInfo) or a late-firing callback
+   * (debounced onBoundsChange firing after release).
+   */
+  resetLifecycle: () => void;
 }
 
 export function useWindowLifecycle(
@@ -88,7 +99,7 @@ export function useWindowLifecycle(
 ): WindowLifecycleResult {
   const { windowId, isReady, provider } = opts;
 
-  const [windowState, setWindowState] = useState<WindowState | null>(null);
+  const [windowState, _setWindowState] = useState<WindowState | null>(null);
   const [displayInfo, setDisplayInfo] = useState<DisplayInfo | null>(null);
 
   // Store all callbacks in refs to avoid re-subscription when callbacks change
@@ -138,38 +149,59 @@ export function useWindowLifecycle(
 
   // Refs holding latest snapshots — allows getSnapshot/getDisplaySnapshot to
   // be stable (no deps) while still returning up-to-date values.
+  //
+  // THE REF IS THE SINGLE SOURCE OF TRUTH. React state mirrors it (to drive
+  // renders) but is never read back. Every write path — the wrapper below,
+  // patchState, resetLifecycle — writes ref FIRST, then copies ref → React
+  // state. No render-body re-sync needed; nothing bails on React's queued
+  // state (which can lag behind the ref during batching).
   const windowStateRef = useRef<WindowState | null>(null);
   const displayInfoRef = useRef<DisplayInfo | null>(null);
-  windowStateRef.current = windowState;
-  displayInfoRef.current = displayInfo;
+
+  // Wrapped setter: ref → React state → notify, in that order.
+  const setWindowState = useCallback((next: WindowState | null) => {
+    windowStateRef.current = next;
+    _setWindowState(next);
+    for (const l of stateListeners.current) l();
+  }, []);
+
+  // Reset ALL hook-owned state. Cancel the debounce BEFORE nulling state —
+  // otherwise a pending timer could fire the consumer's onBoundsChange
+  // after the window is released. Update both refs BEFORE the single notify
+  // so getSnapshot/getDisplaySnapshot both return null when listeners run.
+  const resetLifecycle = useCallback(() => {
+    debouncedBoundsChange.current.cancel();
+    displayInfoRef.current = null;
+    setDisplayInfo(null);
+    windowStateRef.current = null;
+    _setWindowState(null);
+    for (const l of stateListeners.current) l();
+  }, []);
 
   // Subscribe to window events — only re-subscribes when windowId/isReady/provider changes
   useEffect(() => {
     if (!isReady || !windowId) return;
 
     const unsubscribe = provider.subscribeToEvents(windowId, (event) => {
-      // Helper: apply a patch to windowStateRef and schedule the React state
-      // update. We update the ref first so that getSnapshot() returns the new
-      // value synchronously when we notify useSyncExternalStore listeners below.
-      // Preserves the `bounds` object reference when the patch doesn't touch
-      // bounds — this keeps useWindowBounds() stable across focus/blur/etc
-      // events. Without this, every event creates a new windowState object
-      // with a new bounds reference, causing useSyncExternalStore to re-render
-      // useWindowBounds() consumers on unrelated events.
+      // Apply a patch to the ref, then mirror ref → React state.
+      //
+      // Bails ONLY on the ref. No functional updater — that would bail on
+      // React's queued `s`, which can disagree with the ref when a wrapper
+      // call queued `null` that hasn't committed yet (late IPC event would
+      // resurrect the old state through the updater).
+      //
+      // Preserves `bounds` reference when the patch doesn't touch it, so
+      // useWindowBounds() doesn't re-render on focus/blur/etc.
+      //
+      // Listener notify is at the end of the event handler, not here —
+      // multiple patchState calls per event would double-notify.
       function patchState(patch: Partial<WindowState>): void {
         const prev = windowStateRef.current;
-        if (prev) {
-          const next = { ...prev, ...patch };
-          // Reuse the old bounds object unless the patch explicitly changed it
-          if (patch.bounds === undefined) next.bounds = prev.bounds;
-          windowStateRef.current = next;
-        }
-        setWindowState((s) => {
-          if (!s) return s;
-          const next = { ...s, ...patch };
-          if (patch.bounds === undefined) next.bounds = s.bounds;
-          return next;
-        });
+        if (!prev) return;
+        const next = { ...prev, ...patch };
+        if (patch.bounds === undefined) next.bounds = prev.bounds;
+        windowStateRef.current = next;
+        _setWindowState(next);
       }
 
       switch (event.type) {
@@ -230,11 +262,13 @@ export function useWindowLifecycle(
           onUserCloseRef.current?.();
           break;
         case "closed":
-          windowStateRef.current = null;
-          setWindowState(null);
+          // resetLifecycle handles refs + state + debounce cancel. It also
+          // notifies listeners, so return early — don't fall through to the
+          // second notify at the end of the handler.
+          resetLifecycle();
           onWindowClosedSetStateRef.current?.();
           onCloseRef.current?.();
-          break;
+          return;
       }
 
       // Notify useSyncExternalStore subscribers synchronously. The refs are
@@ -246,7 +280,7 @@ export function useWindowLifecycle(
     });
 
     return unsubscribe;
-  }, [isReady, windowId, provider]);
+  }, [isReady, windowId, provider, resetLifecycle]);
 
   const subscribe = useCallback((listener: () => void) => {
     stateListeners.current.add(listener);
@@ -277,8 +311,8 @@ export function useWindowLifecycle(
     windowState,
     setWindowState,
     displayInfo,
-    setDisplayInfo,
     contextValue,
     debouncedBoundsChange,
+    resetLifecycle,
   };
 }

@@ -75,7 +75,19 @@ class MockWindow {
     }
   }
 
+  // close() models a graceful close (not destroy()) — real browsers/Electron
+  // fire unload on window.close(). Tests that go through the cancelled →
+  // win.close() path in Window.tsx need this to exercise the unload handler.
+  // For destroy()-like behavior (no unload), tests use
+  // MockWindowProvider.unregisterWindow which calls .destroy() below.
   close() {
+    if (this.closed) return; // idempotent
+    this.simulateUnload();
+  }
+
+  // destroy() models BrowserWindow.destroy() — no beforeunload, no unload.
+  // Used by MockWindowProvider.unregisterWindow to match real main-process flow.
+  destroy() {
     this.closed = true;
     mockWindows.delete(this.name);
   }
@@ -99,8 +111,11 @@ export function getGlobalMockWindows(): Map<string, unknown> {
 
 // Helper to reset mock windows between tests
 export function resetMockWindowsGlobal() {
+  // destroy() not close() — reset is test teardown, not a graceful flow.
+  // close() would fire unload handlers that may call back into already-
+  // unmounted React components.
   for (const win of mockWindows.values()) {
-    win.close();
+    win.destroy();
   }
   mockWindows.clear();
 }

@@ -83,8 +83,12 @@ const PROP_SETTERS: Record<
   fullscreenable: (win, v) => win.setFullScreenable(v as boolean),
   ignoreMouseEvents: (win, v) => {
     win.setIgnoreMouseEvents(v as boolean);
-    // Linux workaround: setIgnoreMouseEvents only takes effect once mouse exits
-    if (isLinux()) {
+    // Linux workaround: setIgnoreMouseEvents(true) only takes effect once the
+    // pointer exits the window. Bounce hide/showInactive to force it.
+    // Only needed when ENABLING pass-through — disabling restores normal
+    // behavior immediately. Also avoids pool.release() briefly re-showing
+    // the previous user's content when resetting to false.
+    if (isLinux() && v === true) {
       win.hide();
       win.showInactive();
     }
@@ -376,7 +380,22 @@ export class WindowInstance {
 
       const setter = PROP_SETTERS[key];
       if (setter) {
-        setter(this.browserWindow, value);
+        // One setter throw must NOT abort the whole batch. Pool release
+        // sends the full POOL_RELEASE_PROP_DEFAULTS every time — a throw
+        // mid-loop would (a) skip all subsequent props, leaving the
+        // previous user's constraints/opacity/etc, and (b) never update
+        // currentProps[key], so the next release sees "changed", throws
+        // again, and wedges the window for the rest of the session.
+        try {
+          setter(this.browserWindow, value);
+        } catch (err) {
+          devWarning(
+            `Failed to set "${key}" on window ${this.id}: ${err instanceof Error ? err.message : String(err)}. ` +
+              `Continuing with remaining props.`,
+          );
+          // Fall through — update currentProps to break the retry-throws-again
+          // loop. The window won't reflect this value, but the pool stays usable.
+        }
       }
 
       (this.currentProps as Record<string, unknown>)[key] = value;

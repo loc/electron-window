@@ -1,5 +1,5 @@
 /**
- * Preload-side origin gate, called from the EIPC-generated preload validator
+ * Preload-side origin gate, called from the generated IPC preload validator
  * AFTER the main-frame check passes. Runs once at preload-evaluation time —
  * if it returns false, `contextBridge.exposeInMainWorld("electron_window", ...)`
  * is skipped and the renderer never sees the API surface.

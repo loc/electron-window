@@ -93,7 +93,7 @@ export function getMockWindowByName(name: string): MockWindowData | undefined {
 /**
  * Event without ID for simulation
  */
-type SimulatedEvent =
+export type SimulatedEvent =
   | { type: "closed" }
   | { type: "focused" }
   | { type: "blurred" }
@@ -245,8 +245,14 @@ export function MockWindowProvider({
     // tests/setup.ts) tracks windows by name; close it so tests that
     // assert on getGlobalMockWindows().size see the window gone.
     const mockWindows = (globalThis as Record<string, unknown>)
-      .__mockWindows__ as Map<string, { close: () => void }> | undefined;
-    mockWindows?.get(id)?.close();
+      .__mockWindows__ as
+      | Map<string, { destroy: () => void; close: () => void }>
+      | undefined;
+    // Use destroy() (not close()) — matches real BrowserWindow.destroy()
+    // which does NOT fire unload. This exercises the "destroy doesn't fire
+    // unload" path that the production code has explicit handling for
+    // (styleCleanupRef, pool.notifyDestroyed, etc.).
+    mockWindows?.get(id)?.destroy();
   }, []);
 
   const updateWindow = useCallback(
@@ -442,25 +448,34 @@ export function MockWindow({
   id = "mock-window",
   state = {},
 }: MockWindowComponentProps): ReactElement {
-  const fullState: WindowState = {
-    id,
-    isFocused: false,
-    isVisible: true,
-    isMaximized: false,
-    isMinimized: false,
-    isFullscreen: false,
-    bounds: { x: 0, y: 0, width: 800, height: 600 },
-    title: "",
-    ...state,
-  };
+  // useSyncExternalStore requires getSnapshot() to return a stable reference
+  // unless state changed — a new object each render triggers React's
+  // "getSnapshot should be cached" warning and causes thrashing.
+  const fullState: WindowState = useMemo(
+    () => ({
+      id,
+      isFocused: false,
+      isVisible: true,
+      isMaximized: false,
+      isMinimized: false,
+      isFullscreen: false,
+      bounds: { x: 0, y: 0, width: 800, height: 600 },
+      title: "",
+      ...state,
+    }),
+    [id, state],
+  );
 
-  const contextValue: WindowContextValue = {
-    windowId: id,
-    subscribe: (_listener) => () => {},
-    getSnapshot: () => fullState,
-    getDisplaySnapshot: () => null,
-    document: null,
-  };
+  const contextValue: WindowContextValue = useMemo(
+    () => ({
+      windowId: id,
+      subscribe: (_listener) => () => {},
+      getSnapshot: () => fullState,
+      getDisplaySnapshot: () => null,
+      document: null,
+    }),
+    [id, fullState],
+  );
 
   return React.createElement(
     WindowContext.Provider,

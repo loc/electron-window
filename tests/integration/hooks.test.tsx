@@ -541,6 +541,71 @@ describe("useWindowDisplay", () => {
       );
     }).toThrow(/useWindowContext must be used within a Window/);
   });
+
+  // F2 regression guard: displayInfo was never cleared on teardown. Same
+  // <Window> with recreateOnShapeChange — if use A was on an external
+  // display, use B's children saw use A's scaleFactor until the first
+  // real displayChanged event from use B.
+  it("resets to null on recreateOnShapeChange (not previous window's display)", async () => {
+    let observedDisplay: ReturnType<typeof useWindowDisplay> | undefined;
+
+    function DisplayProbe() {
+      observedDisplay = useWindowDisplay();
+      return <div data-testid="display-probe" />;
+    }
+
+    function TestApp({ frame }: { frame: boolean }) {
+      return (
+        <MockWindowProvider>
+          <Window open frame={frame} recreateOnShapeChange>
+            <DisplayProbe />
+          </Window>
+        </MockWindowProvider>
+      );
+    }
+
+    const { rerender } = render(<TestApp frame={true} />);
+    await waitFor(() => getMockWindows().length >= 1);
+
+    // Flush effects so subscribeToEvents is live
+    await waitFor(() => {
+      for (const w of getGlobalMockWindows().values()) {
+        if (
+          (w as { document: Document }).document?.querySelector(
+            '[data-testid="display-probe"]',
+          )
+        )
+          return true;
+      }
+      return false;
+    });
+
+    // Push a display for window A (external monitor, scaleFactor 2)
+    const displayA = {
+      id: 2,
+      bounds: { x: 1920, y: 0, width: 2560, height: 1440 },
+      workArea: { x: 1920, y: 0, width: 2560, height: 1400 },
+      scaleFactor: 2,
+    };
+    const idA = getMockWindows()[0]!.id;
+    await waitFor(() => {
+      simulateMockWindowEvent(idA, {
+        type: "displayChanged",
+        display: displayA,
+      });
+      return observedDisplay?.scaleFactor === 2;
+    });
+
+    // Shape change → recreateOnShapeChange teardown + new window
+    rerender(<TestApp frame={false} />);
+
+    // After teardown, displayInfo should be null (not displayA).
+    // It stays null until the NEW window gets a real displayChanged event.
+    await waitFor(() => {
+      return observedDisplay === null;
+    });
+    expect(observedDisplay).toBeNull();
+  });
 });
 
 describe("re-render isolation", () => {
