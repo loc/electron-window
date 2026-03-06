@@ -523,14 +523,15 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isReady, windowId, provider, rest, title, visible]);
 
-    // Unmount-only safety net for hook state. The acquire effect's cleanup
-    // above normally calls resetLifecycle() (which cancels the debounce),
-    // but only when entryRef is set. If acquire failed or was cancelled,
-    // there's no entry — yet a late boundsChanged debounce from an earlier
-    // open-cycle could still be pending. Always cancel on unmount.
+    // Unmount cleanup: just cancel the debounce timer. Refs are GC'd with
+    // the fiber; React setters are no-ops on unmounted components. The
+    // acquire effect's cleanup handles pool.release(). resetLifecycle()
+    // is for lifecycle teardown (open=false) where the component stays
+    // mounted — don't call it here, the extra setState scheduling adds
+    // latency that can delay a subsequent mount.
     useEffect(() => {
       return () => {
-        lifecycle.resetLifecycle();
+        lifecycle.debouncedBoundsChange.current.cancel();
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);

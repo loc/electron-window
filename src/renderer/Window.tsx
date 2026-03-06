@@ -491,11 +491,16 @@ export const Window = forwardRef<WindowRef, WindowProps>(
     // recreateOnShapeChange when the shape-change handler already cleaned up.
     useEffect(() => {
       return () => {
-        // resetLifecycle cancels the debounce + clears hook state.
-        // resetComponentState releases the style subscriber (unregisterWindow
-        // → BrowserWindow.destroy() does NOT fire unload).
-        resetComponentState();
-        lifecycle.resetLifecycle();
+        // Unmount cleanup is minimal — React setters are no-ops on an
+        // unmounted component and component-owned refs are GC'd with the
+        // fiber. Only do what actually leaks across the unmount boundary:
+        // the style subscriber (module-level Set), the debounce timer,
+        // and the main-process window registration.
+        // resetComponentState()/resetLifecycle() are for LIFECYCLE teardown
+        // (open=false, shape-change) where the component stays mounted.
+        styleCleanupRef.current?.();
+        styleCleanupRef.current = null;
+        lifecycle.debouncedBoundsChange.current.cancel();
         if (hasRegisteredRef.current) {
           hasRegisteredRef.current = false;
           void provider.unregisterWindow(windowIdRef.current);
