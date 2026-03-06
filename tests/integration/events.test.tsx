@@ -10,6 +10,21 @@ import {
 } from "../../src/testing/index.js";
 import { resetMockWindowsGlobal, getGlobalMockWindows } from "../setup.js";
 
+/**
+ * Wait until the event subscription is live. `getMockWindows().length === 1`
+ * fires during registerWindow, but the subscription effect needs
+ * isReady=true (after window.open → waitForWindowReady → React commit).
+ * Firing events in that gap drops them. onReady fires from a layout effect
+ * that runs on the same commit as the subscription effect — reliable signal.
+ */
+async function renderAndWaitReady(
+  ui: React.ReactElement,
+  onReadySpy: ReturnType<typeof vi.fn>,
+) {
+  render(ui);
+  await waitFor(() => expect(onReadySpy).toHaveBeenCalled());
+}
+
 describe("<Window> state events", () => {
   beforeEach(() => {
     resetMockWindows();
@@ -39,185 +54,175 @@ describe("<Window> state events", () => {
 
   it("calls onUserClose when user closes window", async () => {
     const onUserClose = vi.fn();
+    const onReady = vi.fn();
 
-    render(
+    await renderAndWaitReady(
       <MockWindowProvider>
-        <Window open onUserClose={onUserClose}>
+        <Window open onReady={onReady} onUserClose={onUserClose}>
           <div>Content</div>
         </Window>
       </MockWindowProvider>,
+      onReady,
     );
 
-    await waitFor(() => {
-      expect(getGlobalMockWindows().size).toBe(1);
-    });
-
     // Simulate user close via IPC event (the real path in Electron)
-    const mockWindows = getMockWindows();
-    simulateMockWindowEvent(mockWindows[0].id, { type: "userCloseRequested" });
-
-    await waitFor(() => {
-      expect(onUserClose).toHaveBeenCalled();
+    simulateMockWindowEvent(getMockWindows()[0].id, {
+      type: "userCloseRequested",
     });
+    await waitFor(() => expect(onUserClose).toHaveBeenCalled());
   });
 
   it("calls onMaximize when maximized event fires", async () => {
     const onMaximize = vi.fn();
+    const onReady = vi.fn();
 
-    render(
+    await renderAndWaitReady(
       <MockWindowProvider>
-        <Window open onMaximize={onMaximize}>
+        <Window open onReady={onReady} onMaximize={onMaximize}>
           <div>Content</div>
         </Window>
       </MockWindowProvider>,
+      onReady,
     );
 
-    await waitFor(() => expect(getMockWindows().length).toBe(1));
-
     simulateMockWindowEvent(getMockWindows()[0].id, { type: "maximized" });
-
     await waitFor(() => expect(onMaximize).toHaveBeenCalledOnce());
   });
 
   it("calls onUnmaximize when unmaximized event fires", async () => {
     const onUnmaximize = vi.fn();
+    const onReady = vi.fn();
 
-    render(
+    await renderAndWaitReady(
       <MockWindowProvider>
-        <Window open onUnmaximize={onUnmaximize}>
+        <Window open onReady={onReady} onUnmaximize={onUnmaximize}>
           <div>Content</div>
         </Window>
       </MockWindowProvider>,
+      onReady,
     );
 
-    await waitFor(() => expect(getMockWindows().length).toBe(1));
-
     simulateMockWindowEvent(getMockWindows()[0].id, { type: "unmaximized" });
-
     await waitFor(() => expect(onUnmaximize).toHaveBeenCalledOnce());
   });
 
   it("calls onMinimize when minimized event fires", async () => {
     const onMinimize = vi.fn();
+    const onReady = vi.fn();
 
-    render(
+    await renderAndWaitReady(
       <MockWindowProvider>
-        <Window open onMinimize={onMinimize}>
+        <Window open onReady={onReady} onMinimize={onMinimize}>
           <div>Content</div>
         </Window>
       </MockWindowProvider>,
+      onReady,
     );
 
-    await waitFor(() => expect(getMockWindows().length).toBe(1));
-
     simulateMockWindowEvent(getMockWindows()[0].id, { type: "minimized" });
-
     await waitFor(() => expect(onMinimize).toHaveBeenCalledOnce());
   });
 
   it("calls onRestore when restored event fires", async () => {
     const onRestore = vi.fn();
+    const onReady = vi.fn();
 
-    render(
+    await renderAndWaitReady(
       <MockWindowProvider>
-        <Window open onRestore={onRestore}>
+        <Window open onReady={onReady} onRestore={onRestore}>
           <div>Content</div>
         </Window>
       </MockWindowProvider>,
+      onReady,
     );
 
-    await waitFor(() => expect(getMockWindows().length).toBe(1));
-
     simulateMockWindowEvent(getMockWindows()[0].id, { type: "restored" });
-
     await waitFor(() => expect(onRestore).toHaveBeenCalledOnce());
   });
 
   it("calls onEnterFullscreen when enterFullscreen event fires", async () => {
     const onEnterFullscreen = vi.fn();
+    const onReady = vi.fn();
 
-    render(
+    await renderAndWaitReady(
       <MockWindowProvider>
-        <Window open onEnterFullscreen={onEnterFullscreen}>
+        <Window open onReady={onReady} onEnterFullscreen={onEnterFullscreen}>
           <div>Content</div>
         </Window>
       </MockWindowProvider>,
+      onReady,
     );
-
-    await waitFor(() => expect(getMockWindows().length).toBe(1));
 
     simulateMockWindowEvent(getMockWindows()[0].id, {
       type: "enterFullscreen",
     });
-
     await waitFor(() => expect(onEnterFullscreen).toHaveBeenCalledOnce());
   });
 
   it("calls onExitFullscreen when leaveFullscreen event fires", async () => {
     const onExitFullscreen = vi.fn();
+    const onReady = vi.fn();
 
-    render(
+    await renderAndWaitReady(
       <MockWindowProvider>
-        <Window open onExitFullscreen={onExitFullscreen}>
+        <Window open onReady={onReady} onExitFullscreen={onExitFullscreen}>
           <div>Content</div>
         </Window>
       </MockWindowProvider>,
+      onReady,
     );
-
-    await waitFor(() => expect(getMockWindows().length).toBe(1));
 
     simulateMockWindowEvent(getMockWindows()[0].id, {
       type: "leaveFullscreen",
     });
-
     await waitFor(() => expect(onExitFullscreen).toHaveBeenCalledOnce());
   });
 
   it("calls onClose when closed event fires", async () => {
     const onClose = vi.fn();
+    const onReady = vi.fn();
 
-    render(
+    await renderAndWaitReady(
       <MockWindowProvider>
-        <Window open onClose={onClose}>
+        <Window open onReady={onReady} onClose={onClose}>
           <div>Content</div>
         </Window>
       </MockWindowProvider>,
+      onReady,
     );
 
-    await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
-
-    const mockWindows = getMockWindows();
-    simulateMockWindowEvent(mockWindows[0].id, { type: "closed" });
-
-    await waitFor(() => {
-      expect(onClose).toHaveBeenCalledOnce();
-    });
+    simulateMockWindowEvent(getMockWindows()[0].id, { type: "closed" });
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   });
 
   it("onClose is distinct from onUserClose", async () => {
     const onClose = vi.fn();
     const onUserClose = vi.fn();
+    const onReady = vi.fn();
 
-    render(
+    await renderAndWaitReady(
       <MockWindowProvider>
-        <Window open onClose={onClose} onUserClose={onUserClose}>
+        <Window
+          open
+          onReady={onReady}
+          onClose={onClose}
+          onUserClose={onUserClose}
+        >
           <div>Content</div>
         </Window>
       </MockWindowProvider>,
+      onReady,
     );
 
-    await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
+    const id = getMockWindows()[0].id;
 
     // Fire userCloseRequested — should call onUserClose but NOT onClose
-    const mockWindows = getMockWindows();
-    simulateMockWindowEvent(mockWindows[0].id, { type: "userCloseRequested" });
-
+    simulateMockWindowEvent(id, { type: "userCloseRequested" });
     await waitFor(() => expect(onUserClose).toHaveBeenCalledOnce());
     expect(onClose).not.toHaveBeenCalled();
 
     // Fire closed — should call onClose
-    simulateMockWindowEvent(mockWindows[0].id, { type: "closed" });
-
+    simulateMockWindowEvent(id, { type: "closed" });
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   });
 
@@ -230,22 +235,21 @@ describe("<Window> state events", () => {
       scaleFactor: 2,
     };
 
-    render(
+    const onReady = vi.fn();
+
+    await renderAndWaitReady(
       <MockWindowProvider>
-        <Window open onDisplayChange={onDisplayChange}>
+        <Window open onReady={onReady} onDisplayChange={onDisplayChange}>
           <div>Content</div>
         </Window>
       </MockWindowProvider>,
+      onReady,
     );
 
-    await waitFor(() => expect(getMockWindows().length).toBe(1));
-
-    // SimulatedEvent doesn't include displayChanged yet, but the listener
-    // receives the raw event object so we can dispatch it directly.
     simulateMockWindowEvent(getMockWindows()[0].id, {
       type: "displayChanged",
       display,
-    } as Parameters<typeof simulateMockWindowEvent>[1]);
+    });
 
     await waitFor(() => {
       expect(onDisplayChange).toHaveBeenCalledOnce();
