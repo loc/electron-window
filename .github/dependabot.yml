@@ -1,0 +1,27 @@
+version: 2
+updates:
+  # Keep GitHub Actions pinned versions current — action major bumps are
+  # usually security/runtime deprecations (node16→node20 etc.) that silently
+  # break workflows on old pins.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # npm deps: monthly, dev-only. Runtime is peer-deps (consumer's tree).
+  # @marshallofsound/ipc is pinned ~2.6 intentionally — patch script
+  # string-matches its output shape. Ignore it here so Dependabot doesn't
+  # open a PR that breaks the build on merge.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    ignore:
+      - dependency-name: "@marshallofsound/ipc"
+    groups:
+      dev-deps:
+        dependency-type: development
+        patterns: ["*"]

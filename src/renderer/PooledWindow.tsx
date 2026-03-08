@@ -268,11 +268,8 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(funct
     onExitFullscreen,
     onDisplayChange,
     onWindowClosedSetState: () => {
-      // The window was destroyed (possibly via BrowserWindow.destroy() from
-      // main, which does NOT fire unload). The pool's own unload listener
-      // won't run in that case, so explicitly remove from pool tracking.
-      // The hook already called resetLifecycle() internally for 'closed' —
-      // we only reset our own component-owned state here.
+      // BrowserWindow.destroy() skips unload, so the pool's unload listener
+      // won't run — explicitly notify. resetLifecycle ran in the hook already.
       const destroyedId = entryRef.current?.id;
       resetComponentState();
       if (destroyedId) pool.notifyDestroyed(destroyedId);
@@ -400,20 +397,15 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(funct
       prevPropsRef.current = { ...rest, title, visible };
 
       // Defer show to useLayoutEffect — React must commit the portal content
-      // to the DOM before the window becomes visible. The layout effect fires
-      // after React's commit phase, guaranteeing content is painted.
-      // Skip if initially hidden.
+      // before the window becomes visible. Skip if initially hidden.
       if (visibleRef.current !== false) {
         pendingShowRef.current = entry.id;
       }
     }
 
     acquireWindow();
-    // Cleanup fires on open→false, pool change, AND unmount. In all cases,
-    // release the acquired entry (if any) to the captured pool and reset
-    // state fully so the next acquire starts clean. The captured `pool`
-    // closure is the OLD pool on pool-change — correct, that's where the
-    // entry belongs.
+    // Release to the captured `pool` (the OLD pool on pool-change — correct,
+    // that's where this entry belongs).
     return () => {
       cancelled = true;
       if (entryRef.current) {

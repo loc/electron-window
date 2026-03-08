@@ -39,7 +39,6 @@ export interface WindowLifecycleOptions {
   childWindowRef?: React.RefObject<globalThis.Window | null>;
   /** The child window's Document, for portaling UI library overlays */
   childDocument?: Document | null;
-  /** Callbacks — all optional */
   onBoundsChange?: (bounds: Bounds) => void;
   onUserClose?: () => void;
   onFocus?: () => void;
@@ -52,7 +51,6 @@ export interface WindowLifecycleOptions {
   onEnterFullscreen?: () => void;
   onExitFullscreen?: () => void;
   onDisplayChange?: (display: DisplayInfo) => void;
-  /** Optional persistence */
   persistBoundsKey?: string;
   persistenceSave?: (bounds: Bounds) => void;
   /**
@@ -162,7 +160,6 @@ export function useWindowLifecycle(opts: WindowLifecycleOptions): WindowLifecycl
     for (const l of stateListeners.current) l();
   }, []);
 
-  // Subscribe to window events — only re-subscribes when windowId/isReady/provider changes
   useEffect(() => {
     if (!isReady || !windowId) return;
 

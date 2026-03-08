@@ -1,0 +1,5 @@
+# This repo uses oxfmt (yarn format), not Prettier. Keep editor
+# format-on-save from fighting it.
+src/
+tests/
+dist/

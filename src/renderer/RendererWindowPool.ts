@@ -212,11 +212,8 @@ export class RendererWindowPool {
   async acquire(): Promise<PoolEntry> {
     if (this.isDestroyed) throw new Error("Pool has been destroyed");
 
-    // Pull from idle, discarding dead entries. External destruction (e.g.,
-    // consumer's "close all windows" menu, or test clearAllState) can kill
-    // pooled windows while no <PooledWindow> is mounted to receive the
-    // `closed` IPC event — so notifyDestroyed() never runs and the pool
-    // still has dead entries in idle[]. Bounded by maxIdle.
+    // Discard dead entries — external destruction with no <PooledWindow> mounted
+    // means no `closed` event → notifyDestroyed never ran. Bounded by maxIdle.
     let entry = this.idle.shift();
     while (entry && entry.childWindow.closed) {
       this.debugLog("discarding dead idle entry", entry.id);

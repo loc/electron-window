@@ -1,0 +1,44 @@
+name: Bug report
+description: Report a bug or unexpected behavior
+labels: [bug]
+body:
+  - type: input
+    id: electron-version
+    attributes:
+      label: Electron version
+      description: Output of `npx electron --version`
+      placeholder: "40.2.1"
+    validations:
+      required: true
+  - type: input
+    id: library-version
+    attributes:
+      label: "@loc/electron-window version"
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+        - Linux
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the bug and how to reproduce it.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: |
+        A minimal code snippet or link to a repo. Window lifecycle bugs are
+        highly sensitive to mount/unmount timing — a repro helps enormously.
+      render: tsx
