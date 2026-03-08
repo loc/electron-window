@@ -236,3 +236,71 @@ describe("__originHook — build-time origin allowlist", () => {
     expect(hook("not a url")).toBe(false);
   });
 });
+
+describe("preload __originHook — reads window.location.href", () => {
+  // The preload hook gates contextBridge.exposeInMainWorld — if it returns
+  // false, the renderer never sees the API. Unlike the main-side hook which
+  // receives event.senderFrame.url, this reads window.location directly
+  // (preload runs after document commit, so location is final).
+
+  const CONST = "__ELECTRON_WINDOW_ALLOWED_ORIGINS__";
+  let originalHref: string;
+
+  beforeEach(() => {
+    originalHref = window.location.href;
+  });
+
+  afterEach(() => {
+    // jsdom's location isn't writable by default; reconfigure it
+    Object.defineProperty(window, "location", {
+      value: new URL(originalHref),
+      writable: true,
+      configurable: true,
+    });
+    delete (globalThis as Record<string, unknown>)[CONST];
+    vi.resetModules();
+  });
+
+  function setLocation(href: string) {
+    Object.defineProperty(window, "location", {
+      value: new URL(href),
+      writable: true,
+      configurable: true,
+    });
+  }
+
+  async function loadPreloadHook() {
+    const mod = await import("../../src/preload/__originHook.js");
+    return mod.__originHook;
+  }
+
+  it("permissive when constant is undefined", async () => {
+    setLocation("https://any.example/page");
+    const hook = await loadPreloadHook();
+    expect(hook()).toBe(true);
+  });
+
+  it("allows when window.location origin is in allowlist", async () => {
+    (globalThis as Record<string, unknown>)[CONST] = ["https://trusted.example"];
+    setLocation("https://trusted.example/some/path");
+    vi.resetModules();
+    const hook = await loadPreloadHook();
+    expect(hook()).toBe(true);
+  });
+
+  it("rejects when window.location origin is not in allowlist", async () => {
+    (globalThis as Record<string, unknown>)[CONST] = ["https://trusted.example"];
+    setLocation("https://attacker.example/");
+    vi.resetModules();
+    const hook = await loadPreloadHook();
+    expect(hook()).toBe(false);
+  });
+
+  it("handles file:// via origin === 'null' fallback", async () => {
+    (globalThis as Record<string, unknown>)[CONST] = ["file://"];
+    setLocation("file:///Users/app/index.html");
+    vi.resetModules();
+    const hook = await loadPreloadHook();
+    expect(hook()).toBe(true);
+  });
+});

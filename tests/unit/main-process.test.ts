@@ -247,6 +247,54 @@ describe("filterAllowedProps (via WindowManager IPC implementation)", () => {
     expect(result).toEqual({ action: "deny" });
   });
 
+  it("delegates unmanaged window.open to fallbackWindowOpenHandler when provided", () => {
+    // Apps that also use window.open for OAuth popups or external links
+    // need this escape hatch. If delegation breaks, those silently fail.
+    const parent = createMockParentWindow();
+    const localManager = new WindowManager({ devWarnings: false });
+    const fallback = vi.fn(() => ({ action: "allow" as const }));
+
+    localManager.setupForWindow(parent as unknown as import("electron").BrowserWindow, {
+      fallbackWindowOpenHandler: fallback,
+    });
+
+    const handler = parent.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (details: {
+      frameName: string;
+      url: string;
+    }) => unknown;
+
+    // Frame name that isn't a registered win_* id → not library-managed
+    const details = {
+      frameName: "oauth-popup",
+      url: "https://accounts.example.com/auth",
+    };
+    const result = handler(details);
+
+    expect(fallback).toHaveBeenCalledWith(details);
+    expect(result).toEqual({ action: "allow" });
+  });
+
+  it("fallbackWindowOpenHandler return value is propagated (deny case)", () => {
+    const parent = createMockParentWindow();
+    const localManager = new WindowManager({ devWarnings: false });
+    const fallback = vi.fn(() => ({ action: "deny" as const }));
+
+    localManager.setupForWindow(parent as unknown as import("electron").BrowserWindow, {
+      fallbackWindowOpenHandler: fallback,
+    });
+
+    const handler = parent.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (details: {
+      frameName: string;
+      url: string;
+    }) => unknown;
+
+    const result = handler({
+      frameName: "_blank",
+      url: "https://evil.example",
+    });
+    expect(result).toEqual({ action: "deny" });
+  });
+
   it("strips nodeIntegration, contextIsolation, sandbox, preload", () => {
     // These keys are not in RENDERER_ALLOWED_PROPS — verify the set directly
     // as the enforcement contract, then verify indirectly via the registered result

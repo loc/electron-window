@@ -62,6 +62,48 @@ describe("createWindowPool", () => {
     ).toThrow(/maxIdle.*must be >= minIdle/);
   });
 
+  it("evicts idle windows after idleTimeout, but never below minIdle", async () => {
+    // Timer-driven eviction path. Only scheduled when idle.length > minIdle
+    // at release time — so we need to acquire+release enough to cross that.
+    const { RendererWindowPool } = await import("../../src/renderer/RendererWindowPool.js");
+
+    vi.useFakeTimers();
+    const unregisterWindow = vi.fn(async () => {});
+    const pool = new RendererWindowPool({
+      shape: {},
+      config: { minIdle: 1, maxIdle: 3, idleTimeout: 5000 },
+      registerWindow: vi.fn(async () => true),
+      unregisterWindow,
+      updateWindow: vi.fn(async () => {}),
+      windowAction: vi.fn(async () => {}),
+    });
+
+    // Warm to minIdle (1), then acquire it + create 2 more on-the-fly
+    await pool.warmUp();
+    const e1 = await pool.acquire();
+    const e2 = await pool.acquire();
+    const e3 = await pool.acquire();
+    // Let any in-flight replenishment settle
+    await vi.runOnlyPendingTimersAsync();
+
+    // Release all 3 → idle = 3 > minIdle (1), timers scheduled for e2 and e3
+    // (e1 release brings idle to 1 = minIdle, no timer for it)
+    await pool.release(e1.id);
+    await pool.release(e2.id);
+    await pool.release(e3.id);
+    expect(pool.getIdleCount()).toBe(3);
+
+    unregisterWindow.mockClear();
+    vi.advanceTimersByTime(5001);
+
+    // evictIdle guards idle > minIdle, so it stops at 1
+    expect(pool.getIdleCount()).toBe(1);
+    expect(unregisterWindow).toHaveBeenCalledTimes(2);
+
+    pool.destroy();
+    vi.useRealTimers();
+  });
+
   it("PoolShape interface keys match POOL_SHAPE_PROPS runtime set", async () => {
     // Completeness trap guard: there are THREE places defining "pool shape
     // props" — the PoolShape interface (RendererWindowPool.ts), the
