@@ -15,13 +15,22 @@ updates:
   # @marshallofsound/ipc is pinned ~2.6 intentionally — patch script
   # string-matches its output shape. Ignore it here so Dependabot doesn't
   # open a PR that breaks the build on merge.
+  #
+  # Majors are NOT grouped. Grouped majors across 14 deps are unmergeable —
+  # first batch hit a Node engines wall (@semantic-release/github@12 needs
+  # Node 22) before even reaching the React 19 + @testing-library/react 16
+  # cascade behind it. Majors come as individual PRs, capped at 3 open.
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: monthly
+    open-pull-requests-limit: 3
     ignore:
       - dependency-name: "@marshallofsound/ipc"
     groups:
-      dev-deps:
+      dev-deps-minor-patch:
         dependency-type: development
         patterns: ["*"]
+        update-types:
+          - minor
+          - patch
