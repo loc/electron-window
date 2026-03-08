@@ -11,21 +11,16 @@ export default defineConfig([
     splitting: true,
     external: ["electron", "react", "react-dom"],
   },
-  // Main process entry — dual ESM/CJS because many Electron apps still use
-  // a CJS main process (electron-forge/electron-builder defaults).
+  // Main process + preload entries — dual ESM/CJS (many Electron apps use a
+  // CJS main process; sandboxed preloads require CJS). Merged into one config
+  // block because the settings are identical. Each config block in the array
+  // runs a separate DTS worker in parallel — 4 parallel workers hit
+  // STATUS_HEAP_CORRUPTION on Windows CI (tsup#10662). 3 blocks survives.
   {
-    entry: { "main/index": "src/main/index.ts" },
-    format: ["esm", "cjs"],
-    dts: true,
-    sourcemap: true,
-    platform: "node",
-    external: ["electron"],
-  },
-  // Preload entry — dual ESM/CJS because sandboxed preloads require CJS.
-  // Consumers should still bundle this, but the CJS build makes direct use
-  // possible in non-sandboxed setups.
-  {
-    entry: { "preload/index": "src/preload/index.ts" },
+    entry: {
+      "main/index": "src/main/index.ts",
+      "preload/index": "src/preload/index.ts",
+    },
     format: ["esm", "cjs"],
     dts: true,
     sourcemap: true,

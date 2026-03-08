@@ -50,11 +50,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # windows-latest excluded: tsup's parallel DTS generation hits
-        # STATUS_HEAP_CORRUPTION (0xC0000374) on Windows runners. The package
-        # is pure TS (platform-agnostic); macOS + Ubuntu cover the Electron
-        # runtime paths.
-        os: [macos-latest, ubuntu-latest]
+        os: [macos-latest, ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
