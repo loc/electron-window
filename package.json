@@ -75,7 +75,7 @@
   },
   "devDependencies": {
     "@marshallofsound/ipc": "~2.6.0",
-    "@playwright/test": "^1.40.0",
+    "@playwright/test": "^1.58.2",
     "@semantic-release/commit-analyzer": "^13.0.0",
     "@semantic-release/github": "^11.0.0",
     "@semantic-release/npm": "^12.0.0",
@@ -86,7 +86,7 @@
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "electron": "^33.0.0",
-    "esbuild": "^0.27.2",
+    "esbuild": "^0.27.3",
     "jsdom": "^23.0.0",
     "oxfmt": "^0.36.0",
     "oxlint": "^1.51.0",
