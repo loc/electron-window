@@ -11,7 +11,9 @@ import {
   resetMockWindows,
   getMockWindows,
   simulateMockUserClose,
+  simulateMockWindowEvent,
 } from "../../src/testing/index.js";
+import { useCurrentWindow, useWindowFocused } from "../../src/renderer/hooks/index.js";
 import { resetMockWindowsGlobal, getGlobalMockWindows } from "../setup.js";
 
 // Query content from the pool window's document (portals render there, not in
@@ -1084,5 +1086,83 @@ describe("<PooledWindow>", () => {
     ).toBe(true);
 
     warnSpy.mockRestore();
+  });
+
+  // ─── Hooks inside <PooledWindow> ──────────────────────────────────────────
+  //
+  // All hook tests in hooks.test.tsx use <Window>. PooledWindow wires its own
+  // lifecycle.contextValue into WindowContext.Provider — same hook, different
+  // call site. A regression in PooledWindow's contextValue (stale subscribe,
+  // missing field) would break hooks ONLY here and every existing test would
+  // still pass. Two probes cover the contract:
+  // - useCurrentWindow: the static read (handle id + methods)
+  // - useWindowFocused: the reactive subscribe/getSnapshot path
+
+  it("useCurrentWindow works inside <PooledWindow> children", async () => {
+    // minIdle: 0 → no warm-up → exactly one window (the on-the-fly acquire).
+    // With minIdle > 0, warm-up + replenish create extra windows and
+    // getMockWindows()[0] becomes ambiguous.
+    const pool = createWindowPool({}, { minIdle: 0 });
+    let handle: ReturnType<typeof useCurrentWindow> | null = null;
+    const onReady = vi.fn();
+
+    function Child() {
+      handle = useCurrentWindow();
+      return <div data-testid="child">child</div>;
+    }
+
+    render(
+      <MockWindowProvider>
+        <PooledWindow pool={pool} open onReady={onReady}>
+          <Child />
+        </PooledWindow>
+      </MockWindowProvider>,
+    );
+
+    await waitFor(() => expect(onReady).toHaveBeenCalled());
+    await waitFor(() => expect(handle).not.toBeNull());
+
+    expect(handle!.id).toBeDefined();
+    // Methods are wired, not the NOT_READY_HANDLE no-ops — focus dispatches
+    // a real windowAction. (Checking it's callable is enough; the dispatch
+    // target is covered by the handle-dispatch-correctness test in Window.test.)
+    expect(typeof handle!.focus).toBe("function");
+    expect(() => handle!.focus()).not.toThrow();
+  });
+
+  it("useWindowFocused reacts to events inside <PooledWindow> children", async () => {
+    const pool = createWindowPool({}, { minIdle: 0 });
+    let focused: boolean | null = null;
+    let handleId: string | null = null;
+    const onReady = vi.fn();
+
+    function Child() {
+      focused = useWindowFocused();
+      handleId = useCurrentWindow().id;
+      return <div>{String(focused)}</div>;
+    }
+
+    render(
+      <MockWindowProvider>
+        <PooledWindow pool={pool} open onReady={onReady}>
+          <Child />
+        </PooledWindow>
+      </MockWindowProvider>,
+    );
+
+    await waitFor(() => expect(onReady).toHaveBeenCalled());
+    await waitFor(() => expect(focused).toBe(false));
+    // Fire at the id the PooledWindow actually subscribed to — not
+    // getMockWindows()[0], which may be a replenishment window.
+    await waitFor(() => expect(handleId).not.toBeNull());
+
+    // The hook subscribed via contextValue.subscribe. If PooledWindow's
+    // contextValue.subscribe is stale (wrong stateListeners ref, wrong
+    // windowStateRef), the event fires but the hook doesn't re-render.
+    act(() => simulateMockWindowEvent(handleId!, { type: "focused" }));
+    await waitFor(() => expect(focused).toBe(true));
+
+    act(() => simulateMockWindowEvent(handleId!, { type: "blurred" }));
+    await waitFor(() => expect(focused).toBe(false));
   });
 });

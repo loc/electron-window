@@ -7,6 +7,7 @@ import {
   resetMockWindows,
   getMockWindows,
   simulateMockWindowEvent,
+  setMockRejectRegistration,
 } from "../../src/testing/index.js";
 import type { Bounds } from "../../src/shared/types.js";
 import { resetMockWindowsGlobal, getGlobalMockWindows } from "../setup.js";
@@ -388,6 +389,42 @@ describe("<Window> recreateOnShapeChange", () => {
       const mockWindows = getMockWindows();
       expect(mockWindows[0].props.frame).toBe(false);
     });
+  });
+
+  it("detects prop REMOVAL (transparent: true → undefined) as a shape change", async () => {
+    // getWindowShape always includes all CREATION_ONLY_PROPS keys (undefined
+    // for unset) so `{transparent: true}` diffs against `{}` — the old
+    // `if (prop in props)` approach couldn't see removal. Existing tests
+    // cover false↔true; none cover set→unset.
+    function TestWithRemoval() {
+      const [hasTransparent, setHasTransparent] = useState(true);
+      // Conditional spread — prop is absent (not false) when toggled off.
+      const shapeProps = hasTransparent ? { transparent: true } : {};
+      return (
+        <MockWindowProvider>
+          <button onClick={() => setHasTransparent(false)}>Remove</button>
+          <Window open {...shapeProps} recreateOnShapeChange>
+            <div>Content</div>
+          </Window>
+        </MockWindowProvider>
+      );
+    }
+
+    render(<TestWithRemoval />);
+
+    await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
+    const initialId = [...getGlobalMockWindows().keys()][0];
+    expect(getMockWindows()[0].props.transparent).toBe(true);
+
+    fireEvent.click(screen.getByText("Remove"));
+
+    // Window recreated — new id, transparent absent in new registration.
+    await waitFor(() => {
+      const currentId = [...getGlobalMockWindows().keys()][0];
+      expect(currentId).not.toBe(initialId);
+    });
+    expect(getGlobalMockWindows().size).toBe(1);
+    expect(getMockWindows()[0].props.transparent).toBeUndefined();
   });
 
   it("does not recreate when non-creation-only props change", async () => {
@@ -1412,6 +1449,55 @@ describe("<Window> timing and cancellation", () => {
     // The close-effect runs when open becomes false, closing the window and
     // calling unregisterWindow — net result is zero windows.
     expect(getGlobalMockWindows().size).toBe(0);
+  });
+
+  it("registerWindow → false warns, skips window.open, and leaves component recoverable", async () => {
+    // Main-process rejection (maxWindows hit). The early return means
+    // hasRegisteredRef stays false and childWindowRef stays null — so the
+    // open=false teardown branch skips (nothing to clean up) and the next
+    // open=true retries cleanly with the same windowId.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    setMockRejectRegistration(true);
+
+    function TestApp() {
+      const [open, setOpen] = useState(true);
+      return (
+        <MockWindowProvider>
+          <button data-testid="off" onClick={() => setOpen(false)} />
+          <button data-testid="on" onClick={() => setOpen(true)} />
+          <Window open={open} name="retry-test">
+            <div>Content</div>
+          </Window>
+        </MockWindowProvider>
+      );
+    }
+
+    render(<TestApp />);
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Rejection path: warned, no window.open, no state leak
+    expect(warnSpy.mock.calls.some((c) => String(c[0]).includes("RegisterWindow rejected"))).toBe(
+      true,
+    );
+    expect(getGlobalMockWindows().size).toBe(0);
+    expect(getMockWindows().length).toBe(0);
+
+    // Recovery: clear rejection, toggle off→on
+    setMockRejectRegistration(false);
+    warnSpy.mockClear();
+    fireEvent.click(screen.getByTestId("off"));
+    await new Promise((r) => setTimeout(r, 10));
+    fireEvent.click(screen.getByTestId("on"));
+
+    // This time register succeeds → window.open called → window created.
+    // No second "rejected" warning.
+    await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
+    expect(warnSpy.mock.calls.some((c) => String(c[0]).includes("RegisterWindow rejected"))).toBe(
+      false,
+    );
+
+    warnSpy.mockRestore();
   });
 
   it("handles window.open returning null gracefully", async () => {

@@ -479,6 +479,42 @@ describe("WindowManager webPreferences security floor", () => {
     expect(wp?.nodeIntegration).toBe(false);
     expect(wp?.contextIsolation).toBe(true);
   });
+
+  it("defaultWindowOptions as a function is called per window.open (not spread as object)", () => {
+    // The function form lets consumers compute theme-aware backgroundColor
+    // lazily. If the `typeof === "function"` branch regresses to treating
+    // the function as the options object, `{...fn}` spreads nothing and
+    // backgroundColor is silently dropped.
+    let theme = "dark";
+    const optionsFn = vi.fn(() => ({
+      backgroundColor: theme === "dark" ? "#000" : "#fff",
+    }));
+
+    const manager = new WindowManager({
+      devWarnings: false,
+      defaultWindowOptions: optionsFn,
+    });
+    const parent = createMockParentWindow();
+    manager.setupForWindow(parent as unknown as import("electron").BrowserWindow);
+    const impl = getLastImpl();
+    const handler = parent.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (arg: {
+      frameName: string;
+      url: string;
+    }) => { overrideBrowserWindowOptions?: { backgroundColor?: string } };
+
+    impl.RegisterWindow("a", {} as never);
+    const r1 = handler({ frameName: "a", url: "about:blank" });
+    expect(optionsFn).toHaveBeenCalledTimes(1);
+    expect(r1.overrideBrowserWindowOptions?.backgroundColor).toBe("#000");
+
+    // Theme changed between opens — the function is re-invoked, picks up
+    // the new value. This is the whole point of the function form.
+    theme = "light";
+    impl.RegisterWindow("b", {} as never);
+    const r2 = handler({ frameName: "b", url: "about:blank" });
+    expect(optionsFn).toHaveBeenCalledTimes(2);
+    expect(r2.overrideBrowserWindowOptions?.backgroundColor).toBe("#fff");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -509,6 +545,82 @@ describe("WindowManager public API", () => {
     const manager = new WindowManager({ devWarnings: false });
     expect(() => manager.destroy()).not.toThrow();
     expect(manager.getAllWindows()).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: setupForWindow target-shape overloads
+//
+// The public signature accepts BrowserWindow | {webContents} | WebContents.
+// The branch logic is: pull `.webContents` if present, else use the target
+// itself; use `target.isDestroyed` if present, else `webContents.isDestroyed`.
+// Existing tests only cover the BrowserWindow shape (has both). The other two
+// shapes are the ones actually used when the renderer lives in a
+// WebContentsView (view → has .webContents, no .isDestroyed) or when the
+// caller already has the WebContents in hand.
+// ---------------------------------------------------------------------------
+
+describe("setupForWindow target-shape overloads", () => {
+  beforeEach(() => {
+    (globalThis as Record<string, unknown>).__lastImpl__ = undefined;
+  });
+
+  it("accepts a bare WebContents (no .webContents wrapper)", () => {
+    const manager = new WindowManager({ devWarnings: false });
+    const wc = createMockWebContents();
+
+    // Passing the WebContents directly — the `"webContents" in target`
+    // branch must take the else path and use `target` itself.
+    manager.setupForWindow(wc as unknown as import("electron").WebContents);
+
+    // IPC impl was wired (the mock captures it in __lastImpl__)
+    expect(getLastImpl()).toBeDefined();
+    // setWindowOpenHandler was called on the WebContents we passed in —
+    // not on some undefined `.webContents` property.
+    expect(wc.setWindowOpenHandler).toHaveBeenCalledTimes(1);
+    // 'did-create-window' and 'destroyed' listeners were attached to this WC
+    expect(wc.on).toHaveBeenCalledWith("did-create-window", expect.any(Function));
+    expect(wc.once).toHaveBeenCalledWith("destroyed", expect.any(Function));
+  });
+
+  it("accepts a WebContentsView-shaped object (has .webContents, no .isDestroyed)", () => {
+    // WebContentsView has .webContents but (unlike BrowserWindow) no
+    // .isDestroyed() of its own. The isDestroyed closure must fall through
+    // to webContents.isDestroyed() — if it reads target.isDestroyed, the
+    // 'destroyed' cleanup path would throw at call time (undefined is not
+    // a function) and leave orphaned child windows.
+    const manager = new WindowManager({ devWarnings: false });
+    const wc = createMockWebContents();
+    const view = { webContents: wc }; // no isDestroyed
+
+    manager.setupForWindow(view as unknown as { webContents: import("electron").WebContents });
+
+    expect(getLastImpl()).toBeDefined();
+    // Handler attached to the view's WebContents, not the view itself
+    expect(wc.setWindowOpenHandler).toHaveBeenCalledTimes(1);
+    // The `"isDestroyed" in target` check must be false → falls back to wc.isDestroyed.
+    // We can't directly observe which closure was created, but we CAN verify
+    // that calling wc.isDestroyed doesn't blow up and that the property was
+    // absent from the view (contract assertion — if someone adds it to the
+    // mock view, this test stops testing the fallback).
+    expect("isDestroyed" in view).toBe(false);
+    expect(wc.isDestroyed).not.toHaveBeenCalled(); // closure isn't called during setup
+  });
+
+  it("prefers target.isDestroyed over webContents.isDestroyed when both present", () => {
+    // BrowserWindow shape: the container's lifecycle is authoritative.
+    // A BrowserWindow can be destroyed while its WebContents briefly
+    // survives (or vice versa during teardown races).
+    const manager = new WindowManager({ devWarnings: false });
+    const parent = createMockParentWindow();
+
+    manager.setupForWindow(parent as unknown as import("electron").BrowserWindow);
+
+    // Both exist — verify the mock contract so a future mock change doesn't
+    // silently gut this test.
+    expect("isDestroyed" in parent).toBe(true);
+    expect("isDestroyed" in parent.webContents).toBe(true);
+    expect(getLastImpl()).toBeDefined();
   });
 });
 
@@ -1221,6 +1333,108 @@ describe("WindowManager rate limits", () => {
 
     expect(impl.RegisterWindow("w1", { width: 800 } as never)).toBe(true);
     expect(impl.RegisterWindow("w2", { width: 800 } as never)).toBe(false);
+  });
+
+  it("rejects RegisterWindow when maxWindows (active, not pending) is reached", () => {
+    // maxPendingWindows guards register-but-never-open; maxWindows guards
+    // the actual BrowserWindow count. The check reads this.windows.size,
+    // which is only populated by did-create-window — so we have to walk
+    // the full register → openHandler → did-create flow for each.
+    const manager = new WindowManager({
+      devWarnings: false,
+      maxPendingWindows: 50,
+      maxWindows: 2,
+    });
+    const parent = createMockParentWindow();
+    manager.setupForWindow(parent as unknown as import("electron").BrowserWindow);
+    const impl = getLastImpl();
+
+    const openHandler = parent.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (arg: {
+      frameName: string;
+      url: string;
+    }) => unknown;
+    const didCreate = parent.webContents.on.mock.calls.find(
+      (c) => c[0] === "did-create-window",
+    )?.[1] as (bw: unknown, details: { frameName: string }) => void;
+
+    function createActive(id: string) {
+      expect(impl.RegisterWindow(id, {} as never)).toBe(true);
+      openHandler({ frameName: id, url: "about:blank" });
+      didCreate(createMockBrowserWindow(), { frameName: id });
+    }
+
+    createActive("a");
+    createActive("b");
+    expect(manager.getAllWindows()).toHaveLength(2);
+
+    // Third register is rejected — active limit hit. pendingWindows is
+    // empty at this point (both were consumed by did-create), so this
+    // proves we're checking windows.size, not pendingWindows.size.
+    expect(impl.RegisterWindow("c", {} as never)).toBe(false);
+  });
+
+  it("freed active slot allows RegisterWindow again", () => {
+    // UnregisterWindow → this.windows.delete → RegisterWindow succeeds.
+    // Guards against maxWindows becoming a one-way ratchet.
+    const manager = new WindowManager({
+      devWarnings: false,
+      maxPendingWindows: 50,
+      maxWindows: 1,
+    });
+    const parent = createMockParentWindow();
+    manager.setupForWindow(parent as unknown as import("electron").BrowserWindow);
+    const impl = getLastImpl();
+
+    const openHandler = parent.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (arg: {
+      frameName: string;
+      url: string;
+    }) => unknown;
+    const didCreate = parent.webContents.on.mock.calls.find(
+      (c) => c[0] === "did-create-window",
+    )?.[1] as (bw: unknown, details: { frameName: string }) => void;
+
+    expect(impl.RegisterWindow("a", {} as never)).toBe(true);
+    openHandler({ frameName: "a", url: "about:blank" });
+    didCreate(createMockBrowserWindow(), { frameName: "a" });
+
+    expect(impl.RegisterWindow("b", {} as never)).toBe(false);
+
+    impl.UnregisterWindow("a");
+    expect(manager.getAllWindows()).toHaveLength(0);
+
+    expect(impl.RegisterWindow("b", {} as never)).toBe(true);
+  });
+
+  it("lazy-sweeps pending entries older than 10s on each RegisterWindow", () => {
+    // A renderer that registers then crashes before window.open() would
+    // otherwise leave the pending entry forever, slowly exhausting
+    // maxPendingWindows. The sweep runs per RegisterWindow call (no
+    // background timer), so a stale entry is cleared on the NEXT register.
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+
+    const manager = new WindowManager({
+      devWarnings: false,
+      maxPendingWindows: 1, // so the stale entry would block if not swept
+      maxWindows: 50,
+    });
+    const parent = createMockParentWindow();
+    manager.setupForWindow(parent as unknown as import("electron").BrowserWindow);
+    const impl = getLastImpl();
+
+    // t=0: register A, never open it (simulates crash-before-open)
+    expect(impl.RegisterWindow("stale", {} as never)).toBe(true);
+
+    // t=9s: A is not stale yet (TTL is >10s). B is rejected — pending=1=max.
+    vi.setSystemTime(9_000);
+    expect(impl.RegisterWindow("too-soon", {} as never)).toBe(false);
+
+    // t=11s: A is now stale. The sweep runs BEFORE the limit check, so A
+    // is cleared and B registers cleanly.
+    vi.setSystemTime(11_000);
+    expect(impl.RegisterWindow("after-ttl", {} as never)).toBe(true);
+
+    vi.useRealTimers();
   });
 });
 

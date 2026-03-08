@@ -47,6 +47,22 @@ let mockStore: MockStore = {
 };
 
 /**
+ * When true, MockWindowProvider.registerWindow returns false — simulating
+ * main-process rejection (maxWindows/maxPendingWindows limit). Cleared by
+ * resetMockWindows(); toggle per-test with setMockRejectRegistration().
+ */
+let rejectRegistration = false;
+
+/**
+ * Make the next (and subsequent) registerWindow calls return false, as if
+ * the main process hit maxWindows. Call with `false` to restore normal
+ * behavior, or rely on resetMockWindows() in beforeEach.
+ */
+export function setMockRejectRegistration(reject: boolean): void {
+  rejectRegistration = reject;
+}
+
+/**
  * Reset the mock store (call in beforeEach)
  */
 export function resetMockWindows(): void {
@@ -54,6 +70,7 @@ export function resetMockWindows(): void {
     windows: new Map(),
     listeners: new Map(),
   };
+  rejectRegistration = false;
 }
 
 /**
@@ -188,6 +205,7 @@ export interface MockWindowProviderProps {
 export function MockWindowProvider({ children }: MockWindowProviderProps): ReactElement {
   const registerWindow = useCallback(
     async (id: WindowId, props: Record<string, unknown>): Promise<boolean> => {
+      if (rejectRegistration) return false;
       const state: WindowState = {
         id,
         isFocused: false,
