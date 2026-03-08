@@ -87,7 +87,7 @@ interface PropMeta {
  *   shape props (PooledWindow.tsx)          = creationOnly && allowed
  */
 export const PROP_REGISTRY: Readonly<Record<string, PropMeta>> = {
-  // --- Geometry: initial values (creation-only) ---
+  // --- Geometry: initial values (applied once via constructor) ---
   defaultWidth: { allowed: true, creationOnly: false },
   defaultHeight: { allowed: true, creationOnly: false },
   defaultX: { allowed: true, creationOnly: false },

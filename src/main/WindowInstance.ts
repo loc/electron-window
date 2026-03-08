@@ -9,7 +9,13 @@ import {
 } from "../generated-ipc/common/electron_window.js";
 import type { BaseWindowProps } from "../shared/types.js";
 import { CREATION_ONLY_PROPS } from "../shared/types.js";
-import { debounce, isMac, isWindows, isLinux, devWarning } from "../shared/utils.js";
+import {
+  debounce,
+  isMac,
+  isWindows,
+  isLinux,
+  devWarning,
+} from "../shared/utils.js";
 
 // Hard caps on setBounds values. Electron clamps internally on most platforms
 // but NaN/Infinity have undefined behavior, and gigantic dimensions can cause
@@ -32,7 +38,10 @@ function sanitizeBoundsValue(
 /**
  * Prop to Electron setter method mapping
  */
-const PROP_SETTERS: Record<string, (win: BrowserWindow, value: unknown) => void> = {
+const PROP_SETTERS: Record<
+  string,
+  (win: BrowserWindow, value: unknown) => void
+> = {
   // title is excluded from CHANGEABLE_BEHAVIOR_PROPS (set via document.title
   // in the renderer instead), but the setter here remains for the
   // WindowAction {type: "setTitle"} path which routes through the handle.
@@ -64,7 +73,10 @@ const PROP_SETTERS: Record<string, (win: BrowserWindow, value: unknown) => void>
     }
   },
   alwaysOnTopLevel: (win, v) => {
-    win.setAlwaysOnTop(true, v as Parameters<BrowserWindow["setAlwaysOnTop"]>[1]);
+    win.setAlwaysOnTop(
+      true,
+      v as Parameters<BrowserWindow["setAlwaysOnTop"]>[1],
+    );
   },
   skipTaskbar: (win, v) => win.setSkipTaskbar(v as boolean),
   fullscreen: (win, v) => win.setFullScreen(v as boolean),
@@ -204,17 +216,16 @@ export class WindowInstance {
 
     // Apply alwaysOnTop level if specified — constructor only accepts boolean,
     // level must be set via setAlwaysOnTop after creation.
-    const level = (this.currentProps as Record<string, unknown>).alwaysOnTopLevel as
-      | string
-      | undefined;
+    const level = (this.currentProps as Record<string, unknown>)
+      .alwaysOnTopLevel as string | undefined;
     if (level) {
-      win.setAlwaysOnTop(true, level as Parameters<BrowserWindow["setAlwaysOnTop"]>[1]);
+      win.setAlwaysOnTop(
+        true,
+        level as Parameters<BrowserWindow["setAlwaysOnTop"]>[1],
+      );
     }
   }
 
-  /**
-   * Set up event listeners on the browser window
-   */
   private setupEventListeners(): void {
     const win = this.browserWindow;
     if (!win) return;
@@ -253,36 +264,46 @@ export class WindowInstance {
     });
 
     win.on("focus", () => {
-      if (!this.isDestroyed) this.onEvent({ type: WindowEventType.Focused, id: this.id });
+      if (!this.isDestroyed)
+        this.onEvent({ type: WindowEventType.Focused, id: this.id });
     });
     win.on("blur", () => {
-      if (!this.isDestroyed) this.onEvent({ type: WindowEventType.Blurred, id: this.id });
+      if (!this.isDestroyed)
+        this.onEvent({ type: WindowEventType.Blurred, id: this.id });
     });
 
     win.on("maximize", () => {
-      if (!this.isDestroyed) this.onEvent({ type: WindowEventType.Maximized, id: this.id });
+      if (!this.isDestroyed)
+        this.onEvent({ type: WindowEventType.Maximized, id: this.id });
     });
     win.on("unmaximize", () => {
-      if (!this.isDestroyed) this.onEvent({ type: WindowEventType.Unmaximized, id: this.id });
+      if (!this.isDestroyed)
+        this.onEvent({ type: WindowEventType.Unmaximized, id: this.id });
     });
     win.on("minimize", () => {
-      if (!this.isDestroyed) this.onEvent({ type: WindowEventType.Minimized, id: this.id });
+      if (!this.isDestroyed)
+        this.onEvent({ type: WindowEventType.Minimized, id: this.id });
     });
     win.on("restore", () => {
-      if (!this.isDestroyed) this.onEvent({ type: WindowEventType.Restored, id: this.id });
+      if (!this.isDestroyed)
+        this.onEvent({ type: WindowEventType.Restored, id: this.id });
     });
     win.on("show", () => {
-      if (!this.isDestroyed) this.onEvent({ type: WindowEventType.Shown, id: this.id });
+      if (!this.isDestroyed)
+        this.onEvent({ type: WindowEventType.Shown, id: this.id });
     });
     win.on("hide", () => {
-      if (!this.isDestroyed) this.onEvent({ type: WindowEventType.Hidden, id: this.id });
+      if (!this.isDestroyed)
+        this.onEvent({ type: WindowEventType.Hidden, id: this.id });
     });
 
     win.on("enter-full-screen", () => {
-      if (!this.isDestroyed) this.onEvent({ type: WindowEventType.EnterFullscreen, id: this.id });
+      if (!this.isDestroyed)
+        this.onEvent({ type: WindowEventType.EnterFullscreen, id: this.id });
     });
     win.on("leave-full-screen", () => {
-      if (!this.isDestroyed) this.onEvent({ type: WindowEventType.LeaveFullscreen, id: this.id });
+      if (!this.isDestroyed)
+        this.onEvent({ type: WindowEventType.LeaveFullscreen, id: this.id });
     });
 
     win.on("resize", () => {
@@ -302,9 +323,6 @@ export class WindowInstance {
     });
   }
 
-  /**
-   * Check if the window moved to a different display and emit an event if so
-   */
   private checkDisplayChange(): void {
     if (!this.browserWindow) return;
 
@@ -328,7 +346,9 @@ export class WindowInstance {
     }
   }
 
-  updateProps(newProps: Partial<Omit<BaseWindowProps, "open" | "children">>): void {
+  updateProps(
+    newProps: Partial<Omit<BaseWindowProps, "open" | "children">>,
+  ): void {
     if (!this.browserWindow || this.isDestroyed) return;
 
     // Capture old visible BEFORE the loop updates currentProps — the loop
@@ -336,7 +356,9 @@ export class WindowInstance {
     // without calling show/hide (no setter in PROP_SETTERS), so by the time
     // we reach the explicit handling below, currentProps.visible already
     // reflects the new value.
-    const oldVisible = (this.currentProps as Record<string, unknown>)["visible"];
+    const oldVisible = (this.currentProps as Record<string, unknown>)[
+      "visible"
+    ];
 
     for (const [key, value] of Object.entries(newProps)) {
       if (this.currentProps[key as keyof typeof this.currentProps] === value) {
@@ -344,7 +366,9 @@ export class WindowInstance {
       }
 
       if (CREATION_ONLY_PROPS.has(key)) {
-        devWarning(`"${key}" is a creation-only prop and cannot be changed after window creation.`);
+        devWarning(
+          `"${key}" is a creation-only prop and cannot be changed after window creation.`,
+        );
         continue;
       }
 
@@ -383,7 +407,10 @@ export class WindowInstance {
     }
 
     const boundsChanged =
-      "x" in newProps || "y" in newProps || "width" in newProps || "height" in newProps;
+      "x" in newProps ||
+      "y" in newProps ||
+      "width" in newProps ||
+      "height" in newProps;
 
     if (boundsChanged) {
       // Route through this.setBounds() for sanitization (NaN/Infinity
@@ -457,7 +484,8 @@ export class WindowInstance {
   }
 
   unmaximize(): void {
-    if (this.browserWindow && !this.isDestroyed) this.browserWindow.unmaximize();
+    if (this.browserWindow && !this.isDestroyed)
+      this.browserWindow.unmaximize();
   }
 
   close(): void {
@@ -484,15 +512,35 @@ export class WindowInstance {
     if (!this.browserWindow || this.isDestroyed) return;
     const current = this.browserWindow.getBounds();
 
-    const width = sanitizeBoundsValue(bounds.width, current.width, MIN_DIMENSION, MAX_DIMENSION);
-    const height = sanitizeBoundsValue(bounds.height, current.height, MIN_DIMENSION, MAX_DIMENSION);
+    const width = sanitizeBoundsValue(
+      bounds.width,
+      current.width,
+      MIN_DIMENSION,
+      MAX_DIMENSION,
+    );
+    const height = sanitizeBoundsValue(
+      bounds.height,
+      current.height,
+      MIN_DIMENSION,
+      MAX_DIMENSION,
+    );
 
     // Clamp x/y so at least a 100px sliver stays on some display — keeps
     // the window grabbable. Uses the union of all workAreas rather than
     // a single display, since multi-monitor setups span arbitrary coords.
     const displays = screen.getAllDisplays();
-    let x = sanitizeBoundsValue(bounds.x, current.x, -MAX_DIMENSION, MAX_DIMENSION);
-    let y = sanitizeBoundsValue(bounds.y, current.y, -MAX_DIMENSION, MAX_DIMENSION);
+    let x = sanitizeBoundsValue(
+      bounds.x,
+      current.x,
+      -MAX_DIMENSION,
+      MAX_DIMENSION,
+    );
+    let y = sanitizeBoundsValue(
+      bounds.y,
+      current.y,
+      -MAX_DIMENSION,
+      MAX_DIMENSION,
+    );
     if (displays.length > 0) {
       const GRIP = 100;
       const anyOverlap = displays.some((d) => {
@@ -516,15 +564,18 @@ export class WindowInstance {
   }
 
   setTitle(title: string): void {
-    if (this.browserWindow && !this.isDestroyed) this.browserWindow.setTitle(title);
+    if (this.browserWindow && !this.isDestroyed)
+      this.browserWindow.setTitle(title);
   }
 
   enterFullscreen(): void {
-    if (this.browserWindow && !this.isDestroyed) this.browserWindow.setFullScreen(true);
+    if (this.browserWindow && !this.isDestroyed)
+      this.browserWindow.setFullScreen(true);
   }
 
   exitFullscreen(): void {
-    if (this.browserWindow && !this.isDestroyed) this.browserWindow.setFullScreen(false);
+    if (this.browserWindow && !this.isDestroyed)
+      this.browserWindow.setFullScreen(false);
   }
 
   show(): void {

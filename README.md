@@ -1,5 +1,9 @@
 # @loc/electron-window
 
+[![CI](https://github.com/loc/electron-window/actions/workflows/ci.yml/badge.svg)](https://github.com/loc/electron-window/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/loc/electron-window?include_prereleases)](https://github.com/loc/electron-window/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Declarative React components for Electron window management. Opens native windows with `<Window open>`, renders children via portals so your React context (providers, themes, state) works inside child windows without any extra wiring.
 
 **[Full documentation →](https://loc.github.io/electron-window/)**

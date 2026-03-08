@@ -98,7 +98,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/loc/electron-window.git"
+    "url": "git+https://github.com/loc/electron-window.git"
   },
   "homepage": "https://loc.github.io/electron-window/",
   "bugs": {

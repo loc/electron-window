@@ -32,7 +32,10 @@ export interface RendererWindowPoolOptions {
   debug?: boolean;
   injectStyles?: InjectStylesMode;
   // Injected by PooledWindow from WindowProviderContext
-  registerWindow: (id: string, props: Record<string, unknown>) => Promise<boolean>;
+  registerWindow: (
+    id: string,
+    props: Record<string, unknown>,
+  ) => Promise<boolean>;
   unregisterWindow: (id: string) => Promise<void>;
   updateWindow: (id: string, props: Record<string, unknown>) => Promise<void>;
   windowAction: (id: string, action: { type: string }) => Promise<void>;
@@ -57,7 +60,8 @@ export class RendererWindowPool {
 
   private readonly idle: PoolEntry[] = [];
   private readonly active: Map<string, PoolEntry> = new Map();
-  private readonly idleTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+  private readonly idleTimers: Map<string, ReturnType<typeof setTimeout>> =
+    new Map();
 
   private registerWindow: RendererWindowPoolOptions["registerWindow"];
   private unregisterWindow: RendererWindowPoolOptions["unregisterWindow"];
@@ -131,9 +135,6 @@ export class RendererWindowPool {
     await Promise.all(promises);
   }
 
-  /**
-   * Open a hidden window and park it in the idle queue.
-   */
   private async createIdleWindow(): Promise<void> {
     if (this.isDestroyed) return;
 
@@ -155,7 +156,10 @@ export class RendererWindowPool {
         // pool-warming registrations silently fail and the pool ends up
         // empty. Log so it's diagnosable; the next acquire() takes the
         // slow on-the-fly path and will replenish once slots free up.
-        this.debugLog("createIdleWindow: RegisterWindow rejected (likely maxWindows limit)", id);
+        this.debugLog(
+          "createIdleWindow: RegisterWindow rejected (likely maxWindows limit)",
+          id,
+        );
         return;
       }
 
@@ -183,12 +187,10 @@ export class RendererWindowPool {
         return;
       }
 
-      const { container: portalTarget, cleanup: styleCleanup } = initWindowDocument(
-        childWindow.document,
-        {
+      const { container: portalTarget, cleanup: styleCleanup } =
+        initWindowDocument(childWindow.document, {
           injectStyles: this.injectStyles,
-        },
-      );
+        });
       const entry: PoolEntry = { id, childWindow, portalTarget, styleCleanup };
       this.idle.push(entry);
       this.debugLog("idle window ready", id);
@@ -291,12 +293,10 @@ export class RendererWindowPool {
         throw new Error("Pool destroyed during acquire");
       }
 
-      const { container: portalTarget, cleanup: styleCleanup } = initWindowDocument(
-        childWindow.document,
-        {
+      const { container: portalTarget, cleanup: styleCleanup } =
+        initWindowDocument(childWindow.document, {
           injectStyles: this.injectStyles,
-        },
-      );
+        });
       const newEntry: PoolEntry = {
         id,
         childWindow,

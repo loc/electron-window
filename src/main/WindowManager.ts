@@ -200,6 +200,8 @@ export class WindowManager {
     if (!url) return true;
 
     try {
+      // file:// and data: URLs have origin === "null" (the string, not null).
+      // Fall back to protocol//host so the allowlist can still match file://.
       const parsedOrigin = new URL(url).origin;
       const origin =
         parsedOrigin !== "null" ? parsedOrigin : new URL(url).protocol + "//" + new URL(url).host;
@@ -386,7 +388,6 @@ export class WindowManager {
 
   /**
    * Extract BrowserWindow constructor options from IPC props.
-   * Moved here from the old WindowInstance.buildBrowserWindowOptions().
    */
   private buildConstructorOptions(
     props: IPCWindowProps,
@@ -521,6 +522,10 @@ export class WindowManager {
       RegisterWindow: (id: WindowId, props: IPCWindowProps) => {
         this.debugLog("←", "RegisterWindow", id, props);
         if (!checkOrigin()) return false;
+        // Lazy-sweep stale pending entries (10s TTL) — no background timer
+        // needed since every register call runs this. A renderer that
+        // registers then crashes before window.open() would otherwise
+        // leave the entry forever.
         const now = Date.now();
         for (const [entryId, entry] of this.pendingWindows) {
           if (now - entry.createdAt > 10_000) {
