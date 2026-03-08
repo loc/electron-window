@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useMemo, useEffect } from "react";
+import { useState, useRef, useCallback, useMemo, useEffect, useImperativeHandle } from "react";
 import type { WindowId, WindowState, WindowHandle, Bounds, DisplayInfo } from "../shared/types.js";
 import type { WindowContextValue, WindowProviderContextValue } from "./context.js";
 import { debounce } from "../shared/utils.js";
@@ -73,14 +73,9 @@ export interface WindowLifecycleResult {
   >;
   /**
    * Reset ALL hook-owned state: windowState, displayInfo, and cancel the
-   * pending debounced onBoundsChange. Call this from every teardown path
-   * (open=false, shape-change, onWindowClosedSetState, unload, unmount).
-   * Component-owned state (refs, portalTarget, isReady) is the caller's job.
-   *
-   * Introduced after the FOURTH teardown-asymmetry bug — each teardown
-   * path was resetting a slightly different subset, and each miss was
-   * either a stale-state leak (displayInfo) or a late-firing callback
-   * (debounced onBoundsChange firing after release).
+   * pending debounced onBoundsChange. Call from every teardown path.
+   * Misses here manifest as displayInfo surviving into the next window,
+   * or onBoundsChange firing after release.
    */
   resetLifecycle: () => void;
 }
@@ -304,4 +299,71 @@ export function useWindowLifecycle(opts: WindowLifecycleOptions): WindowLifecycl
     debouncedBoundsChange,
     resetLifecycle,
   };
+}
+
+/**
+ * Builds the WindowHandle (imperative ref) for Window/PooledWindow.
+ *
+ * Method identity is stable as long as windowId + provider don't change —
+ * consumers can pass `ref.current.focus` as an effect dep without churn.
+ * The handle *object* changes when windowState changes so state fields
+ * stay current; consumers shouldn't use the whole handle as a dep.
+ */
+export function useWindowHandle(
+  ref: React.ForwardedRef<WindowHandle>,
+  opts: {
+    windowId: WindowId | null;
+    isReady: boolean;
+    provider: WindowProviderContextValue;
+    windowState: WindowState | null;
+    childWindowRef: React.RefObject<globalThis.Window | null>;
+  },
+): void {
+  const { windowId, isReady, provider, windowState, childWindowRef } = opts;
+
+  // Read through a ref so toggleMaximize closes over latest isMaximized
+  // without putting windowState in handleMethods' deps (that would churn
+  // the method identities on every state event).
+  const stateRef = useRef(windowState);
+  stateRef.current = windowState;
+
+  const handleMethods = useMemo(() => {
+    if (!windowId) return null;
+    return {
+      focus: () => void provider.windowAction(windowId, { type: "focus" }),
+      blur: () => void provider.windowAction(windowId, { type: "blur" }),
+      minimize: () => void provider.windowAction(windowId, { type: "minimize" }),
+      maximize: () => void provider.windowAction(windowId, { type: "maximize" }),
+      unmaximize: () => void provider.windowAction(windowId, { type: "unmaximize" }),
+      toggleMaximize: () =>
+        void provider.windowAction(windowId, {
+          type: stateRef.current?.isMaximized ? "unmaximize" : "maximize",
+        }),
+      close: () => void provider.windowAction(windowId, { type: "close" }),
+      forceClose: () => void provider.windowAction(windowId, { type: "forceClose" }),
+      setBounds: (bounds: Partial<Bounds>) =>
+        void provider.windowAction(windowId, { type: "setBounds", bounds }),
+      setTitle: (t: string) => {
+        if (childWindowRef.current) childWindowRef.current.document.title = t;
+        void provider.windowAction(windowId, { type: "setTitle", title: t });
+      },
+      enterFullscreen: () => void provider.windowAction(windowId, { type: "enterFullscreen" }),
+      exitFullscreen: () => void provider.windowAction(windowId, { type: "exitFullscreen" }),
+    };
+  }, [windowId, provider, childWindowRef]);
+
+  useImperativeHandle(ref, () => {
+    if (!isReady || !windowId || !handleMethods) return NOT_READY_HANDLE;
+    const state = stateRef.current;
+    return {
+      id: windowId,
+      isReady: true,
+      isFocused: state?.isFocused ?? false,
+      isMaximized: state?.isMaximized ?? false,
+      isMinimized: state?.isMinimized ?? false,
+      isFullscreen: state?.isFullscreen ?? false,
+      bounds: state?.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
+      ...handleMethods,
+    };
+  }, [isReady, windowId, handleMethods, windowState]);
 }

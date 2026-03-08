@@ -1,12 +1,4 @@
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  useMemo,
-  forwardRef,
-  useImperativeHandle,
-} from "react";
+import { useEffect, useLayoutEffect, useRef, useState, forwardRef } from "react";
 import { createPortal } from "react-dom";
 import { WindowContext, useWindowProviderContext } from "./context.js";
 import type { WindowId, WindowProps, WindowHandle } from "../shared/types.js";
@@ -18,7 +10,7 @@ import {
 import { usePersistedBounds } from "./hooks/usePersistedBounds.js";
 import { devWarning, generateWindowId } from "../shared/utils.js";
 import { waitForWindowReady, initWindowDocument } from "./windowUtils.js";
-import { useWindowLifecycle, NOT_READY_HANDLE } from "./useWindowLifecycle.js";
+import { useWindowLifecycle, useWindowHandle } from "./useWindowLifecycle.js";
 
 /**
  * Extract the window shape (creation-only props) for change detection.
@@ -28,8 +20,6 @@ import { useWindowLifecycle, NOT_READY_HANDLE } from "./useWindowLifecycle.js";
 function getWindowShape(props: Omit<WindowProps, "children">): Record<string, unknown> {
   const shape: Record<string, unknown> = {};
   for (const prop of CREATION_ONLY_PROPS) {
-    // Always include the key — undefined is a distinct shape value.
-    // Without this, `transparent: true → undefined` goes undetected.
     shape[prop] = props[prop as keyof typeof props];
   }
   return shape;
@@ -188,7 +178,6 @@ export const Window = forwardRef<WindowRef, WindowProps>(function Window(props, 
     setIsReady(false);
   }
 
-  // Warn about controlled bounds without onBoundsChange
   const hasWarnedAboutControlledBoundsRef = useRef(false);
   useEffect(() => {
     if (hasWarnedAboutControlledBoundsRef.current) return;
@@ -207,7 +196,6 @@ export const Window = forwardRef<WindowRef, WindowProps>(function Window(props, 
     }
   }, [props.width, props.height, props.x, props.y, onBoundsChange]);
 
-  // Open/close the child window
   useEffect(() => {
     if (!open) {
       // Only tear down if we actually opened something. Initial mount with
@@ -232,7 +220,6 @@ export const Window = forwardRef<WindowRef, WindowProps>(function Window(props, 
       // 1. Pre-register props so main process can configure the BrowserWindow
       //    before window.open triggers setWindowOpenHandler
       const ipcProps = extractIPCProps(props);
-      // Apply persisted bounds if persistence is enabled
       if (persistBounds && persistence.bounds) {
         if (persistence.bounds.defaultWidth)
           ipcProps.defaultWidth = persistence.bounds.defaultWidth;
@@ -291,7 +278,6 @@ export const Window = forwardRef<WindowRef, WindowProps>(function Window(props, 
       }
       childWindowRef.current = win;
 
-      // 3. Wait for the child window document to be accessible
       try {
         await waitForWindowReady(win, () => cancelled);
       } catch (err) {
@@ -310,15 +296,12 @@ export const Window = forwardRef<WindowRef, WindowProps>(function Window(props, 
         return;
       }
 
-      // 4. Set up document for portal rendering
       const { container, cleanup: styleCleanup } = initWindowDocument(win.document, {
         injectStyles,
         title,
       });
 
-      // 5. Handle user closing the window via OS chrome (X button).
-      // styleCleanup is also stored in a ref so the unmount cleanup can
-      // call it — BrowserWindow.destroy() doesn't fire unload.
+      // Stored in ref for unmount — destroy() doesn't fire unload.
       styleCleanupRef.current = styleCleanup;
       win.addEventListener("unload", () => {
         if (!cancelled) {
@@ -376,20 +359,14 @@ export const Window = forwardRef<WindowRef, WindowProps>(function Window(props, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, windowId]);
 
-  // Send prop updates to main process when changeable props change
   useEffect(() => {
     if (!isReady || !prevPropsRef.current) return;
 
     const prevProps = prevPropsRef.current;
 
-    // Check for creation-only prop changes
     if (initialShapeRef.current) {
       const currentShape = getWindowShape(props);
       const changedCreationOnlyProps: string[] = [];
-      // Iterate CREATION_ONLY_PROPS (not currentShape entries) so removal
-      // (undefined in current, defined in initial) is caught. getWindowShape
-      // now always includes all keys, so either iteration works, but this
-      // is defensive against future shape-function changes.
       for (const key of CREATION_ONLY_PROPS) {
         if (initialShapeRef.current[key] !== currentShape[key]) {
           changedCreationOnlyProps.push(key);
@@ -446,7 +423,6 @@ export const Window = forwardRef<WindowRef, WindowProps>(function Window(props, 
       changedBehaviorProps.alwaysOnTop = true;
     }
 
-    // Collect controlled bounds changes
     const boundsUpdate: Record<string, unknown> = {};
     if (props.width !== undefined && props.width !== prevProps.width) {
       boundsUpdate.width = props.width;
@@ -461,7 +437,6 @@ export const Window = forwardRef<WindowRef, WindowProps>(function Window(props, 
       boundsUpdate.y = props.y;
     }
 
-    // Merge behavior props and bounds into a single IPC update
     const allChanges = { ...changedBehaviorProps, ...boundsUpdate };
     if (Object.keys(allChanges).length > 0) {
       void provider.updateWindow(windowId, allChanges);
@@ -513,55 +488,14 @@ export const Window = forwardRef<WindowRef, WindowProps>(function Window(props, 
     }
   }, [isReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Stable method refs — don't depend on windowState, so the handle object
-  // identity only changes when windowId/provider change (rare). State fields
-  // on the handle still reflect current values via getter closures reading
-  // from the ref. This matches useCurrentWindow's behavior and keeps the
-  // README promise that "method references won't change identity".
-  const stateRef = useRef(lifecycle.windowState);
-  stateRef.current = lifecycle.windowState;
+  useWindowHandle(ref, {
+    windowId,
+    isReady,
+    provider,
+    windowState: lifecycle.windowState,
+    childWindowRef,
+  });
 
-  const handleMethods = useMemo(() => {
-    if (!windowId) return null;
-    return {
-      focus: () => void provider.windowAction(windowId, { type: "focus" }),
-      blur: () => void provider.windowAction(windowId, { type: "blur" }),
-      minimize: () => void provider.windowAction(windowId, { type: "minimize" }),
-      maximize: () => void provider.windowAction(windowId, { type: "maximize" }),
-      unmaximize: () => void provider.windowAction(windowId, { type: "unmaximize" }),
-      toggleMaximize: () =>
-        void provider.windowAction(windowId, {
-          type: stateRef.current?.isMaximized ? "unmaximize" : "maximize",
-        }),
-      close: () => void provider.windowAction(windowId, { type: "close" }),
-      forceClose: () => void provider.windowAction(windowId, { type: "forceClose" }),
-      setBounds: (bounds: Partial<import("../shared/types.js").Bounds>) =>
-        void provider.windowAction(windowId, { type: "setBounds", bounds }),
-      setTitle: (t: string) => {
-        if (childWindowRef.current) childWindowRef.current.document.title = t;
-        void provider.windowAction(windowId, { type: "setTitle", title: t });
-      },
-      enterFullscreen: () => void provider.windowAction(windowId, { type: "enterFullscreen" }),
-      exitFullscreen: () => void provider.windowAction(windowId, { type: "exitFullscreen" }),
-    };
-  }, [windowId, provider]);
-
-  useImperativeHandle(ref, () => {
-    if (!isReady || !windowId || !handleMethods) return NOT_READY_HANDLE;
-    const state = stateRef.current;
-    return {
-      id: windowId,
-      isReady: true,
-      isFocused: state?.isFocused ?? false,
-      isMaximized: state?.isMaximized ?? false,
-      isMinimized: state?.isMinimized ?? false,
-      isFullscreen: state?.isFullscreen ?? false,
-      bounds: state?.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
-      ...handleMethods,
-    };
-  }, [isReady, windowId, handleMethods, lifecycle.windowState]);
-
-  // Portal keeps children in the parent React tree while rendering into the child window DOM
   if (!portalTarget) return null;
 
   return createPortal(

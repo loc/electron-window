@@ -1,12 +1,4 @@
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  useMemo,
-  forwardRef,
-  useImperativeHandle,
-} from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useMemo, forwardRef } from "react";
 import { createPortal } from "react-dom";
 import { WindowContext, useWindowProviderContext } from "./context.js";
 import { RendererWindowPool, type PoolShape } from "./RendererWindowPool.js";
@@ -22,7 +14,7 @@ import {
   POOL_SHAPE_PROPS,
   CHANGEABLE_BEHAVIOR_PROPS,
 } from "../shared/types.js";
-import { useWindowLifecycle, NOT_READY_HANDLE } from "./useWindowLifecycle.js";
+import { useWindowLifecycle, useWindowHandle } from "./useWindowLifecycle.js";
 import { devWarning } from "../shared/utils.js";
 
 // Lifecycle / meta props that are never forwarded as IPC props on acquire.
@@ -232,7 +224,6 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(funct
   visibleRef.current = visible;
   const prevPropsRef = useRef<Record<string, unknown> | null>(null);
 
-  // Warn about controlled bounds without onBoundsChange (parity with Window)
   const hasWarnedAboutControlledBoundsRef = useRef(false);
   useEffect(() => {
     if (hasWarnedAboutControlledBoundsRef.current) return;
@@ -302,7 +293,6 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(funct
     setIsReady(false);
   }
 
-  // Acquire on open=true, release on open=false
   useEffect(() => {
     if (!open) {
       if (entryRef.current) {
@@ -337,7 +327,6 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(funct
       entryRef.current = entry;
       childWindowRef.current = entry.childWindow;
 
-      // B5: Apply default size/position via setBounds if specified.
       // defaultWidth/Height/X/Y have no setter in main — use setBounds instead.
       const { defaultWidth, defaultHeight, defaultX, defaultY } = rest as Record<
         string,
@@ -357,7 +346,6 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(funct
         void provider.windowAction(entry.id, { type: "setBounds", bounds });
       }
 
-      // Forward changeable (non-shape, non-lifecycle) props via IPC
       const changeableProps: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(rest)) {
         if (
@@ -461,7 +449,6 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(funct
     }
   }, [isReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // B4: Send prop updates to main process when changeable props change while open.
   useEffect(() => {
     if (!isReady || !windowId || !prevPropsRef.current) return;
 
@@ -493,7 +480,6 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(funct
       changedBehaviorProps.alwaysOnTop = true;
     }
 
-    // Diff controlled bounds
     const boundsUpdate: Record<string, unknown> = {};
     const r = rest as Record<string, unknown>;
     if (r.width !== undefined && r.width !== prevProps.width) boundsUpdate.width = r.width;
@@ -528,50 +514,13 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(funct
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Stable method refs (parity with Window.tsx) — don't depend on
-  // windowState, so method identity only changes on windowId/provider.
-  const stateRef = useRef(lifecycle.windowState);
-  stateRef.current = lifecycle.windowState;
-
-  const handleMethods = useMemo(() => {
-    if (!windowId) return null;
-    return {
-      focus: () => void provider.windowAction(windowId, { type: "focus" }),
-      blur: () => void provider.windowAction(windowId, { type: "blur" }),
-      minimize: () => void provider.windowAction(windowId, { type: "minimize" }),
-      maximize: () => void provider.windowAction(windowId, { type: "maximize" }),
-      unmaximize: () => void provider.windowAction(windowId, { type: "unmaximize" }),
-      toggleMaximize: () =>
-        void provider.windowAction(windowId, {
-          type: stateRef.current?.isMaximized ? "unmaximize" : "maximize",
-        }),
-      close: () => void provider.windowAction(windowId, { type: "close" }),
-      forceClose: () => void provider.windowAction(windowId, { type: "forceClose" }),
-      setBounds: (bounds: Partial<import("../shared/types.js").Bounds>) =>
-        void provider.windowAction(windowId, { type: "setBounds", bounds }),
-      setTitle: (t: string) => {
-        if (childWindowRef.current) childWindowRef.current.document.title = t;
-        void provider.windowAction(windowId, { type: "setTitle", title: t });
-      },
-      enterFullscreen: () => void provider.windowAction(windowId, { type: "enterFullscreen" }),
-      exitFullscreen: () => void provider.windowAction(windowId, { type: "exitFullscreen" }),
-    };
-  }, [windowId, provider]);
-
-  useImperativeHandle(ref, () => {
-    if (!isReady || !windowId || !handleMethods) return NOT_READY_HANDLE;
-    const state = stateRef.current;
-    return {
-      id: windowId,
-      isReady: true,
-      isFocused: state?.isFocused ?? false,
-      isMaximized: state?.isMaximized ?? false,
-      isMinimized: state?.isMinimized ?? false,
-      isFullscreen: state?.isFullscreen ?? false,
-      bounds: state?.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
-      ...handleMethods,
-    };
-  }, [isReady, windowId, handleMethods, lifecycle.windowState]);
+  useWindowHandle(ref, {
+    windowId,
+    isReady,
+    provider,
+    windowState: lifecycle.windowState,
+    childWindowRef,
+  });
 
   if (!portalTarget) return null;
 
