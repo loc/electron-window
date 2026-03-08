@@ -67,6 +67,11 @@ jobs:
           sudo chown root node_modules/electron/dist/chrome-sandbox
           sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
       - name: Build library
+        # TSUP_SKIP_DTS: Windows DTS workers nondeterministically hit
+        # STATUS_HEAP_CORRUPTION. The test app only imports JS — no .d.ts
+        # needed. Publish builds on Ubuntu are unaffected.
+        env:
+          TSUP_SKIP_DTS: ${{ runner.os == 'Windows' && '1' || '' }}
         run: yarn build
       - name: Build E2E test app
         run: node tests/e2e/fixtures/test-app/build.js

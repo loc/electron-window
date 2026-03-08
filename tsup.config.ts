@@ -1,11 +1,17 @@
 import { defineConfig } from "tsup";
 
+// Windows CI: tsup's DTS workers hit STATUS_HEAP_CORRUPTION nondeterministically
+// (egoist/tsup#920, vercel/ai#10662). The e2e job only needs JS output — the
+// test app doesn't read .d.ts. Publish builds run on Ubuntu, so real DTS output
+// is never affected by this opt-out.
+const dts = process.env.TSUP_SKIP_DTS ? false : true;
+
 export default defineConfig([
   // Main renderer entry (React components)
   {
     entry: { index: "src/index.ts" },
     format: ["esm"],
-    dts: true,
+    dts,
     sourcemap: true,
     clean: true,
     splitting: true,
@@ -22,7 +28,7 @@ export default defineConfig([
       "preload/index": "src/preload/index.ts",
     },
     format: ["esm", "cjs"],
-    dts: true,
+    dts,
     sourcemap: true,
     platform: "node",
     external: ["electron"],
@@ -34,7 +40,7 @@ export default defineConfig([
   {
     entry: { "testing/index": "src/testing/index.ts" },
     format: ["esm"],
-    dts: true,
+    dts,
     sourcemap: true,
     external: ["react", "react-dom", "@loc/electron-window"],
   },
