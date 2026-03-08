@@ -41,6 +41,7 @@
   "engines": {
     "node": ">=20"
   },
+  "packageManager": "yarn@1.22.22",
   "scripts": {
     "generate:ipc": "generate-ipc schemas src/generated-ipc",
     "postgenerate:ipc": "node scripts/patch-ipc-validators.mjs",
