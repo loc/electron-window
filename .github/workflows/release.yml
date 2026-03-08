@@ -15,6 +15,7 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
+      packages: write
       id-token: write
     steps:
       - name: Checkout
@@ -39,6 +40,10 @@ jobs:
 
       - name: Release
         env:
+          # @semantic-release/npm reads NPM_TOKEN; for GitHub Packages we
+          # pass GITHUB_TOKEN as NPM_TOKEN. The registry is set via
+          # publishConfig.registry in package.json. @semantic-release/github
+          # also reads GITHUB_TOKEN directly for release/tag creation.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx semantic-release
