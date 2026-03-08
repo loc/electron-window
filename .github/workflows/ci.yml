@@ -72,12 +72,16 @@ jobs:
         run: node tests/e2e/fixtures/test-app/build.js
       - name: Install Playwright
         run: npx playwright install --with-deps
+      # Call playwright directly instead of `yarn test:e2e` — its pretest:e2e
+      # hook runs `yarn build` again. We already built in explicit steps above.
+      # The redundant second build also triggers a Windows heap-corruption
+      # crash in tsup's DTS worker.
       - name: Run E2E tests (Linux)
         if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum yarn test:e2e
-      - name: Run E2E tests (macOS)
+        run: xvfb-run --auto-servernum npx playwright test
+      - name: Run E2E tests (macOS/Windows)
         if: runner.os != 'Linux'
-        run: yarn test:e2e
+        run: npx playwright test
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -113,4 +117,4 @@ jobs:
       - name: Install Playwright
         run: npx playwright install --with-deps
       - name: Run E2E tests
-        run: xvfb-run --auto-servernum yarn test:e2e
+        run: xvfb-run --auto-servernum npx playwright test
