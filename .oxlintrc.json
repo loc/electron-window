@@ -1,0 +1,7 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": ["src/generated-ipc/**", "dist/**", "docs/**"],
+  "rules": {
+    "no-unused-vars": "warn"
+  }
+}

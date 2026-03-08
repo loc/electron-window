@@ -16,8 +16,12 @@ jobs:
           node-version: 20
           cache: "yarn"
       - run: yarn install --immutable
+      # src/generated-ipc/ is gitignored — typecheck needs it to resolve imports.
+      # `yarn build` generates it via prebuild, but typecheck/test don't run prebuild.
+      - run: yarn generate:ipc
       - run: yarn typecheck
       - run: yarn lint
+      - run: yarn format:check
 
   test:
     runs-on: ubuntu-latest
@@ -28,6 +32,7 @@ jobs:
           node-version: 20
           cache: "yarn"
       - run: yarn install --immutable
+      - run: yarn generate:ipc
       - run: yarn test
 
   build:
@@ -45,7 +50,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
+        # windows-latest excluded: tsup's parallel DTS generation hits
+        # STATUS_HEAP_CORRUPTION (0xC0000374) on Windows runners. The package
+        # is pure TS (platform-agnostic); macOS + Ubuntu cover the Electron
+        # runtime paths.
+        os: [macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -54,6 +63,13 @@ jobs:
           node-version: 20
           cache: "yarn"
       - run: yarn install --immutable
+      # Ubuntu 24.04 restricted unprivileged user namespaces. Electron's
+      # chrome-sandbox needs setuid root to work without them.
+      - name: Fix chrome-sandbox (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo chown root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
       - name: Build library
         run: yarn build
       - name: Build E2E test app
@@ -63,7 +79,7 @@ jobs:
       - name: Run E2E tests (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum yarn test:e2e
-      - name: Run E2E tests (macOS/Windows)
+      - name: Run E2E tests (macOS)
         if: runner.os != 'Linux'
         run: yarn test:e2e
       - uses: actions/upload-artifact@v4
@@ -88,6 +104,12 @@ jobs:
       - run: yarn install --immutable
       - name: Install Electron ${{ matrix.electron }}
         run: yarn add -D electron@${{ matrix.electron }}
+      # Re-run after the electron install — `yarn add` reinstalls the binary
+      # and resets permissions. Same Ubuntu 24.04 userns issue as the e2e job.
+      - name: Fix chrome-sandbox
+        run: |
+          sudo chown root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
       - name: Build library
         run: yarn build
       - name: Build E2E test app

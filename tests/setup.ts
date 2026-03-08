@@ -15,10 +15,7 @@ class MockWindow {
   document: Document;
   onbeforeunload: (() => void) | null = null;
 
-  private _eventListeners = new Map<
-    string,
-    Set<EventListenerOrEventListenerObject>
-  >();
+  private _eventListeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
 
   // Make these spies so tests can check if they were called
   focus = vi.fn();
@@ -47,10 +44,7 @@ class MockWindow {
     this._eventListeners.get(type)!.add(listener);
   }
 
-  removeEventListener(
-    type: string,
-    listener: EventListenerOrEventListenerObject,
-  ) {
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject) {
     this._eventListeners.get(type)?.delete(listener);
   }
 
@@ -94,15 +88,13 @@ class MockWindow {
 }
 
 // Mock window.open for testing
-const originalOpen = window.open;
-window.open = vi.fn((url?: string, target?: string, features?: string) => {
+window.open = vi.fn((_url?: string, target?: string) => {
   const name = target || `mock-window-${Date.now()}`;
   return new MockWindow(name) as unknown as Window;
 });
 
 // Export for test assertions
-(globalThis as unknown as Record<string, unknown>).__mockWindows__ =
-  mockWindows;
+(globalThis as unknown as Record<string, unknown>).__mockWindows__ = mockWindows;
 
 /** Get the global map of mock windows created by window.open */
 export function getGlobalMockWindows(): Map<string, unknown> {
@@ -144,10 +136,7 @@ export class SlowMockWindow {
   closed = false;
   document: { body: null | HTMLElement; title: string };
 
-  private _eventListeners = new Map<
-    string,
-    Set<EventListenerOrEventListenerObject>
-  >();
+  private _eventListeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
 
   focus = vi.fn();
   blur = vi.fn();
@@ -175,10 +164,7 @@ export class SlowMockWindow {
     this._eventListeners.get(type)!.add(listener);
   }
 
-  removeEventListener(
-    type: string,
-    listener: EventListenerOrEventListenerObject,
-  ) {
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject) {
     this._eventListeners.get(type)?.delete(listener);
   }
 }

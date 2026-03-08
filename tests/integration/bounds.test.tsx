@@ -8,7 +8,6 @@ import {
   getMockWindows,
   simulateMockWindowEvent,
 } from "../../src/testing/index.js";
-import type { Bounds } from "../../src/shared/types.js";
 import { resetMockWindowsGlobal, getGlobalMockWindows } from "../setup.js";
 
 describe("<Window> default bounds (uncontrolled)", () => {
@@ -39,13 +38,7 @@ describe("<Window> default bounds (uncontrolled)", () => {
   it("applies defaultX/defaultY on creation", async () => {
     render(
       <MockWindowProvider>
-        <Window
-          open
-          defaultX={50}
-          defaultY={100}
-          defaultWidth={400}
-          defaultHeight={300}
-        >
+        <Window open defaultX={50} defaultY={100} defaultWidth={400} defaultHeight={300}>
           <div>Content</div>
         </Window>
       </MockWindowProvider>,
@@ -103,9 +96,7 @@ describe("<Window> controlled bounds", () => {
   });
 
   it("warns when using controlled bounds without onBoundsChange", async () => {
-    const consoleWarnSpy = vi
-      .spyOn(console, "warn")
-      .mockImplementation(() => {});
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     render(
       <MockWindowProvider>
@@ -127,9 +118,7 @@ describe("<Window> controlled bounds", () => {
   });
 
   it("does not warn when using controlled bounds with onBoundsChange", async () => {
-    const consoleWarnSpy = vi
-      .spyOn(console, "warn")
-      .mockImplementation(() => {});
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const onBoundsChange = vi.fn();
 
     render(
@@ -154,9 +143,7 @@ describe("<Window> controlled bounds", () => {
   });
 
   it("warns when using controlled bounds with persistBounds but no onBoundsChange", async () => {
-    const consoleWarnSpy = vi
-      .spyOn(console, "warn")
-      .mockImplementation(() => {});
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     render(
       <MockWindowProvider>
@@ -186,12 +173,7 @@ describe("<Window> controlled bounds", () => {
       return (
         <MockWindowProvider>
           <button onClick={() => setWidth(600)}>Resize</button>
-          <Window
-            open
-            width={width}
-            height={300}
-            onBoundsChange={onBoundsChange}
-          >
+          <Window open width={width} height={300} onBoundsChange={onBoundsChange}>
             <div>Content</div>
           </Window>
         </MockWindowProvider>
@@ -263,13 +245,7 @@ describe("<Window> bounds constraints", () => {
   it("applies minWidth/minHeight constraints", async () => {
     render(
       <MockWindowProvider>
-        <Window
-          open
-          defaultWidth={800}
-          defaultHeight={600}
-          minWidth={400}
-          minHeight={300}
-        >
+        <Window open defaultWidth={800} defaultHeight={600} minWidth={400} minHeight={300}>
           <div>Content</div>
         </Window>
       </MockWindowProvider>,
@@ -287,13 +263,7 @@ describe("<Window> bounds constraints", () => {
   it("applies maxWidth/maxHeight constraints", async () => {
     render(
       <MockWindowProvider>
-        <Window
-          open
-          defaultWidth={800}
-          defaultHeight={600}
-          maxWidth={1200}
-          maxHeight={900}
-        >
+        <Window open defaultWidth={800} defaultHeight={600} maxWidth={1200} maxHeight={900}>
           <div>Content</div>
         </Window>
       </MockWindowProvider>,
@@ -321,12 +291,7 @@ describe("<Window> onBoundsChange", () => {
 
     render(
       <MockWindowProvider>
-        <Window
-          open
-          defaultWidth={400}
-          defaultHeight={300}
-          onBoundsChange={onBoundsChange}
-        >
+        <Window open defaultWidth={400} defaultHeight={300} onBoundsChange={onBoundsChange}>
           <div>Content</div>
         </Window>
       </MockWindowProvider>,
@@ -338,8 +303,7 @@ describe("<Window> onBoundsChange", () => {
 
     // Simulate a boundsChanged event from the main process via the mock provider
     const mockWindows = getMockWindows();
-    const { simulateMockWindowEvent } =
-      await import("../../src/testing/index.js");
+    const { simulateMockWindowEvent } = await import("../../src/testing/index.js");
     simulateMockWindowEvent(mockWindows[0].id, {
       type: "boundsChanged",
       bounds: { x: 0, y: 0, width: 500, height: 400 },
@@ -356,12 +320,7 @@ describe("<Window> onBoundsChange", () => {
 
     render(
       <MockWindowProvider>
-        <Window
-          open
-          defaultWidth={400}
-          defaultHeight={300}
-          onBoundsChange={onBoundsChange}
-        >
+        <Window open defaultWidth={400} defaultHeight={300} onBoundsChange={onBoundsChange}>
           <div>Content</div>
         </Window>
       </MockWindowProvider>,
@@ -388,8 +347,7 @@ describe("<Window> onBoundsChange", () => {
     expect(onBoundsChange).toHaveBeenCalled();
     expect(onBoundsChange.mock.calls.length).toBeLessThan(10);
     // The last call should have the final bounds
-    const lastCall =
-      onBoundsChange.mock.calls[onBoundsChange.mock.calls.length - 1];
+    const lastCall = onBoundsChange.mock.calls[onBoundsChange.mock.calls.length - 1];
     expect(lastCall[0].width).toBe(490); // 400 + 9*10
   });
 });
