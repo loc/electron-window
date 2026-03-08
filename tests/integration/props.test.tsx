@@ -2,11 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import React, { useState } from "react";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { Window } from "../../src/renderer/Window.js";
-import {
-  MockWindowProvider,
-  resetMockWindows,
-  getMockWindows,
-} from "../../src/testing/index.js";
+import { MockWindowProvider, resetMockWindows, getMockWindows } from "../../src/testing/index.js";
 import { resetMockWindowsGlobal, getGlobalMockWindows } from "../setup.js";
 
 describe("<Window> creation-only props", () => {
@@ -85,9 +81,7 @@ describe("<Window> creation-only props", () => {
   });
 
   it("warns when transparent changes without recreateOnShapeChange", async () => {
-    const consoleWarnSpy = vi
-      .spyOn(console, "warn")
-      .mockImplementation(() => {});
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     function TestWithTransparent() {
       const [transparent, setTransparent] = useState(false);
@@ -119,9 +113,7 @@ describe("<Window> creation-only props", () => {
   });
 
   it("warns when frame changes without recreateOnShapeChange", async () => {
-    const consoleWarnSpy = vi
-      .spyOn(console, "warn")
-      .mockImplementation(() => {});
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     function TestWithFrame() {
       const [frame, setFrame] = useState(true);
@@ -144,18 +136,14 @@ describe("<Window> creation-only props", () => {
     fireEvent.click(screen.getByText("Toggle"));
 
     await waitFor(() => {
-      expect(consoleWarnSpy).toHaveBeenCalledWith(
-        expect.stringMatching(/frame.*creation-only/),
-      );
+      expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringMatching(/frame.*creation-only/));
     });
 
     consoleWarnSpy.mockRestore();
   });
 
   it("warns when titleBarStyle changes without recreateOnShapeChange", async () => {
-    const consoleWarnSpy = vi
-      .spyOn(console, "warn")
-      .mockImplementation(() => {});
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     function TestWithTitleBarStyle() {
       const [style, setStyle] = useState<"default" | "hidden">("default");
@@ -371,11 +359,7 @@ describe("<Window> name prop", () => {
     // windowId (win_xxx) is used as second arg; name prop is sent via IPC
     const mockWindows = getMockWindows();
     expect(mockWindows[0].props.name).toBe("settings-window");
-    expect(window.open).toHaveBeenCalledWith(
-      "about:blank",
-      expect.stringMatching(/^win_/),
-      "",
-    );
+    expect(window.open).toHaveBeenCalledWith("about:blank", expect.stringMatching(/^win_/), "");
   });
 
   it("generates unique name when name prop is not provided", async () => {
@@ -392,11 +376,7 @@ describe("<Window> name prop", () => {
     });
 
     // Should use generated window ID with empty features string
-    expect(window.open).toHaveBeenCalledWith(
-      "about:blank",
-      expect.stringMatching(/^win_/),
-      "",
-    );
+    expect(window.open).toHaveBeenCalledWith("about:blank", expect.stringMatching(/^win_/), "");
   });
 });
 
@@ -446,9 +426,7 @@ describe("<Window> injectStyles prop", () => {
     };
 
     // The <style> tag should be cloned into the child
-    const clonedStyle = mockWin.document.querySelector(
-      'style[data-test="injected-style"]',
-    );
+    const clonedStyle = mockWin.document.querySelector('style[data-test="injected-style"]');
     expect(clonedStyle).not.toBeNull();
     expect(clonedStyle?.textContent).toBe(".test-class { color: red; }");
 
@@ -478,12 +456,8 @@ describe("<Window> injectStyles prop", () => {
     };
 
     // No styles should be cloned
-    expect(
-      mockWin.document.querySelector('style[data-test="injected-style"]'),
-    ).toBeNull();
-    expect(
-      mockWin.document.querySelector('link[data-test="injected-link"]'),
-    ).toBeNull();
+    expect(mockWin.document.querySelector('style[data-test="injected-style"]')).toBeNull();
+    expect(mockWin.document.querySelector('link[data-test="injected-link"]')).toBeNull();
   });
 
   it("custom injectStyles function receives the child document", async () => {
@@ -515,16 +489,12 @@ describe("<Window> injectStyles prop", () => {
     const mockWin = [...getGlobalMockWindows().values()][0] as {
       document: Document;
     };
-    const customStyle = mockWin.document.querySelector(
-      'style[data-test="custom-style"]',
-    );
+    const customStyle = mockWin.document.querySelector('style[data-test="custom-style"]');
     expect(customStyle).not.toBeNull();
     expect(customStyle?.textContent).toBe(".custom { color: blue; }");
 
     // Auto-injection should NOT have run (custom replaces auto)
-    expect(
-      mockWin.document.querySelector('style[data-test="injected-style"]'),
-    ).toBeNull();
+    expect(mockWin.document.querySelector('style[data-test="injected-style"]')).toBeNull();
   });
 
   it("auto mode syncs dynamically added styles to child window", async () => {
@@ -554,9 +524,7 @@ describe("<Window> injectStyles prop", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     // The dynamic style should be cloned into the child
-    const cloned = mockWin.document.querySelector(
-      'style[data-test="dynamic-style"]',
-    );
+    const cloned = mockWin.document.querySelector('style[data-test="dynamic-style"]');
     expect(cloned).not.toBeNull();
     expect(cloned?.textContent).toBe(".dynamic { color: green; }");
 
@@ -582,9 +550,7 @@ describe("<Window> injectStyles prop", () => {
     };
 
     // The testStyle from beforeEach should be in the child
-    expect(
-      mockWin.document.querySelector('style[data-test="injected-style"]'),
-    ).not.toBeNull();
+    expect(mockWin.document.querySelector('style[data-test="injected-style"]')).not.toBeNull();
 
     // Remove it from the parent
     testStyle.remove();
@@ -592,9 +558,7 @@ describe("<Window> injectStyles prop", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     // Should be removed from the child too
-    expect(
-      mockWin.document.querySelector('style[data-test="injected-style"]'),
-    ).toBeNull();
+    expect(mockWin.document.querySelector('style[data-test="injected-style"]')).toBeNull();
 
     // Re-add for afterEach cleanup (it expects testStyle to be in DOM)
     testStyle = document.createElement("style");
@@ -621,9 +585,7 @@ describe("<Window> injectStyles prop", () => {
     };
 
     // The testStyle from beforeEach should be cloned in the child
-    const clonedBefore = mockWin.document.querySelector(
-      'style[data-test="injected-style"]',
-    );
+    const clonedBefore = mockWin.document.querySelector('style[data-test="injected-style"]');
     expect(clonedBefore?.textContent).toBe(".test-class { color: red; }");
 
     // Modify the parent style's textContent
@@ -633,11 +595,7 @@ describe("<Window> injectStyles prop", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     // The child clone should have the updated content
-    const clonedAfter = mockWin.document.querySelector(
-      'style[data-test="injected-style"]',
-    );
-    expect(clonedAfter?.textContent).toBe(
-      ".test-class { color: blue; font-size: 16px; }",
-    );
+    const clonedAfter = mockWin.document.querySelector('style[data-test="injected-style"]');
+    expect(clonedAfter?.textContent).toBe(".test-class { color: blue; font-size: 16px; }");
   });
 });

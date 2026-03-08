@@ -120,27 +120,22 @@ function createMockWebContents(opts: { id?: number; url?: string } = {}) {
 
 // Pull the IWindowManagerImpl out of WindowManager without needing real Electron IPC.
 // We do this by mocking the generated IPC module to capture the impl passed to it.
-vi.mock(
-  "../../src/generated-ipc/browser/electron_window.js",
-  async (importOriginal) => {
-    const actual =
-      await importOriginal<
-        typeof import("../../src/generated-ipc/browser/electron_window.js")
-      >();
-    return {
-      ...actual,
-      WindowManager: {
-        for: () => ({
-          setImplementation: (impl: unknown) => {
-            // Stash it so tests can pull it out
-            (globalThis as Record<string, unknown>).__lastImpl__ = impl;
-            return { dispatchWindowEvent: vi.fn() };
-          },
-        }),
-      },
-    };
-  },
-);
+vi.mock("../../src/generated-ipc/browser/electron_window.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/generated-ipc/browser/electron_window.js")>();
+  return {
+    ...actual,
+    WindowManager: {
+      for: () => ({
+        setImplementation: (impl: unknown) => {
+          // Stash it so tests can pull it out
+          (globalThis as Record<string, unknown>).__lastImpl__ = impl;
+          return { dispatchWindowEvent: vi.fn() };
+        },
+      }),
+    },
+  };
+});
 
 function getLastImpl(): ReturnType<
   import("../../src/generated-ipc/browser/electron_window.js")["WindowManager"]["for"]
@@ -176,9 +171,7 @@ describe("filterAllowedProps (via WindowManager IPC implementation)", () => {
     // devWarnings: false suppresses console noise in tests
     manager = new WindowManager({ devWarnings: false });
     const parent = createMockParentWindow();
-    manager.setupForWindow(
-      parent as unknown as import("electron").BrowserWindow,
-    );
+    manager.setupForWindow(parent as unknown as import("electron").BrowserWindow);
     impl = getLastImpl();
   });
 
@@ -212,9 +205,7 @@ describe("filterAllowedProps (via WindowManager IPC implementation)", () => {
     // buildConstructorOptions by inspecting setWindowOpenHandler return values.
     const parent = createMockParentWindow();
     const localManager = new WindowManager({ devWarnings: false });
-    localManager.setupForWindow(
-      parent as unknown as import("electron").BrowserWindow,
-    );
+    localManager.setupForWindow(parent as unknown as import("electron").BrowserWindow);
     const localImpl = getLastImpl();
 
     localImpl.RegisterWindow("sec-win", {
@@ -224,8 +215,7 @@ describe("filterAllowedProps (via WindowManager IPC implementation)", () => {
     } as never);
 
     // Now trigger setWindowOpenHandler and verify webPreferences are clean
-    const handler = parent.webContents.setWindowOpenHandler.mock
-      .calls[0]?.[0] as
+    const handler = parent.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as
       | ((arg: { frameName: string; url: string }) => unknown)
       | undefined;
     expect(handler).toBeDefined();
@@ -240,23 +230,19 @@ describe("filterAllowedProps (via WindowManager IPC implementation)", () => {
     // nodeIntegration is enforced to false (security floor), not left as renderer-supplied true.
     const opts = result.overrideBrowserWindowOptions!;
     expect(opts.webPreferences).toBeDefined();
-    expect(
-      (opts.webPreferences as Record<string, unknown>)?.nodeIntegration,
-    ).toBe(false);
-    expect(
-      (opts.webPreferences as Record<string, unknown>)?.preload,
-    ).toBeUndefined();
+    expect((opts.webPreferences as Record<string, unknown>)?.nodeIntegration).toBe(false);
+    expect((opts.webPreferences as Record<string, unknown>)?.preload).toBeUndefined();
   });
 
   it("unknown window name causes setWindowOpenHandler to deny", () => {
     const parent = createMockParentWindow();
     const localManager = new WindowManager({ devWarnings: false });
-    localManager.setupForWindow(
-      parent as unknown as import("electron").BrowserWindow,
-    );
+    localManager.setupForWindow(parent as unknown as import("electron").BrowserWindow);
 
-    const handler = parent.webContents.setWindowOpenHandler.mock
-      .calls[0]?.[0] as (arg: { frameName: string; url: string }) => unknown;
+    const handler = parent.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (arg: {
+      frameName: string;
+      url: string;
+    }) => unknown;
     const result = handler({ frameName: "unknown-win", url: "about:blank" });
     expect(result).toEqual({ action: "deny" });
   });
@@ -322,11 +308,7 @@ describe("filterAllowedProps (via WindowManager IPC implementation)", () => {
       "titleBarOverlay",
       "targetDisplay",
     ];
-    for (const prop of [
-      ...allowedGeometry,
-      ...allowedAppearance,
-      ...allowedBehavior,
-    ]) {
+    for (const prop of [...allowedGeometry, ...allowedAppearance, ...allowedBehavior]) {
       expect(RENDERER_ALLOWED_PROPS.has(prop)).toBe(true);
     }
   });
@@ -350,17 +332,14 @@ describe("filterAllowedProps (via WindowManager IPC implementation)", () => {
   it("denies window.open with non-about:blank URL", () => {
     const manager = new WindowManager({ devWarnings: false });
     const parent = createMockParentWindow();
-    manager.setupForWindow(
-      parent as unknown as import("electron").BrowserWindow,
-    );
+    manager.setupForWindow(parent as unknown as import("electron").BrowserWindow);
     const impl = getLastImpl();
 
     // Register a window
     impl.RegisterWindow("url-test", { width: 800 } as never);
 
     // Get the handler
-    const handler = parent.webContents.setWindowOpenHandler.mock
-      .calls[0]?.[0] as
+    const handler = parent.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as
       | ((arg: { frameName: string; url: string }) => unknown)
       | undefined;
     expect(handler).toBeDefined();
@@ -392,15 +371,15 @@ describe("WindowManager webPreferences security floor", () => {
   it("enforces nodeIntegration: false and contextIsolation: true even when defaultWindowOptions is empty", () => {
     const manager = new WindowManager({ devWarnings: false });
     const parent = createMockParentWindow();
-    manager.setupForWindow(
-      parent as unknown as import("electron").BrowserWindow,
-    );
+    manager.setupForWindow(parent as unknown as import("electron").BrowserWindow);
     const impl = getLastImpl();
 
     impl.RegisterWindow("sec-floor-win", { width: 800 } as never);
 
-    const handler = parent.webContents.setWindowOpenHandler.mock
-      .calls[0]?.[0] as (arg: { frameName: string; url: string }) => unknown;
+    const handler = parent.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (arg: {
+      frameName: string;
+      url: string;
+    }) => unknown;
 
     const result = handler({
       frameName: "sec-floor-win",
@@ -426,15 +405,15 @@ describe("WindowManager webPreferences security floor", () => {
       defaultWindowOptions: { webPreferences: { sandbox: false } },
     });
     const parent = createMockParentWindow();
-    manager.setupForWindow(
-      parent as unknown as import("electron").BrowserWindow,
-    );
+    manager.setupForWindow(parent as unknown as import("electron").BrowserWindow);
     const impl = getLastImpl();
 
     impl.RegisterWindow("sandbox-win", {} as never);
 
-    const handler = parent.webContents.setWindowOpenHandler.mock
-      .calls[0]?.[0] as (arg: { frameName: string; url: string }) => unknown;
+    const handler = parent.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (arg: {
+      frameName: string;
+      url: string;
+    }) => unknown;
 
     const result = handler({
       frameName: "sandbox-win",
@@ -669,9 +648,7 @@ describe("WindowInstance updateProps — PROP_SETTERS dispatch", () => {
 
     // Insertion order matters: opacity throws, resizable comes after.
     // Without per-setter catch, setResizable never runs.
-    expect(() =>
-      instance.updateProps({ opacity: 0.5, resizable: false }),
-    ).not.toThrow();
+    expect(() => instance.updateProps({ opacity: 0.5, resizable: false })).not.toThrow();
 
     expect(bw.setResizable).toHaveBeenCalledWith(false);
   });
@@ -1175,9 +1152,7 @@ describe("WindowManager rate limits", () => {
       maxWindows: 50,
     });
     const parent = createMockParentWindow();
-    manager.setupForWindow(
-      parent as unknown as import("electron").BrowserWindow,
-    );
+    manager.setupForWindow(parent as unknown as import("electron").BrowserWindow);
     const impl = getLastImpl();
 
     expect(impl.RegisterWindow("w1", { width: 800 } as never)).toBe(true);
@@ -1193,9 +1168,7 @@ describe("WindowManager rate limits", () => {
       maxWindows: 50,
     });
     const parent = createMockParentWindow();
-    manager.setupForWindow(
-      parent as unknown as import("electron").BrowserWindow,
-    );
+    manager.setupForWindow(parent as unknown as import("electron").BrowserWindow);
     const impl = getLastImpl();
 
     expect(impl.RegisterWindow("w1", { width: 800 } as never)).toBe(true);
@@ -1270,15 +1243,12 @@ describe("alwaysOnTop level: full IPC pipeline", () => {
     (globalThis as Record<string, unknown>).__lastImpl__ = undefined;
     const manager = new WindowManager({ devWarnings: false });
     const parent = createMockParentWindow();
-    manager.setupForWindow(
-      parent as unknown as import("electron").BrowserWindow,
-    );
+    manager.setupForWindow(parent as unknown as import("electron").BrowserWindow);
     const impl = getLastImpl();
 
     impl.RegisterWindow("aot-win", {} as never);
 
-    const handler = parent.webContents.setWindowOpenHandler.mock
-      .calls[0]?.[0] as
+    const handler = parent.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as
       | ((arg: { frameName: string; url: string }) => unknown)
       | undefined;
     expect(handler).toBeDefined();
@@ -1300,12 +1270,12 @@ describe("buildConstructorOptions — off-screen bounds validation", () => {
     (globalThis as Record<string, unknown>).__lastImpl__ = undefined;
     const localManager = new WindowManager({ devWarnings: false });
     const localParent = createMockParentWindow();
-    localManager.setupForWindow(
-      localParent as unknown as import("electron").BrowserWindow,
-    );
+    localManager.setupForWindow(localParent as unknown as import("electron").BrowserWindow);
     const localImpl = getLastImpl();
-    const localHandler = localParent.webContents.setWindowOpenHandler.mock
-      .calls[0]?.[0] as (arg: { frameName: string; url: string }) => {
+    const localHandler = localParent.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (arg: {
+      frameName: string;
+      url: string;
+    }) => {
       action: string;
       overrideBrowserWindowOptions?: Record<string, unknown>;
     };
@@ -1411,12 +1381,12 @@ describe("buildConstructorOptions — targetDisplay", () => {
     (globalThis as Record<string, unknown>).__lastImpl__ = undefined;
     const localManager = new WindowManager({ devWarnings: false });
     const localParent = createMockParentWindow();
-    localManager.setupForWindow(
-      localParent as unknown as import("electron").BrowserWindow,
-    );
+    localManager.setupForWindow(localParent as unknown as import("electron").BrowserWindow);
     const localImpl = getLastImpl();
-    const localHandler = localParent.webContents.setWindowOpenHandler.mock
-      .calls[0]?.[0] as (arg: { frameName: string; url: string }) => {
+    const localHandler = localParent.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (arg: {
+      frameName: string;
+      url: string;
+    }) => {
       action: string;
       overrideBrowserWindowOptions?: Record<string, unknown>;
     };
@@ -1536,16 +1506,11 @@ describe("buildConstructorOptions — targetDisplay", () => {
 // ---------------------------------------------------------------------------
 
 describe("allowedOrigins — parent renderer origin validation", () => {
-  function setupWithOrigin(
-    config: ConstructorParameters<typeof WindowManager>[0],
-    url: string,
-  ) {
+  function setupWithOrigin(config: ConstructorParameters<typeof WindowManager>[0], url: string) {
     (globalThis as Record<string, unknown>).__lastImpl__ = undefined;
     const manager = new WindowManager(config);
     const parent = createMockParentWindow({ url });
-    manager.setupForWindow(
-      parent as unknown as import("electron").BrowserWindow,
-    );
+    manager.setupForWindow(parent as unknown as import("electron").BrowserWindow);
     return getLastImpl();
   }
 
@@ -1597,10 +1562,7 @@ describe("allowedOrigins — parent renderer origin validation", () => {
     // the page loads, but the implementation is created eagerly. Only the
     // truly empty string is allowed — about:blank is REJECTED because a page
     // can navigate itself there to bypass the allowlist.
-    const implEmpty = setupWithOrigin(
-      { devWarnings: false, allowedOrigins: ["app://main"] },
-      "",
-    );
+    const implEmpty = setupWithOrigin({ devWarnings: false, allowedOrigins: ["app://main"] }, "");
     expect(implEmpty.RegisterWindow("w1", {} as never)).toBe(true);
   });
 
@@ -1621,17 +1583,14 @@ describe("allowedOrigins — parent renderer origin validation", () => {
       allowedOrigins: ["app://trusted"],
     });
     const parent = createMockParentWindow({ url: "app://trusted/index.html" });
-    manager.setupForWindow(
-      parent as unknown as import("electron").BrowserWindow,
-    );
+    manager.setupForWindow(parent as unknown as import("electron").BrowserWindow);
     const impl = getLastImpl();
 
     // First call at trusted origin — allowed
     expect(impl.RegisterWindow("w1", {} as never)).toBe(true);
 
     // Simulate navigation: change the mock's mainFrame.url
-    (parent.webContents.mainFrame as { url: string }).url =
-      "https://untrusted.example/page";
+    (parent.webContents.mainFrame as { url: string }).url = "https://untrusted.example/page";
 
     // Next call at untrusted origin — rejected (per-call validation)
     expect(impl.RegisterWindow("w2", {} as never)).toBe(false);
@@ -1651,15 +1610,11 @@ describe("per-WebContents ownership enforcement", () => {
     const manager = new WindowManager({ devWarnings: false });
 
     const parentA = createMockParentWindow({ id: 1 });
-    manager.setupForWindow(
-      parentA as unknown as import("electron").BrowserWindow,
-    );
+    manager.setupForWindow(parentA as unknown as import("electron").BrowserWindow);
     const implA = getLastImpl();
 
     const parentB = createMockParentWindow({ id: 2 });
-    manager.setupForWindow(
-      parentB as unknown as import("electron").BrowserWindow,
-    );
+    manager.setupForWindow(parentB as unknown as import("electron").BrowserWindow);
     const implB = getLastImpl();
 
     return { manager, parentA, parentB, implA, implB };
@@ -1679,8 +1634,10 @@ describe("per-WebContents ownership enforcement", () => {
 
     // A registers and opens a window
     implA.RegisterWindow("a-win", { width: 400 } as never);
-    const openHandler = parentA.webContents.setWindowOpenHandler.mock
-      .calls[0]?.[0] as (arg: { frameName: string; url: string }) => unknown;
+    const openHandler = parentA.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (arg: {
+      frameName: string;
+      url: string;
+    }) => unknown;
     const result = openHandler({ frameName: "a-win", url: "about:blank" });
     expect((result as { action: string }).action).toBe("allow");
 
@@ -1694,9 +1651,7 @@ describe("per-WebContents ownership enforcement", () => {
     expect(manager.getWindow("a-win")).toBeDefined();
 
     // B tries to manipulate A's window — all should be rejected
-    expect(implB.UpdateWindow("a-win", { title: "hijacked" } as never)).toBe(
-      false,
-    );
+    expect(implB.UpdateWindow("a-win", { title: "hijacked" } as never)).toBe(false);
     expect(implB.WindowAction("a-win", { type: "hide" } as never)).toBe(false);
     expect(implB.DestroyWindow("a-win")).toBe(false);
 
@@ -1715,8 +1670,10 @@ describe("per-WebContents ownership enforcement", () => {
     implA.RegisterWindow("hijack-target", {} as never);
 
     // B's setWindowOpenHandler fires (simulating B calling window.open with A's frameName)
-    const openHandlerB = parentB.webContents.setWindowOpenHandler.mock
-      .calls[0]?.[0] as (arg: { frameName: string; url: string }) => {
+    const openHandlerB = parentB.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (arg: {
+      frameName: string;
+      url: string;
+    }) => {
       action: string;
     };
     const resultB = openHandlerB({
@@ -1726,8 +1683,10 @@ describe("per-WebContents ownership enforcement", () => {
     expect(resultB.action).toBe("deny");
 
     // A can still open it
-    const openHandlerA = parentA.webContents.setWindowOpenHandler.mock
-      .calls[0]?.[0] as (arg: { frameName: string; url: string }) => {
+    const openHandlerA = parentA.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (arg: {
+      frameName: string;
+      url: string;
+    }) => {
       action: string;
     };
     const resultA = openHandlerA({
@@ -1741,8 +1700,10 @@ describe("per-WebContents ownership enforcement", () => {
     const { parentA, implA, implB } = setupTwoParents();
 
     implA.RegisterWindow("a-win", {} as never);
-    const openHandler = parentA.webContents.setWindowOpenHandler.mock
-      .calls[0]?.[0] as (arg: { frameName: string; url: string }) => unknown;
+    const openHandler = parentA.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (arg: {
+      frameName: string;
+      url: string;
+    }) => unknown;
     openHandler({ frameName: "a-win", url: "about:blank" });
     const didCreate = parentA.webContents.on.mock.calls.find(
       (c) => c[0] === "did-create-window",
@@ -1766,14 +1727,14 @@ describe("child window security and parent lifecycle", () => {
     (globalThis as Record<string, unknown>).__lastImpl__ = undefined;
     const manager = new WindowManager({ devWarnings: false });
     const parent = createMockParentWindow();
-    manager.setupForWindow(
-      parent as unknown as import("electron").BrowserWindow,
-    );
+    manager.setupForWindow(parent as unknown as import("electron").BrowserWindow);
     const impl = getLastImpl();
 
     impl.RegisterWindow("child", {} as never);
-    const openHandler = parent.webContents.setWindowOpenHandler.mock
-      .calls[0]?.[0] as (arg: { frameName: string; url: string }) => unknown;
+    const openHandler = parent.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (arg: {
+      frameName: string;
+      url: string;
+    }) => unknown;
     openHandler({ frameName: "child", url: "about:blank" });
 
     const didCreate = parent.webContents.on.mock.calls.find(
@@ -1793,11 +1754,8 @@ describe("child window security and parent lifecycle", () => {
     // are not a supported use case.
     const { childBW } = setupAndCreateChild();
 
-    const childHandler = (
-      childBW.webContents.setWindowOpenHandler as ReturnType<typeof vi.fn>
-    ).mock.calls[0]?.[0] as
-      | ((details: { url: string }) => { action: string })
-      | undefined;
+    const childHandler = (childBW.webContents.setWindowOpenHandler as ReturnType<typeof vi.fn>).mock
+      .calls[0]?.[0] as ((details: { url: string }) => { action: string }) | undefined;
     expect(childHandler).toBeDefined();
 
     // Any URL — including about:blank — is denied from a child.
@@ -1817,11 +1775,9 @@ describe("child window security and parent lifecycle", () => {
     expect(manager.getAllWindows()).toHaveLength(1);
 
     // Fire the 'destroyed' callback that setupForWebContents registered
-    const destroyedCb = (
-      parent.webContents.once as ReturnType<typeof vi.fn>
-    ).mock.calls.find((c) => c[0] === "destroyed")?.[1] as
-      | (() => void)
-      | undefined;
+    const destroyedCb = (parent.webContents.once as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c) => c[0] === "destroyed",
+    )?.[1] as (() => void) | undefined;
     expect(destroyedCb).toBeDefined();
     destroyedCb!();
 

@@ -1,14 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import {
-  createDeferred,
-  generateWindowId,
-  debounce,
-  sleep,
-} from "../../src/shared/utils.js";
-import {
-  handleStyleInjection,
-  __getStyleSubscriberCount,
-} from "../../src/renderer/windowUtils.js";
+import { createDeferred, generateWindowId, debounce, sleep } from "../../src/shared/utils.js";
+import { handleStyleInjection, __getStyleSubscriberCount } from "../../src/renderer/windowUtils.js";
 
 describe("createDeferred", () => {
   it("creates a promise that can be resolved externally", async () => {
@@ -206,9 +198,7 @@ describe("__originHook — build-time origin allowlist", () => {
   });
 
   it("allows origins in the allowlist", async () => {
-    (globalThis as Record<string, unknown>)[CONST] = [
-      "https://trusted.example",
-    ];
+    (globalThis as Record<string, unknown>)[CONST] = ["https://trusted.example"];
     vi.resetModules();
     const hook = await loadMainHook();
     expect(hook("https://trusted.example/page")).toBe(true);
@@ -216,9 +206,7 @@ describe("__originHook — build-time origin allowlist", () => {
   });
 
   it("rejects origins not in the allowlist", async () => {
-    (globalThis as Record<string, unknown>)[CONST] = [
-      "https://trusted.example",
-    ];
+    (globalThis as Record<string, unknown>)[CONST] = ["https://trusted.example"];
     vi.resetModules();
     const hook = await loadMainHook();
     expect(hook("https://evil.example/page")).toBe(false);
@@ -242,9 +230,7 @@ describe("__originHook — build-time origin allowlist", () => {
   });
 
   it("rejects malformed URLs", async () => {
-    (globalThis as Record<string, unknown>)[CONST] = [
-      "https://trusted.example",
-    ];
+    (globalThis as Record<string, unknown>)[CONST] = ["https://trusted.example"];
     vi.resetModules();
     const hook = await loadMainHook();
     expect(hook("not a url")).toBe(false);

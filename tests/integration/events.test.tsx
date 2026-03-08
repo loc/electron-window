@@ -17,10 +17,7 @@ import { resetMockWindowsGlobal, getGlobalMockWindows } from "../setup.js";
  * Firing events in that gap drops them. onReady fires from a layout effect
  * that runs on the same commit as the subscription effect — reliable signal.
  */
-async function renderAndWaitReady(
-  ui: React.ReactElement,
-  onReadySpy: ReturnType<typeof vi.fn>,
-) {
+async function renderAndWaitReady(ui: React.ReactElement, onReadySpy: ReturnType<typeof vi.fn>) {
   render(ui);
   await waitFor(() => expect(onReadySpy).toHaveBeenCalled());
 }
@@ -202,12 +199,7 @@ describe("<Window> state events", () => {
 
     await renderAndWaitReady(
       <MockWindowProvider>
-        <Window
-          open
-          onReady={onReady}
-          onClose={onClose}
-          onUserClose={onUserClose}
-        >
+        <Window open onReady={onReady} onClose={onClose} onUserClose={onUserClose}>
           <div>Content</div>
         </Window>
       </MockWindowProvider>,
@@ -372,9 +364,7 @@ describe("<Window> focus/blur", () => {
     await waitFor(() => expect(getMockWindows()[0].state.isFocused).toBe(true));
 
     simulateMockWindowEvent(getMockWindows()[0].id, { type: "blurred" });
-    await waitFor(() =>
-      expect(getMockWindows()[0].state.isFocused).toBe(false),
-    );
+    await waitFor(() => expect(getMockWindows()[0].state.isFocused).toBe(false));
   });
 });
 

@@ -65,8 +65,7 @@ function isStyleNode(node: Node): node is HTMLStyleElement | HTMLLinkElement {
   if (node.nodeType !== Node.ELEMENT_NODE) return false;
   const el = node as Element;
   return (
-    el.tagName === "STYLE" ||
-    (el.tagName === "LINK" && el.getAttribute("rel") === "stylesheet")
+    el.tagName === "STYLE" || (el.tagName === "LINK" && el.getAttribute("rel") === "stylesheet")
   );
 }
 
@@ -78,10 +77,7 @@ interface Subscriber {
 const subscribers = new Set<Subscriber>();
 let sharedObserver: MutationObserver | null = null;
 
-function applyMutationToSubscriber(
-  sub: Subscriber,
-  mutations: MutationRecord[],
-): void {
+function applyMutationToSubscriber(sub: Subscriber, mutations: MutationRecord[]): void {
   for (const mutation of mutations) {
     for (const node of mutation.addedNodes) {
       if (isStyleNode(node) && !sub.cloneMap.has(node)) {
@@ -101,9 +97,7 @@ function applyMutationToSubscriber(
 
     if (mutation.type === "characterData" || mutation.type === "childList") {
       const target =
-        mutation.type === "characterData"
-          ? mutation.target.parentNode
-          : mutation.target;
+        mutation.type === "characterData" ? mutation.target.parentNode : mutation.target;
       if (target && isStyleNode(target)) {
         const clone = sub.cloneMap.get(target);
         if (clone && clone instanceof HTMLStyleElement) {
@@ -119,10 +113,7 @@ function applyMutationToSubscriber(
  * In "auto" mode, a single shared MutationObserver fans out style changes
  * to all subscribed child documents. Returns a cleanup function to unsubscribe.
  */
-export function handleStyleInjection(
-  doc: Document,
-  mode: InjectStylesMode,
-): () => void {
+export function handleStyleInjection(doc: Document, mode: InjectStylesMode): () => void {
   if (mode === false) return () => {};
   if (typeof mode === "function") {
     mode(doc);

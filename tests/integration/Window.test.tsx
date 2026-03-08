@@ -1,12 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import React, { useState, useEffect, useMemo } from "react";
-import {
-  render,
-  screen,
-  waitFor,
-  fireEvent,
-  act,
-} from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import { Window, type WindowRef } from "../../src/renderer/Window.js";
 import {
   MockWindowProvider,
@@ -16,10 +10,7 @@ import {
 } from "../../src/testing/index.js";
 import type { Bounds } from "../../src/shared/types.js";
 import { resetMockWindowsGlobal, getGlobalMockWindows } from "../setup.js";
-import {
-  useWindowProviderContext,
-  WindowProviderContext,
-} from "../../src/renderer/context.js";
+import { useWindowProviderContext, WindowProviderContext } from "../../src/renderer/context.js";
 
 /** Intercepts windowAction("show") calls for assertion */
 function ShowSpy({
@@ -33,10 +24,7 @@ function ShowSpy({
   const wrapped = useMemo(
     () => ({
       ...ctx,
-      windowAction: async (
-        id: string,
-        action: { type: string; [key: string]: unknown },
-      ) => {
+      windowAction: async (id: string, action: { type: string; [key: string]: unknown }) => {
         if (action.type === "show") onShow(id);
         return ctx.windowAction(id, action);
       },
@@ -44,11 +32,7 @@ function ShowSpy({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [ctx],
   );
-  return React.createElement(
-    WindowProviderContext.Provider,
-    { value: wrapped },
-    children,
-  );
+  return React.createElement(WindowProviderContext.Provider, { value: wrapped }, children);
 }
 
 // Helper component for testing
@@ -159,9 +143,7 @@ describe("<Window> lifecycle", () => {
     };
 
     await waitFor(() => {
-      const content = mockWin.document.querySelector(
-        '[data-testid="window-content"]',
-      );
+      const content = mockWin.document.querySelector('[data-testid="window-content"]');
       expect(content).not.toBeNull();
       expect(content?.textContent).toBe("Window Content");
     });
@@ -305,9 +287,7 @@ describe("<Window> recreateOnShapeChange", () => {
   });
 
   it("warns when creation-only prop changes without recreateOnShapeChange", async () => {
-    const consoleWarnSpy = vi
-      .spyOn(console, "warn")
-      .mockImplementation(() => {});
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     function TestWithTransparent() {
       const [transparent, setTransparent] = useState(false);
@@ -625,12 +605,7 @@ describe("<Window> changeable props call setters", () => {
       return (
         <MockWindowProvider>
           <button onClick={() => setWidth(600)}>Resize</button>
-          <Window
-            open
-            width={width}
-            height={300}
-            onBoundsChange={onBoundsChange}
-          >
+          <Window open width={width} height={300} onBoundsChange={onBoundsChange}>
             <div>Content</div>
           </Window>
         </MockWindowProvider>
@@ -917,9 +892,7 @@ describe("<Window> changeable behavior props", () => {
       const [minimizable, setMinimizable] = useState(true);
       return (
         <MockWindowProvider>
-          <button onClick={() => setMinimizable(false)}>
-            Disable Minimize
-          </button>
+          <button onClick={() => setMinimizable(false)}>Disable Minimize</button>
           <Window open minimizable={minimizable}>
             <div>Content</div>
           </Window>
@@ -948,9 +921,7 @@ describe("<Window> changeable behavior props", () => {
       const [maximizable, setMaximizable] = useState(true);
       return (
         <MockWindowProvider>
-          <button onClick={() => setMaximizable(false)}>
-            Disable Maximize
-          </button>
+          <button onClick={() => setMaximizable(false)}>Disable Maximize</button>
           <Window open maximizable={maximizable}>
             <div>Content</div>
           </Window>
@@ -1008,9 +979,7 @@ describe("<Window> changeable behavior props", () => {
       const [skipTaskbar, setSkipTaskbar] = useState(false);
       return (
         <MockWindowProvider>
-          <button onClick={() => setSkipTaskbar(true)}>
-            Hide from Taskbar
-          </button>
+          <button onClick={() => setSkipTaskbar(true)}>Hide from Taskbar</button>
           <Window open skipTaskbar={skipTaskbar}>
             <div>Content</div>
           </Window>
@@ -1111,9 +1080,7 @@ describe("<Window> changeable behavior props", () => {
     });
 
     // Behavior props should still be the same
-    expect(getMockWindows()[0].props.alwaysOnTop).toBe(
-      initialProps.alwaysOnTop,
-    );
+    expect(getMockWindows()[0].props.alwaysOnTop).toBe(initialProps.alwaysOnTop);
     expect(getMockWindows()[0].props.resizable).toBe(initialProps.resizable);
   });
 });
@@ -1369,9 +1336,7 @@ describe("<Window> timing and cancellation", () => {
     const originalOpen = window.open;
     (window.open as ReturnType<typeof vi.fn>) = vi.fn(() => null);
 
-    const consoleWarnSpy = vi
-      .spyOn(console, "warn")
-      .mockImplementation(() => {});
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     render(
       <MockWindowProvider>
@@ -1386,9 +1351,7 @@ describe("<Window> timing and cancellation", () => {
     // window.open returned null → devWarning fires, no portal is created,
     // no window is leaked in the mock store.
     expect(getGlobalMockWindows().size).toBe(0);
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
-      expect.stringMatching(/window\.open blocked/),
-    );
+    expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringMatching(/window\.open blocked/));
 
     window.open = originalOpen;
     consoleWarnSpy.mockRestore();
@@ -1425,9 +1388,7 @@ describe("<Window> timing and cancellation", () => {
     unmount();
     await new Promise((resolve) => setTimeout(resolve, 20));
 
-    expect(
-      (slowWin as InstanceType<typeof SlowMockWindow>).close,
-    ).toHaveBeenCalled();
+    expect((slowWin as InstanceType<typeof SlowMockWindow>).close).toHaveBeenCalled();
     expect(getGlobalMockWindows().size).toBe(0);
 
     window.open = originalOpen;
@@ -1580,8 +1541,7 @@ describe("<Window> style subscriber cleanup on open toggle", () => {
     // The open={false} teardown path must call styleCleanupRef — otherwise
     // each open cycle adds a subscriber that's never removed. The shape-change
     // and unmount paths already did this; open=false was the gap.
-    const { __getStyleSubscriberCount } =
-      await import("../../src/renderer/windowUtils.js");
+    const { __getStyleSubscriberCount } = await import("../../src/renderer/windowUtils.js");
 
     function ToggleApp() {
       const [open, setOpen] = useState(false);

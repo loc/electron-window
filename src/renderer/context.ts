@@ -47,10 +47,7 @@ export interface WindowProviderContextValue {
   hasBridge: boolean;
 
   /** Pre-register props with main process before calling window.open */
-  registerWindow: (
-    id: WindowId,
-    props: Record<string, unknown>,
-  ) => Promise<boolean>;
+  registerWindow: (id: WindowId, props: Record<string, unknown>) => Promise<boolean>;
 
   /** Unregister a window and clean up resources */
   unregisterWindow: (id: WindowId) => Promise<void>;
@@ -62,10 +59,7 @@ export interface WindowProviderContextValue {
   destroyWindow: (id: WindowId) => Promise<void>;
 
   /** Perform window action */
-  windowAction: (
-    id: WindowId,
-    action: { type: string; [key: string]: unknown },
-  ) => Promise<void>;
+  windowAction: (id: WindowId, action: { type: string; [key: string]: unknown }) => Promise<void>;
 
   /** Get window state */
   getWindowState: (id: WindowId) => Promise<WindowState | null>;
@@ -77,8 +71,7 @@ export interface WindowProviderContextValue {
   ) => () => void;
 }
 
-export const WindowProviderContext =
-  createContext<WindowProviderContextValue | null>(null);
+export const WindowProviderContext = createContext<WindowProviderContextValue | null>(null);
 
 /**
  * Hook to get the window provider context
@@ -86,9 +79,7 @@ export const WindowProviderContext =
 export function useWindowProviderContext(): WindowProviderContextValue {
   const context = useContext(WindowProviderContext);
   if (!context) {
-    throw new Error(
-      "useWindowProviderContext must be used within a WindowProvider",
-    );
+    throw new Error("useWindowProviderContext must be used within a WindowProvider");
   }
   return context;
 }

@@ -9,22 +9,14 @@
  *
  * The script pauses at key moments so you can observe visually.
  */
-import {
-  test,
-  _electron as electron,
-  ElectronApplication,
-  Page,
-} from "@playwright/test";
+import { test, _electron as electron, ElectronApplication, Page } from "@playwright/test";
 import path from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testAppPath = path.join(__dirname, "fixtures/test-app/dist/main.js");
 
-async function waitFor(
-  fn: () => Promise<boolean>,
-  timeout = 5000,
-): Promise<void> {
+async function waitFor(fn: () => Promise<boolean>, timeout = 5000): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     if (await fn()) return;
@@ -90,9 +82,7 @@ test.describe("Ghost Paint Repro", () => {
     await page.waitForTimeout(200);
 
     // --- Step 4: Reopen — WATCH FOR THE GHOST ---
-    console.log(
-      ">>> Reopening pool window — WATCH FOR RED FLASH before BLUE...",
-    );
+    console.log(">>> Reopening pool window — WATCH FOR RED FLASH before BLUE...");
     await page.evaluate(() => window.__test__.setWindowOpen(true));
 
     // Wait for the window to be shown
@@ -102,9 +92,7 @@ test.describe("Ghost Paint Repro", () => {
     });
 
     console.log(">>> Content B (BLUE) should be visible now.");
-    console.log(
-      ">>> If you saw a brief RED flash, that's the ghost paint bug.",
-    );
+    console.log(">>> If you saw a brief RED flash, that's the ghost paint bug.");
     console.log(">>> Pausing 3s so you can observe...");
     await page.waitForTimeout(3000);
 
@@ -127,9 +115,7 @@ test.describe("Ghost Paint Repro", () => {
       return events.some((e) => e.type === "ready");
     });
 
-    console.log(
-      ">>> Content A (RED) should be visible. If you saw BLUE flash, that's the ghost.",
-    );
+    console.log(">>> Content A (RED) should be visible. If you saw BLUE flash, that's the ghost.");
     await page.waitForTimeout(3000);
 
     console.log("\n>>> Done. Close the app window to finish the test.");

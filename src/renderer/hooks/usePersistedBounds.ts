@@ -51,13 +51,7 @@ export function usePersistedBounds(
   key: string,
   options: UsePersistedBoundsOptions = {},
 ): UsePersistedBoundsResult {
-  const {
-    defaultWidth,
-    defaultHeight,
-    defaultX,
-    defaultY,
-    saveDebounceMs = 500,
-  } = options;
+  const { defaultWidth, defaultHeight, defaultX, defaultY, saveDebounceMs = 500 } = options;
 
   // Window.tsx passes "" when persistBounds is unset — skip storage entirely.
   const enabled = key !== "";
@@ -134,9 +128,7 @@ export function clearPersistedBounds(key: string): void {
  * Clear all persisted bounds stored by this library
  */
 export function clearAllPersistedBounds(): void {
-  const keys = Object.keys(localStorage).filter((k) =>
-    k.startsWith(STORAGE_PREFIX),
-  );
+  const keys = Object.keys(localStorage).filter((k) => k.startsWith(STORAGE_PREFIX));
   for (const k of keys) {
     localStorage.removeItem(k);
   }

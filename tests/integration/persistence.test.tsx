@@ -32,8 +32,7 @@ function getPersistedBounds(key: string) {
 // Get mock windows from global mock
 function getGlobalMockWindows(): Map<string, unknown> {
   return (
-    (globalThis as unknown as Record<string, Map<string, unknown>>)
-      .__mockWindows__ ?? new Map()
+    (globalThis as unknown as Record<string, Map<string, unknown>>).__mockWindows__ ?? new Map()
   );
 }
 
@@ -109,9 +108,7 @@ describe("usePersistedBounds", () => {
   });
 
   it("saves bounds to localStorage via save()", async () => {
-    const { result } = renderHook(() =>
-      usePersistedBounds("save-key", { saveDebounceMs: 0 }),
-    );
+    const { result } = renderHook(() => usePersistedBounds("save-key", { saveDebounceMs: 0 }));
 
     act(() => {
       result.current.save({ x: 10, y: 20, width: 500, height: 400 });
@@ -255,8 +252,7 @@ describe("usePersistedBounds — key change", () => {
     // key-b has no saved bounds
 
     const { result, rerender } = renderHook(
-      ({ k }: { k: string }) =>
-        usePersistedBounds(k, { defaultWidth: 500, defaultHeight: 400 }),
+      ({ k }: { k: string }) => usePersistedBounds(k, { defaultWidth: 500, defaultHeight: 400 }),
       { initialProps: { k: "key-a" } },
     );
 
@@ -330,22 +326,13 @@ describe("<Window> persistBounds prop — smoke tests", () => {
       expect(getGlobalMockWindows().size).toBe(1);
     });
 
-    expect(window.open).toHaveBeenCalledWith(
-      "about:blank",
-      expect.any(String),
-      expect.any(String),
-    );
+    expect(window.open).toHaveBeenCalledWith("about:blank", expect.any(String), expect.any(String));
   });
 
   it("creates window normally with persistBounds set", async () => {
     render(
       <MockWindowProvider>
-        <Window
-          open
-          persistBounds="my-window"
-          defaultWidth={600}
-          defaultHeight={400}
-        >
+        <Window open persistBounds="my-window" defaultWidth={600} defaultHeight={400}>
           <div>Content</div>
         </Window>
       </MockWindowProvider>,
@@ -361,12 +348,7 @@ describe("<Window> persistBounds prop — smoke tests", () => {
   it("uses defaultWidth/defaultHeight on first open when no localStorage entry exists", async () => {
     render(
       <MockWindowProvider>
-        <Window
-          open
-          persistBounds="test-window"
-          defaultWidth={600}
-          defaultHeight={400}
-        >
+        <Window open persistBounds="test-window" defaultWidth={600} defaultHeight={400}>
           <div>Content</div>
         </Window>
       </MockWindowProvider>,
@@ -511,12 +493,7 @@ describe("<Window> built-in persistBounds save", () => {
   it("saves bounds to localStorage when boundsChanged event fires", async () => {
     render(
       <MockWindowProvider>
-        <Window
-          open
-          persistBounds="save-test"
-          defaultWidth={400}
-          defaultHeight={300}
-        >
+        <Window open persistBounds="save-test" defaultWidth={400} defaultHeight={300}>
           <div>Content</div>
         </Window>
       </MockWindowProvider>,
@@ -567,12 +544,7 @@ describe("<Window> built-in persistBounds restore", () => {
 
     render(
       <MockWindowProvider>
-        <Window
-          open
-          persistBounds="restore-test"
-          defaultWidth={400}
-          defaultHeight={300}
-        >
+        <Window open persistBounds="restore-test" defaultWidth={400} defaultHeight={300}>
           <div>Content</div>
         </Window>
       </MockWindowProvider>,
@@ -591,12 +563,7 @@ describe("<Window> built-in persistBounds restore", () => {
   it("uses defaults when no persisted bounds exist", async () => {
     render(
       <MockWindowProvider>
-        <Window
-          open
-          persistBounds="no-saved-key"
-          defaultWidth={400}
-          defaultHeight={300}
-        >
+        <Window open persistBounds="no-saved-key" defaultWidth={400} defaultHeight={300}>
           <div>Content</div>
         </Window>
       </MockWindowProvider>,
@@ -623,18 +590,11 @@ describe("<Window> persistBounds conflicts", () => {
   });
 
   it("warns when using controlled bounds without onBoundsChange", async () => {
-    const consoleWarnSpy = vi
-      .spyOn(console, "warn")
-      .mockImplementation(() => {});
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     render(
       <MockWindowProvider>
-        <Window
-          open
-          persistBounds="conflict-test"
-          width={800}
-          defaultHeight={600}
-        >
+        <Window open persistBounds="conflict-test" width={800} defaultHeight={600}>
           <div>Content</div>
         </Window>
       </MockWindowProvider>,

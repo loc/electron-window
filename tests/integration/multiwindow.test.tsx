@@ -106,20 +106,10 @@ describe("Multiple windows", () => {
   it("windows can have different configurations", async () => {
     render(
       <MockWindowProvider>
-        <Window
-          open
-          defaultWidth={800}
-          defaultHeight={600}
-          title="Large Window"
-        >
+        <Window open defaultWidth={800} defaultHeight={600} title="Large Window">
           <div>Large</div>
         </Window>
-        <Window
-          open
-          defaultWidth={300}
-          defaultHeight={200}
-          title="Small Window"
-        >
+        <Window open defaultWidth={300} defaultHeight={200} title="Small Window">
           <div>Small</div>
         </Window>
       </MockWindowProvider>,
@@ -175,8 +165,7 @@ describe("Window ref", () => {
   });
 
   it("exposes window methods via ref", async () => {
-    const ref =
-      React.createRef<import("../../src/shared/types.js").WindowHandle>();
+    const ref = React.createRef<import("../../src/shared/types.js").WindowHandle>();
 
     render(
       <MockWindowProvider>

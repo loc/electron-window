@@ -130,17 +130,12 @@ export function isLinux(): boolean {
  */
 export function isDev(): boolean {
   // Explicit global override (set by WindowProvider devWarnings prop)
-  if (
-    typeof globalThis !== "undefined" &&
-    "__ELECTRON_WINDOW_DEV__" in globalThis
-  ) {
+  if (typeof globalThis !== "undefined" && "__ELECTRON_WINDOW_DEV__" in globalThis) {
     return !!(globalThis as Record<string, unknown>).__ELECTRON_WINDOW_DEV__;
   }
   // Webpack/Node
   if (typeof process !== "undefined" && process.env) {
-    return (
-      process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test"
-    );
+    return process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
   }
   return false;
 }

@@ -25,8 +25,7 @@ export class FilePersistenceAdapter implements PersistenceAdapter {
   private isLoaded = false;
 
   constructor(storePath?: string) {
-    this.storePath =
-      storePath ?? path.join(app.getPath("userData"), STORE_FILE_NAME);
+    this.storePath = storePath ?? path.join(app.getPath("userData"), STORE_FILE_NAME);
   }
 
   private ensureLoaded(): void {

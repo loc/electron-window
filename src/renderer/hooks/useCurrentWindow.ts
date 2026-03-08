@@ -39,12 +39,9 @@ export function useCurrentWindow(): WindowHandle {
       forceClose: () => provider.windowAction(windowId, { type: "forceClose" }),
       setBounds: (bounds: Partial<Bounds>) =>
         provider.windowAction(windowId, { type: "setBounds", bounds }),
-      setTitle: (title: string) =>
-        provider.windowAction(windowId, { type: "setTitle", title }),
-      enterFullscreen: () =>
-        provider.windowAction(windowId, { type: "enterFullscreen" }),
-      exitFullscreen: () =>
-        provider.windowAction(windowId, { type: "exitFullscreen" }),
+      setTitle: (title: string) => provider.windowAction(windowId, { type: "setTitle", title }),
+      enterFullscreen: () => provider.windowAction(windowId, { type: "enterFullscreen" }),
+      exitFullscreen: () => provider.windowAction(windowId, { type: "exitFullscreen" }),
     }),
     [windowId, provider, getSnapshot],
   );

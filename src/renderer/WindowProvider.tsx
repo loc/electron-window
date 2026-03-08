@@ -7,10 +7,7 @@ import {
   type ReactNode,
   type ReactElement,
 } from "react";
-import {
-  WindowProviderContext,
-  type WindowProviderContextValue,
-} from "./context.js";
+import { WindowProviderContext, type WindowProviderContextValue } from "./context.js";
 import type { WindowId } from "../shared/types.js";
 import { devWarning } from "../shared/utils.js";
 import type {
@@ -41,23 +38,20 @@ export function WindowProvider({
   // (Was a render-body side effect — moved here for Concurrent Mode hygiene.)
   useInsertionEffect(() => {
     if (devWarnings !== undefined) {
-      (globalThis as Record<string, unknown>).__ELECTRON_WINDOW_DEV__ =
-        devWarnings;
+      (globalThis as Record<string, unknown>).__ELECTRON_WINDOW_DEV__ = devWarnings;
     }
   }, [devWarnings]);
 
-  const eventListeners = useRef<
-    Map<WindowId, Set<(event: WindowEvent) => void>>
-  >(new Map());
+  const eventListeners = useRef<Map<WindowId, Set<(event: WindowEvent) => void>>>(new Map());
 
   const hasWarnedAboutBridgeRef = useRef(false);
   const api = useMemo<IWindowManagerRenderer | null>(() => {
     if (typeof window === "undefined") return null;
     // Lazy lookup — the generated module captures globalThis at eval time,
     // which can be undefined if the preload hasn't finished. Re-read here.
-    const bridge = (globalThis as Record<string, unknown>)[
-      "electron_window"
-    ] as { WindowManager?: Partial<IWindowManagerRenderer> } | undefined;
+    const bridge = (globalThis as Record<string, unknown>)["electron_window"] as
+      | { WindowManager?: Partial<IWindowManagerRenderer> }
+      | undefined;
     const manager = bridge?.WindowManager as IWindowManagerRenderer | undefined;
     if (manager) return manager;
     if (!hasWarnedAboutBridgeRef.current) {
@@ -112,9 +106,7 @@ export function WindowProvider({
       const result = await fn();
       return result ?? fallback;
     } catch (err) {
-      devWarning(
-        `IPC rejected: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      devWarning(`IPC rejected: ${err instanceof Error ? err.message : String(err)}`);
       return fallback;
     }
   };
@@ -151,10 +143,7 @@ export function WindowProvider({
       trace("UpdateWindow", id, props);
       await safeInvoke(
         () =>
-          api?.UpdateWindow?.(
-            id,
-            props as Parameters<IWindowManagerRenderer["UpdateWindow"]>[1],
-          ),
+          api?.UpdateWindow?.(id, props as Parameters<IWindowManagerRenderer["UpdateWindow"]>[1]),
         false,
       );
     },
@@ -175,10 +164,7 @@ export function WindowProvider({
       trace("WindowAction", id, action);
       await safeInvoke(
         () =>
-          api?.WindowAction?.(
-            id,
-            action as Parameters<IWindowManagerRenderer["WindowAction"]>[1],
-          ),
+          api?.WindowAction?.(id, action as Parameters<IWindowManagerRenderer["WindowAction"]>[1]),
         false,
       );
     },
@@ -193,10 +179,7 @@ export function WindowProvider({
   );
 
   const subscribeToEvents = useCallback(
-    (
-      id: WindowId,
-      callback: (event: { type: string; [key: string]: unknown }) => void,
-    ) => {
+    (id: WindowId, callback: (event: { type: string; [key: string]: unknown }) => void) => {
       let listeners = eventListeners.current.get(id);
       if (!listeners) {
         listeners = new Set();
@@ -240,8 +223,6 @@ export function WindowProvider({
   );
 
   return (
-    <WindowProviderContext.Provider value={contextValue}>
-      {children}
-    </WindowProviderContext.Provider>
+    <WindowProviderContext.Provider value={contextValue}>{children}</WindowProviderContext.Provider>
   );
 }

@@ -127,10 +127,7 @@ type PoolExcludedProps =
   | "persistBounds"
   | "injectStyles";
 
-export interface PooledWindowProps extends Omit<
-  BaseWindowProps,
-  PoolExcludedProps
-> {
+export interface PooledWindowProps extends Omit<BaseWindowProps, PoolExcludedProps> {
   /** Pool to acquire windows from */
   pool: WindowPoolDefinition;
   /** Content to render inside the window */
@@ -151,451 +148,437 @@ export type PooledWindowRef = WindowHandle;
  * The pool's shape props (transparent, frame, titleBarStyle, vibrancy) are
  * immutable and set at pool creation time. All other props can change per use.
  */
-export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(
-  function PooledWindow(
-    {
-      pool: poolDef,
-      open,
-      children,
-      onUserClose,
-      onBoundsChange,
-      onReady,
-      onFocus,
-      onBlur,
-      onClose,
-      onMaximize,
-      onUnmaximize,
-      onMinimize,
-      onRestore,
-      onEnterFullscreen,
-      onExitFullscreen,
-      onDisplayChange,
-      title,
-      visible,
-      name,
-      ...rest
-    },
-    ref,
-  ) {
-    const provider = useWindowProviderContext();
+export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(function PooledWindow(
+  {
+    pool: poolDef,
+    open,
+    children,
+    onUserClose,
+    onBoundsChange,
+    onReady,
+    onFocus,
+    onBlur,
+    onClose,
+    onMaximize,
+    onUnmaximize,
+    onMinimize,
+    onRestore,
+    onEnterFullscreen,
+    onExitFullscreen,
+    onDisplayChange,
+    title,
+    visible,
+    name,
+    ...rest
+  },
+  ref,
+) {
+  const provider = useWindowProviderContext();
 
-    // Detect unstable poolDef identity (inline/useMemo-with-deps/HMR). Each
-    // identity change creates a NEW RendererWindowPool + warmUp() → N hidden
-    // BrowserWindows. The OLD pool is GC'd but its windows are main-process
-    // owned — nothing unregisters them. Eventual symptom: "hit maxWindows
-    // (50)", miles from the root cause. Warn on the SECOND distinct poolDef
-    // this component instance sees.
-    const hasCreatedPoolRef = useRef(false);
-    const hasWarnedPoolChurnRef = useRef(false);
+  // Detect unstable poolDef identity (inline/useMemo-with-deps/HMR). Each
+  // identity change creates a NEW RendererWindowPool + warmUp() → N hidden
+  // BrowserWindows. The OLD pool is GC'd but its windows are main-process
+  // owned — nothing unregisters them. Eventual symptom: "hit maxWindows
+  // (50)", miles from the root cause. Warn on the SECOND distinct poolDef
+  // this component instance sees.
+  const hasCreatedPoolRef = useRef(false);
+  const hasWarnedPoolChurnRef = useRef(false);
 
-    // Share one pool instance per pool definition across all mounts.
-    const pool = useMemo(() => {
-      let instance = poolInstances.get(poolDef);
-      if (!instance) {
-        if (hasCreatedPoolRef.current && !hasWarnedPoolChurnRef.current) {
-          hasWarnedPoolChurnRef.current = true;
-          devWarning(
-            `${name ? `[${name}] ` : ""}PooledWindow \`pool\` prop identity changed. ` +
-              "Each change leaks hidden BrowserWindows (old pool's idle windows are never unregistered). " +
-              "Define the pool at module scope, not inline: " +
-              "`const myPool = createWindowPool(...)` outside any component. " +
-              "If this is HMR, add `import.meta.hot?.dispose(() => destroyWindowPool(myPool))`.",
-          );
-        }
-        hasCreatedPoolRef.current = true;
-        instance = new RendererWindowPool({
-          shape: poolDef.shape,
-          config: poolDef.config,
-          debug: poolDef.debug,
-          injectStyles: poolDef.injectStyles,
-          registerWindow: provider.registerWindow,
-          unregisterWindow: provider.unregisterWindow,
-          updateWindow: provider.updateWindow,
-          windowAction: provider.windowAction,
-        });
-        poolInstances.set(poolDef, instance);
-        void instance.warmUp();
+  // Share one pool instance per pool definition across all mounts.
+  const pool = useMemo(() => {
+    let instance = poolInstances.get(poolDef);
+    if (!instance) {
+      if (hasCreatedPoolRef.current && !hasWarnedPoolChurnRef.current) {
+        hasWarnedPoolChurnRef.current = true;
+        devWarning(
+          `${name ? `[${name}] ` : ""}PooledWindow \`pool\` prop identity changed. ` +
+            "Each change leaks hidden BrowserWindows (old pool's idle windows are never unregistered). " +
+            "Define the pool at module scope, not inline: " +
+            "`const myPool = createWindowPool(...)` outside any component. " +
+            "If this is HMR, add `import.meta.hot?.dispose(() => destroyWindowPool(myPool))`.",
+        );
       }
-      // Always rebind provider refs — the pool outlives individual mounts and
-      // needs fresh references if WindowProvider remounts (HMR, test teardown).
-      instance.rebind({
+      hasCreatedPoolRef.current = true;
+      instance = new RendererWindowPool({
+        shape: poolDef.shape,
+        config: poolDef.config,
+        debug: poolDef.debug,
+        injectStyles: poolDef.injectStyles,
         registerWindow: provider.registerWindow,
         unregisterWindow: provider.unregisterWindow,
         updateWindow: provider.updateWindow,
         windowAction: provider.windowAction,
       });
-      return instance;
-    }, [poolDef]); // eslint-disable-line react-hooks/exhaustive-deps -- provider rebind is handled above
-
-    const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
-    const [childDocument, setChildDocument] = useState<Document | null>(null);
-    const [windowId, setWindowId] = useState<WindowId | null>(null);
-    const [isReady, setIsReady] = useState(false);
-    const pendingShowRef = useRef<string | null>(null);
-    const visibleRef = useRef(visible);
-    visibleRef.current = visible;
-    const prevPropsRef = useRef<Record<string, unknown> | null>(null);
-
-    // Warn about controlled bounds without onBoundsChange (parity with Window)
-    const hasWarnedAboutControlledBoundsRef = useRef(false);
-    useEffect(() => {
-      if (hasWarnedAboutControlledBoundsRef.current) return;
-      const r = rest as Record<string, unknown>;
-      const hasControlledBounds =
-        r.width !== undefined ||
-        r.height !== undefined ||
-        r.x !== undefined ||
-        r.y !== undefined;
-      if (hasControlledBounds && !onBoundsChange) {
-        devWarning(
-          `${name ? `[${name}] ` : ""}Using controlled bounds (width/height/x/y) without onBoundsChange.\n` +
-            "The window will revert to prop values when user resizes.\n" +
-            "Use defaultWidth/defaultHeight for initial-only bounds, or add onBoundsChange for two-way sync.",
-        );
-        hasWarnedAboutControlledBoundsRef.current = true;
-      }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [rest, onBoundsChange]);
-
-    // Tracks the currently-acquired pool entry so release() has the right id
-    const entryRef = useRef<{
-      id: string;
-      childWindow: globalThis.Window;
-    } | null>(null);
-    // Mirrors entryRef.current?.childWindow as a ref object for useWindowLifecycle
-    const childWindowRef = useRef<globalThis.Window | null>(null);
-
-    const lifecycle = useWindowLifecycle({
-      windowId,
-      isReady,
-      provider,
-      childWindowRef,
-      childDocument,
-      onBoundsChange,
-      onUserClose,
-      onFocus,
-      onBlur,
-      onClose,
-      onMaximize,
-      onUnmaximize,
-      onMinimize,
-      onRestore,
-      onEnterFullscreen,
-      onExitFullscreen,
-      onDisplayChange,
-      onWindowClosedSetState: () => {
-        // The window was destroyed (possibly via BrowserWindow.destroy() from
-        // main, which does NOT fire unload). The pool's own unload listener
-        // won't run in that case, so explicitly remove from pool tracking.
-        // The hook already called resetLifecycle() internally for 'closed' —
-        // we only reset our own component-owned state here.
-        const destroyedId = entryRef.current?.id;
-        resetComponentState();
-        if (destroyedId) pool.notifyDestroyed(destroyedId);
-      },
+      poolInstances.set(poolDef, instance);
+      void instance.warmUp();
+    }
+    // Always rebind provider refs — the pool outlives individual mounts and
+    // needs fresh references if WindowProvider remounts (HMR, test teardown).
+    instance.rebind({
+      registerWindow: provider.registerWindow,
+      unregisterWindow: provider.unregisterWindow,
+      updateWindow: provider.updateWindow,
+      windowAction: provider.windowAction,
     });
+    return instance;
+  }, [poolDef]); // eslint-disable-line react-hooks/exhaustive-deps -- provider rebind is handled above
 
-    // Single place that resets PooledWindow-owned state. Call this from
-    // EVERY teardown path. Hook-owned state (windowState, displayInfo,
-    // debounce) is reset by lifecycle.resetLifecycle() — call both.
-    function resetComponentState(): void {
-      entryRef.current = null;
-      pendingShowRef.current = null;
-      prevPropsRef.current = null;
-      childWindowRef.current = null;
-      setPortalTarget(null);
-      setChildDocument(null);
-      setWindowId(null);
-      setIsReady(false);
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  const [childDocument, setChildDocument] = useState<Document | null>(null);
+  const [windowId, setWindowId] = useState<WindowId | null>(null);
+  const [isReady, setIsReady] = useState(false);
+  const pendingShowRef = useRef<string | null>(null);
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+  const prevPropsRef = useRef<Record<string, unknown> | null>(null);
+
+  // Warn about controlled bounds without onBoundsChange (parity with Window)
+  const hasWarnedAboutControlledBoundsRef = useRef(false);
+  useEffect(() => {
+    if (hasWarnedAboutControlledBoundsRef.current) return;
+    const r = rest as Record<string, unknown>;
+    const hasControlledBounds =
+      r.width !== undefined || r.height !== undefined || r.x !== undefined || r.y !== undefined;
+    if (hasControlledBounds && !onBoundsChange) {
+      devWarning(
+        `${name ? `[${name}] ` : ""}Using controlled bounds (width/height/x/y) without onBoundsChange.\n` +
+          "The window will revert to prop values when user resizes.\n" +
+          "Use defaultWidth/defaultHeight for initial-only bounds, or add onBoundsChange for two-way sync.",
+      );
+      hasWarnedAboutControlledBoundsRef.current = true;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rest, onBoundsChange]);
+
+  // Tracks the currently-acquired pool entry so release() has the right id
+  const entryRef = useRef<{
+    id: string;
+    childWindow: globalThis.Window;
+  } | null>(null);
+  // Mirrors entryRef.current?.childWindow as a ref object for useWindowLifecycle
+  const childWindowRef = useRef<globalThis.Window | null>(null);
+
+  const lifecycle = useWindowLifecycle({
+    windowId,
+    isReady,
+    provider,
+    childWindowRef,
+    childDocument,
+    onBoundsChange,
+    onUserClose,
+    onFocus,
+    onBlur,
+    onClose,
+    onMaximize,
+    onUnmaximize,
+    onMinimize,
+    onRestore,
+    onEnterFullscreen,
+    onExitFullscreen,
+    onDisplayChange,
+    onWindowClosedSetState: () => {
+      // The window was destroyed (possibly via BrowserWindow.destroy() from
+      // main, which does NOT fire unload). The pool's own unload listener
+      // won't run in that case, so explicitly remove from pool tracking.
+      // The hook already called resetLifecycle() internally for 'closed' —
+      // we only reset our own component-owned state here.
+      const destroyedId = entryRef.current?.id;
+      resetComponentState();
+      if (destroyedId) pool.notifyDestroyed(destroyedId);
+    },
+  });
+
+  // Single place that resets PooledWindow-owned state. Call this from
+  // EVERY teardown path. Hook-owned state (windowState, displayInfo,
+  // debounce) is reset by lifecycle.resetLifecycle() — call both.
+  function resetComponentState(): void {
+    entryRef.current = null;
+    pendingShowRef.current = null;
+    prevPropsRef.current = null;
+    childWindowRef.current = null;
+    setPortalTarget(null);
+    setChildDocument(null);
+    setWindowId(null);
+    setIsReady(false);
+  }
+
+  // Acquire on open=true, release on open=false
+  useEffect(() => {
+    if (!open) {
+      if (entryRef.current) {
+        const idToRelease = entryRef.current.id;
+        resetComponentState();
+        lifecycle.resetLifecycle();
+        void pool.release(idToRelease);
+      }
+      return;
     }
 
-    // Acquire on open=true, release on open=false
-    useEffect(() => {
-      if (!open) {
-        if (entryRef.current) {
-          const idToRelease = entryRef.current.id;
-          resetComponentState();
-          lifecycle.resetLifecycle();
-          void pool.release(idToRelease);
-        }
+    let cancelled = false;
+
+    async function acquireWindow() {
+      let entry;
+      try {
+        entry = await pool.acquire();
+      } catch (err) {
+        devWarning(
+          `${name ? `[${name}] ` : ""}PooledWindow: pool.acquire() failed — ${err instanceof Error ? err.message : String(err)}`,
+        );
+        // State was never set (acquire is the first async op) — component
+        // is already in a clean state. Toggling open will retry.
         return;
       }
 
-      let cancelled = false;
+      if (cancelled) {
+        void pool.release(entry.id);
+        return;
+      }
 
-      async function acquireWindow() {
-        let entry;
-        try {
-          entry = await pool.acquire();
-        } catch (err) {
-          devWarning(
-            `${name ? `[${name}] ` : ""}PooledWindow: pool.acquire() failed — ${err instanceof Error ? err.message : String(err)}`,
-          );
-          // State was never set (acquire is the first async op) — component
-          // is already in a clean state. Toggling open will retry.
-          return;
-        }
+      entryRef.current = entry;
+      childWindowRef.current = entry.childWindow;
 
-        if (cancelled) {
-          void pool.release(entry.id);
-          return;
-        }
+      // B5: Apply default size/position via setBounds if specified.
+      // defaultWidth/Height/X/Y have no setter in main — use setBounds instead.
+      const { defaultWidth, defaultHeight, defaultX, defaultY } = rest as Record<
+        string,
+        number | undefined
+      >;
+      if (
+        defaultWidth !== undefined ||
+        defaultHeight !== undefined ||
+        defaultX !== undefined ||
+        defaultY !== undefined
+      ) {
+        const bounds: Record<string, number> = {};
+        if (defaultWidth !== undefined) bounds.width = defaultWidth;
+        if (defaultHeight !== undefined) bounds.height = defaultHeight;
+        if (defaultX !== undefined) bounds.x = defaultX;
+        if (defaultY !== undefined) bounds.y = defaultY;
+        void provider.windowAction(entry.id, { type: "setBounds", bounds });
+      }
 
-        entryRef.current = entry;
-        childWindowRef.current = entry.childWindow;
-
-        // B5: Apply default size/position via setBounds if specified.
-        // defaultWidth/Height/X/Y have no setter in main — use setBounds instead.
-        const { defaultWidth, defaultHeight, defaultX, defaultY } =
-          rest as Record<string, number | undefined>;
+      // Forward changeable (non-shape, non-lifecycle) props via IPC
+      const changeableProps: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(rest)) {
         if (
-          defaultWidth !== undefined ||
-          defaultHeight !== undefined ||
-          defaultX !== undefined ||
-          defaultY !== undefined
+          !LIFECYCLE_EXCLUDED_ON_ACQUIRE.has(key) &&
+          !POOL_SHAPE_PROPS.has(key) &&
+          !CREATION_ONLY_PROPS.has(key) &&
+          value !== undefined
         ) {
-          const bounds: Record<string, number> = {};
-          if (defaultWidth !== undefined) bounds.width = defaultWidth;
-          if (defaultHeight !== undefined) bounds.height = defaultHeight;
-          if (defaultX !== undefined) bounds.x = defaultX;
-          if (defaultY !== undefined) bounds.y = defaultY;
-          void provider.windowAction(entry.id, { type: "setBounds", bounds });
-        }
-
-        // Forward changeable (non-shape, non-lifecycle) props via IPC
-        const changeableProps: Record<string, unknown> = {};
-        for (const [key, value] of Object.entries(rest)) {
-          if (
-            !LIFECYCLE_EXCLUDED_ON_ACQUIRE.has(key) &&
-            !POOL_SHAPE_PROPS.has(key) &&
-            !CREATION_ONLY_PROPS.has(key) &&
-            value !== undefined
-          ) {
-            changeableProps[key] = value;
-          }
-        }
-        // visible was destructured separately to create visibleRef, but it
-        // is still a changeable prop that should be forwarded on acquire.
-        if (visible !== undefined) {
-          changeableProps.visible = visible;
-        }
-        // Normalize alwaysOnTop string levels for IPC (schema validates alwaysOnTop as boolean)
-        if (typeof changeableProps.alwaysOnTop === "string") {
-          changeableProps.alwaysOnTopLevel = changeableProps.alwaysOnTop;
-          changeableProps.alwaysOnTop = true;
-        }
-        if (Object.keys(changeableProps).length > 0) {
-          void provider.updateWindow(entry.id, changeableProps);
-        }
-
-        if (title && entry.childWindow.document) {
-          entry.childWindow.document.title = title;
-        }
-
-        // Set portal target BEFORE showing the window — React starts rendering
-        // immediately so content is already in the DOM when the window appears.
-        // This eliminates the blank-window flash on acquire.
-        setWindowId(entry.id);
-        lifecycle.setWindowState({
-          id: entry.id,
-          isFocused: false,
-          isVisible: true,
-          isMaximized: false,
-          isMinimized: false,
-          isFullscreen: false,
-          bounds: {
-            x: entry.childWindow.screenX,
-            y: entry.childWindow.screenY,
-            width: entry.childWindow.outerWidth,
-            height: entry.childWindow.outerHeight,
-          },
-          title: title ?? "",
-        });
-        setPortalTarget(entry.portalTarget);
-        setChildDocument(entry.childWindow.document);
-        setIsReady(true);
-        prevPropsRef.current = { ...rest, title, visible };
-
-        // Defer show to useLayoutEffect — React must commit the portal content
-        // to the DOM before the window becomes visible. The layout effect fires
-        // after React's commit phase, guaranteeing content is painted.
-        // Skip if initially hidden.
-        if (visibleRef.current !== false) {
-          pendingShowRef.current = entry.id;
+          changeableProps[key] = value;
         }
       }
-
-      acquireWindow();
-      // Cleanup fires on open→false, pool change, AND unmount. In all cases,
-      // release the acquired entry (if any) to the captured pool and reset
-      // state fully so the next acquire starts clean. The captured `pool`
-      // closure is the OLD pool on pool-change — correct, that's where the
-      // entry belongs.
-      return () => {
-        cancelled = true;
-        if (entryRef.current) {
-          const idToRelease = entryRef.current.id;
-          resetComponentState();
-          lifecycle.resetLifecycle();
-          void pool.release(idToRelease);
-        }
-      };
-      // Minimal deps — prop changes are handled by the diff effect below.
-      // `pool` is included so changing the pool prop releases the old
-      // window and acquires from the new pool.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [open, pool]);
-
-    // Fire onReady and (if visible) show the window AFTER React has committed
-    // portal content. onReady is decoupled from show — a window mounted with
-    // visible={false} still fires onReady when the portal is live.
-    const onReadyFiredRef = useRef(false);
-    useLayoutEffect(() => {
-      if (!isReady) {
-        onReadyFiredRef.current = false;
-        return;
+      // visible was destructured separately to create visibleRef, but it
+      // is still a changeable prop that should be forwarded on acquire.
+      if (visible !== undefined) {
+        changeableProps.visible = visible;
       }
-      if (!onReadyFiredRef.current) {
-        onReadyFiredRef.current = true;
-        onReady?.();
-      }
-      const showId = pendingShowRef.current;
-      if (showId) {
-        pendingShowRef.current = null;
-        void provider.windowAction(showId, { type: "show" });
-      }
-    }, [isReady]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    // B4: Send prop updates to main process when changeable props change while open.
-    useEffect(() => {
-      if (!isReady || !windowId || !prevPropsRef.current) return;
-
-      const prevProps = prevPropsRef.current;
-      const currentProps: Record<string, unknown> = { ...rest, title, visible };
-
-      // Title is set directly on the document (renderer-side, no IPC needed)
-      if (title !== prevProps.title && title && childWindowRef.current) {
-        childWindowRef.current.document.title = title;
-      }
-
-      // Diff changeable behavior props. `visible` defaults to true when
-      // undefined (respects documented default), so false→undefined re-shows.
-      const changedBehaviorProps: Record<string, unknown> = {};
-      for (const prop of CHANGEABLE_BEHAVIOR_PROPS) {
-        const prevValue = prevProps[prop];
-        let currentValue = currentProps[prop];
-        if (prop === "visible" && currentValue === undefined) {
-          currentValue = true;
-        }
-        if (prevValue !== currentValue && currentValue !== undefined) {
-          changedBehaviorProps[prop] = currentValue;
-        }
-      }
-
       // Normalize alwaysOnTop string levels for IPC (schema validates alwaysOnTop as boolean)
-      if (typeof changedBehaviorProps.alwaysOnTop === "string") {
-        changedBehaviorProps.alwaysOnTopLevel =
-          changedBehaviorProps.alwaysOnTop;
-        changedBehaviorProps.alwaysOnTop = true;
+      if (typeof changeableProps.alwaysOnTop === "string") {
+        changeableProps.alwaysOnTopLevel = changeableProps.alwaysOnTop;
+        changeableProps.alwaysOnTop = true;
+      }
+      if (Object.keys(changeableProps).length > 0) {
+        void provider.updateWindow(entry.id, changeableProps);
       }
 
-      // Diff controlled bounds
-      const boundsUpdate: Record<string, unknown> = {};
-      const r = rest as Record<string, unknown>;
-      if (r.width !== undefined && r.width !== prevProps.width)
-        boundsUpdate.width = r.width;
-      if (r.height !== undefined && r.height !== prevProps.height)
-        boundsUpdate.height = r.height;
-      if (r.x !== undefined && r.x !== prevProps.x) boundsUpdate.x = r.x;
-      if (r.y !== undefined && r.y !== prevProps.y) boundsUpdate.y = r.y;
-
-      const allChanges = { ...changedBehaviorProps, ...boundsUpdate };
-      if (Object.keys(allChanges).length > 0) {
-        void provider.updateWindow(windowId, allChanges);
+      if (title && entry.childWindow.document) {
+        entry.childWindow.document.title = title;
       }
 
-      prevPropsRef.current = currentProps;
-      // `rest` is a new object every render, so this effect runs per-render
-      // once isReady. The diff above short-circuits (no IPC when nothing
-      // changed), so the overhead is ~20 shallow compares. Intentional —
-      // listing every changeable prop individually would be brittle against
-      // PROP_REGISTRY additions.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isReady, windowId, provider, rest, title, visible]);
-
-    // Unmount cleanup: just cancel the debounce timer. Refs are GC'd with
-    // the fiber; React setters are no-ops on unmounted components. The
-    // acquire effect's cleanup handles pool.release(). resetLifecycle()
-    // is for lifecycle teardown (open=false) where the component stays
-    // mounted — don't call it here, the extra setState scheduling adds
-    // latency that can delay a subsequent mount.
-    useEffect(() => {
-      return () => {
-        lifecycle.debouncedBoundsChange.current.cancel();
-      };
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-
-    // Stable method refs (parity with Window.tsx) — don't depend on
-    // windowState, so method identity only changes on windowId/provider.
-    const stateRef = useRef(lifecycle.windowState);
-    stateRef.current = lifecycle.windowState;
-
-    const handleMethods = useMemo(() => {
-      if (!windowId) return null;
-      return {
-        focus: () => void provider.windowAction(windowId, { type: "focus" }),
-        blur: () => void provider.windowAction(windowId, { type: "blur" }),
-        minimize: () =>
-          void provider.windowAction(windowId, { type: "minimize" }),
-        maximize: () =>
-          void provider.windowAction(windowId, { type: "maximize" }),
-        unmaximize: () =>
-          void provider.windowAction(windowId, { type: "unmaximize" }),
-        toggleMaximize: () =>
-          void provider.windowAction(windowId, {
-            type: stateRef.current?.isMaximized ? "unmaximize" : "maximize",
-          }),
-        close: () => void provider.windowAction(windowId, { type: "close" }),
-        forceClose: () =>
-          void provider.windowAction(windowId, { type: "forceClose" }),
-        setBounds: (bounds: Partial<import("../shared/types.js").Bounds>) =>
-          void provider.windowAction(windowId, { type: "setBounds", bounds }),
-        setTitle: (t: string) => {
-          if (childWindowRef.current) childWindowRef.current.document.title = t;
-          void provider.windowAction(windowId, { type: "setTitle", title: t });
+      // Set portal target BEFORE showing the window — React starts rendering
+      // immediately so content is already in the DOM when the window appears.
+      // This eliminates the blank-window flash on acquire.
+      setWindowId(entry.id);
+      lifecycle.setWindowState({
+        id: entry.id,
+        isFocused: false,
+        isVisible: true,
+        isMaximized: false,
+        isMinimized: false,
+        isFullscreen: false,
+        bounds: {
+          x: entry.childWindow.screenX,
+          y: entry.childWindow.screenY,
+          width: entry.childWindow.outerWidth,
+          height: entry.childWindow.outerHeight,
         },
-        enterFullscreen: () =>
-          void provider.windowAction(windowId, { type: "enterFullscreen" }),
-        exitFullscreen: () =>
-          void provider.windowAction(windowId, { type: "exitFullscreen" }),
-      };
-    }, [windowId, provider]);
+        title: title ?? "",
+      });
+      setPortalTarget(entry.portalTarget);
+      setChildDocument(entry.childWindow.document);
+      setIsReady(true);
+      prevPropsRef.current = { ...rest, title, visible };
 
-    useImperativeHandle(ref, () => {
-      if (!isReady || !windowId || !handleMethods) return NOT_READY_HANDLE;
-      const state = stateRef.current;
-      return {
-        id: windowId,
-        isReady: true,
-        isFocused: state?.isFocused ?? false,
-        isMaximized: state?.isMaximized ?? false,
-        isMinimized: state?.isMinimized ?? false,
-        isFullscreen: state?.isFullscreen ?? false,
-        bounds: state?.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
-        ...handleMethods,
-      };
-    }, [isReady, windowId, handleMethods, lifecycle.windowState]);
+      // Defer show to useLayoutEffect — React must commit the portal content
+      // to the DOM before the window becomes visible. The layout effect fires
+      // after React's commit phase, guaranteeing content is painted.
+      // Skip if initially hidden.
+      if (visibleRef.current !== false) {
+        pendingShowRef.current = entry.id;
+      }
+    }
 
-    if (!portalTarget) return null;
+    acquireWindow();
+    // Cleanup fires on open→false, pool change, AND unmount. In all cases,
+    // release the acquired entry (if any) to the captured pool and reset
+    // state fully so the next acquire starts clean. The captured `pool`
+    // closure is the OLD pool on pool-change — correct, that's where the
+    // entry belongs.
+    return () => {
+      cancelled = true;
+      if (entryRef.current) {
+        const idToRelease = entryRef.current.id;
+        resetComponentState();
+        lifecycle.resetLifecycle();
+        void pool.release(idToRelease);
+      }
+    };
+    // Minimal deps — prop changes are handled by the diff effect below.
+    // `pool` is included so changing the pool prop releases the old
+    // window and acquires from the new pool.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, pool]);
 
-    return createPortal(
-      <WindowContext.Provider value={lifecycle.contextValue}>
-        {children}
-      </WindowContext.Provider>,
-      portalTarget,
-    );
-  },
-);
+  // Fire onReady and (if visible) show the window AFTER React has committed
+  // portal content. onReady is decoupled from show — a window mounted with
+  // visible={false} still fires onReady when the portal is live.
+  const onReadyFiredRef = useRef(false);
+  useLayoutEffect(() => {
+    if (!isReady) {
+      onReadyFiredRef.current = false;
+      return;
+    }
+    if (!onReadyFiredRef.current) {
+      onReadyFiredRef.current = true;
+      onReady?.();
+    }
+    const showId = pendingShowRef.current;
+    if (showId) {
+      pendingShowRef.current = null;
+      void provider.windowAction(showId, { type: "show" });
+    }
+  }, [isReady]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // B4: Send prop updates to main process when changeable props change while open.
+  useEffect(() => {
+    if (!isReady || !windowId || !prevPropsRef.current) return;
+
+    const prevProps = prevPropsRef.current;
+    const currentProps: Record<string, unknown> = { ...rest, title, visible };
+
+    // Title is set directly on the document (renderer-side, no IPC needed)
+    if (title !== prevProps.title && title && childWindowRef.current) {
+      childWindowRef.current.document.title = title;
+    }
+
+    // Diff changeable behavior props. `visible` defaults to true when
+    // undefined (respects documented default), so false→undefined re-shows.
+    const changedBehaviorProps: Record<string, unknown> = {};
+    for (const prop of CHANGEABLE_BEHAVIOR_PROPS) {
+      const prevValue = prevProps[prop];
+      let currentValue = currentProps[prop];
+      if (prop === "visible" && currentValue === undefined) {
+        currentValue = true;
+      }
+      if (prevValue !== currentValue && currentValue !== undefined) {
+        changedBehaviorProps[prop] = currentValue;
+      }
+    }
+
+    // Normalize alwaysOnTop string levels for IPC (schema validates alwaysOnTop as boolean)
+    if (typeof changedBehaviorProps.alwaysOnTop === "string") {
+      changedBehaviorProps.alwaysOnTopLevel = changedBehaviorProps.alwaysOnTop;
+      changedBehaviorProps.alwaysOnTop = true;
+    }
+
+    // Diff controlled bounds
+    const boundsUpdate: Record<string, unknown> = {};
+    const r = rest as Record<string, unknown>;
+    if (r.width !== undefined && r.width !== prevProps.width) boundsUpdate.width = r.width;
+    if (r.height !== undefined && r.height !== prevProps.height) boundsUpdate.height = r.height;
+    if (r.x !== undefined && r.x !== prevProps.x) boundsUpdate.x = r.x;
+    if (r.y !== undefined && r.y !== prevProps.y) boundsUpdate.y = r.y;
+
+    const allChanges = { ...changedBehaviorProps, ...boundsUpdate };
+    if (Object.keys(allChanges).length > 0) {
+      void provider.updateWindow(windowId, allChanges);
+    }
+
+    prevPropsRef.current = currentProps;
+    // `rest` is a new object every render, so this effect runs per-render
+    // once isReady. The diff above short-circuits (no IPC when nothing
+    // changed), so the overhead is ~20 shallow compares. Intentional —
+    // listing every changeable prop individually would be brittle against
+    // PROP_REGISTRY additions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isReady, windowId, provider, rest, title, visible]);
+
+  // Unmount cleanup: just cancel the debounce timer. Refs are GC'd with
+  // the fiber; React setters are no-ops on unmounted components. The
+  // acquire effect's cleanup handles pool.release(). resetLifecycle()
+  // is for lifecycle teardown (open=false) where the component stays
+  // mounted — don't call it here, the extra setState scheduling adds
+  // latency that can delay a subsequent mount.
+  useEffect(() => {
+    return () => {
+      lifecycle.debouncedBoundsChange.current.cancel();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Stable method refs (parity with Window.tsx) — don't depend on
+  // windowState, so method identity only changes on windowId/provider.
+  const stateRef = useRef(lifecycle.windowState);
+  stateRef.current = lifecycle.windowState;
+
+  const handleMethods = useMemo(() => {
+    if (!windowId) return null;
+    return {
+      focus: () => void provider.windowAction(windowId, { type: "focus" }),
+      blur: () => void provider.windowAction(windowId, { type: "blur" }),
+      minimize: () => void provider.windowAction(windowId, { type: "minimize" }),
+      maximize: () => void provider.windowAction(windowId, { type: "maximize" }),
+      unmaximize: () => void provider.windowAction(windowId, { type: "unmaximize" }),
+      toggleMaximize: () =>
+        void provider.windowAction(windowId, {
+          type: stateRef.current?.isMaximized ? "unmaximize" : "maximize",
+        }),
+      close: () => void provider.windowAction(windowId, { type: "close" }),
+      forceClose: () => void provider.windowAction(windowId, { type: "forceClose" }),
+      setBounds: (bounds: Partial<import("../shared/types.js").Bounds>) =>
+        void provider.windowAction(windowId, { type: "setBounds", bounds }),
+      setTitle: (t: string) => {
+        if (childWindowRef.current) childWindowRef.current.document.title = t;
+        void provider.windowAction(windowId, { type: "setTitle", title: t });
+      },
+      enterFullscreen: () => void provider.windowAction(windowId, { type: "enterFullscreen" }),
+      exitFullscreen: () => void provider.windowAction(windowId, { type: "exitFullscreen" }),
+    };
+  }, [windowId, provider]);
+
+  useImperativeHandle(ref, () => {
+    if (!isReady || !windowId || !handleMethods) return NOT_READY_HANDLE;
+    const state = stateRef.current;
+    return {
+      id: windowId,
+      isReady: true,
+      isFocused: state?.isFocused ?? false,
+      isMaximized: state?.isMaximized ?? false,
+      isMinimized: state?.isMinimized ?? false,
+      isFullscreen: state?.isFullscreen ?? false,
+      bounds: state?.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
+      ...handleMethods,
+    };
+  }, [isReady, windowId, handleMethods, lifecycle.windowState]);
+
+  if (!portalTarget) return null;
+
+  return createPortal(
+    <WindowContext.Provider value={lifecycle.contextValue}>{children}</WindowContext.Provider>,
+    portalTarget,
+  );
+});
 
 PooledWindow.displayName = "PooledWindow";

@@ -3,12 +3,7 @@
  * @module @loc/electron-window/testing
  */
 
-import React, {
-  useCallback,
-  useMemo,
-  type ReactNode,
-  type ReactElement,
-} from "react";
+import React, { useCallback, useMemo, type ReactNode, type ReactElement } from "react";
 // Import contexts from the PACKAGE ENTRY, not relative paths. With
 // @loc/electron-window marked as external in the testing tsup build, this
 // becomes a literal `import ... from "@loc/electron-window"` in dist —
@@ -42,10 +37,7 @@ export interface MockWindowData {
  */
 interface MockStore {
   windows: Map<WindowId, MockWindowData>;
-  listeners: Map<
-    WindowId,
-    Set<(event: { type: string; [key: string]: unknown }) => void>
-  >;
+  listeners: Map<WindowId, Set<(event: { type: string; [key: string]: unknown }) => void>>;
 }
 
 // Global mock store
@@ -113,10 +105,7 @@ export type SimulatedEvent =
 /**
  * Simulate a window event
  */
-export function simulateMockWindowEvent(
-  id: WindowId,
-  event: SimulatedEvent,
-): void {
+export function simulateMockWindowEvent(id: WindowId, event: SimulatedEvent): void {
   const window = mockStore.windows.get(id);
   if (!window) return;
 
@@ -196,9 +185,7 @@ export interface MockWindowProviderProps {
  * Mock window provider for testing.
  * Use this instead of WindowProvider in tests.
  */
-export function MockWindowProvider({
-  children,
-}: MockWindowProviderProps): ReactElement {
+export function MockWindowProvider({ children }: MockWindowProviderProps): ReactElement {
   const registerWindow = useCallback(
     async (id: WindowId, props: Record<string, unknown>): Promise<boolean> => {
       const state: WindowState = {
@@ -211,10 +198,8 @@ export function MockWindowProvider({
         bounds: {
           x: (props.defaultX as number) ?? (props.x as number) ?? 0,
           y: (props.defaultY as number) ?? (props.y as number) ?? 0,
-          width:
-            (props.defaultWidth as number) ?? (props.width as number) ?? 800,
-          height:
-            (props.defaultHeight as number) ?? (props.height as number) ?? 600,
+          width: (props.defaultWidth as number) ?? (props.width as number) ?? 800,
+          height: (props.defaultHeight as number) ?? (props.height as number) ?? 600,
         },
         title: (props.title as string) ?? "",
       };
@@ -244,8 +229,7 @@ export function MockWindowProvider({
     // renderer's Window proxy .closed = true. The window.open mock (in
     // tests/setup.ts) tracks windows by name; close it so tests that
     // assert on getGlobalMockWindows().size see the window gone.
-    const mockWindows = (globalThis as Record<string, unknown>)
-      .__mockWindows__ as
+    const mockWindows = (globalThis as Record<string, unknown>).__mockWindows__ as
       | Map<string, { destroy: () => void; close: () => void }>
       | undefined;
     // Use destroy() (not close()) — matches real BrowserWindow.destroy()
@@ -255,41 +239,30 @@ export function MockWindowProvider({
     mockWindows?.get(id)?.destroy();
   }, []);
 
-  const updateWindow = useCallback(
-    async (id: WindowId, props: Record<string, unknown>) => {
-      const window = mockStore.windows.get(id);
-      if (!window) return;
+  const updateWindow = useCallback(async (id: WindowId, props: Record<string, unknown>) => {
+    const window = mockStore.windows.get(id);
+    if (!window) return;
 
-      Object.assign(window.props, props);
+    Object.assign(window.props, props);
 
-      if ("title" in props) {
-        window.state.title = props.title as string;
-      }
-      if (
-        "width" in props ||
-        "height" in props ||
-        "x" in props ||
-        "y" in props
-      ) {
-        window.state.bounds = {
-          x: (props.x as number) ?? window.state.bounds.x,
-          y: (props.y as number) ?? window.state.bounds.y,
-          width: (props.width as number) ?? window.state.bounds.width,
-          height: (props.height as number) ?? window.state.bounds.height,
-        };
-      }
-      // Mirror real WindowInstance.updateProps: visible triggers show()/hide()
-      // which emit shown/hidden events. Without this, tests can't observe
-      // visible-prop-driven visibility transitions.
-      if ("visible" in props && props.visible !== window.state.isVisible) {
-        simulateMockWindowEvent(
-          id,
-          props.visible === false ? { type: "hidden" } : { type: "shown" },
-        );
-      }
-    },
-    [],
-  );
+    if ("title" in props) {
+      window.state.title = props.title as string;
+    }
+    if ("width" in props || "height" in props || "x" in props || "y" in props) {
+      window.state.bounds = {
+        x: (props.x as number) ?? window.state.bounds.x,
+        y: (props.y as number) ?? window.state.bounds.y,
+        width: (props.width as number) ?? window.state.bounds.width,
+        height: (props.height as number) ?? window.state.bounds.height,
+      };
+    }
+    // Mirror real WindowInstance.updateProps: visible triggers show()/hide()
+    // which emit shown/hidden events. Without this, tests can't observe
+    // visible-prop-driven visibility transitions.
+    if ("visible" in props && props.visible !== window.state.isVisible) {
+      simulateMockWindowEvent(id, props.visible === false ? { type: "hidden" } : { type: "shown" });
+    }
+  }, []);
 
   const destroyWindow = useCallback(async (id: WindowId) => {
     const window = mockStore.windows.get(id);
@@ -362,18 +335,12 @@ export function MockWindowProvider({
     [destroyWindow],
   );
 
-  const getWindowState = useCallback(
-    async (id: WindowId): Promise<WindowState | null> => {
-      return mockStore.windows.get(id)?.state ?? null;
-    },
-    [],
-  );
+  const getWindowState = useCallback(async (id: WindowId): Promise<WindowState | null> => {
+    return mockStore.windows.get(id)?.state ?? null;
+  }, []);
 
   const subscribeToEvents = useCallback(
-    (
-      id: WindowId,
-      callback: (event: { type: string; [key: string]: unknown }) => void,
-    ) => {
+    (id: WindowId, callback: (event: { type: string; [key: string]: unknown }) => void) => {
       let listeners = mockStore.listeners.get(id);
       if (!listeners) {
         listeners = new Set();
@@ -415,11 +382,7 @@ export function MockWindowProvider({
     ],
   );
 
-  return React.createElement(
-    WindowProviderContext.Provider,
-    { value: contextValue },
-    children,
-  );
+  return React.createElement(WindowProviderContext.Provider, { value: contextValue }, children);
 }
 
 /**
@@ -477,9 +440,5 @@ export function MockWindow({
     [id, fullState],
   );
 
-  return React.createElement(
-    WindowContext.Provider,
-    { value: contextValue },
-    children,
-  );
+  return React.createElement(WindowContext.Provider, { value: contextValue }, children);
 }

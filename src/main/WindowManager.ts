@@ -40,19 +40,14 @@ export interface SetupOptions {
    * Called for window.open() calls that aren't managed by this library.
    * If not provided, unmanaged window.open() calls are denied.
    */
-  fallbackWindowOpenHandler?: (
-    details: Electron.HandlerDetails,
-  ) => WindowOpenHandlerResult;
+  fallbackWindowOpenHandler?: (details: Electron.HandlerDetails) => WindowOpenHandlerResult;
 }
 
 /**
  * Filter props to only include allowed properties.
  * Provides a runtime security boundary against renderer-supplied dangerous options.
  */
-function filterAllowedProps(
-  props: IPCWindowProps,
-  devWarnings: boolean,
-): IPCWindowProps {
+function filterAllowedProps(props: IPCWindowProps, devWarnings: boolean): IPCWindowProps {
   const filtered: Record<string, unknown> = {};
   const rejected: string[] = [];
 
@@ -152,12 +147,7 @@ export class WindowManager {
     };
   }
 
-  private debugLog(
-    direction: "←" | "→",
-    method: string,
-    id: string,
-    data?: unknown,
-  ): void {
+  private debugLog(direction: "←" | "→", method: string, id: string, data?: unknown): void {
     if (!this.config.debug) return;
     const payload = data ? ` ${JSON.stringify(data)}` : "";
     console.log(`[electron-window] ${direction} ${method} "${id}"${payload}`);
@@ -212,14 +202,10 @@ export class WindowManager {
     try {
       const parsedOrigin = new URL(url).origin;
       const origin =
-        parsedOrigin !== "null"
-          ? parsedOrigin
-          : new URL(url).protocol + "//" + new URL(url).host;
+        parsedOrigin !== "null" ? parsedOrigin : new URL(url).protocol + "//" + new URL(url).host;
       const allowed = this.config.allowedOrigins.some((o) => origin === o);
       if (!allowed && this.config.devWarnings) {
-        devWarning(
-          `IPC call from origin "${origin}" rejected. Add to allowedOrigins to allow.`,
-        );
+        devWarning(`IPC call from origin "${origin}" rejected. Add to allowedOrigins to allow.`);
       }
       return allowed;
     } catch {
@@ -266,8 +252,7 @@ export class WindowManager {
   ): void {
     const impl = this.createImplementation(webContents);
 
-    const dispatcher =
-      WindowManagerIPC.for(webContents).setImplementation(impl);
+    const dispatcher = WindowManagerIPC.for(webContents).setImplementation(impl);
 
     dispatchers.set(webContents, dispatcher);
 
@@ -309,10 +294,7 @@ export class WindowManager {
           return { action: "deny" };
         }
 
-        const constructorOptions = this.buildConstructorOptions(
-          pending.props,
-          webContents,
-        );
+        const constructorOptions = this.buildConstructorOptions(pending.props, webContents);
 
         const defaultWindowOptions = this.getDefaultWindowOptions();
         return {
@@ -429,8 +411,7 @@ export class WindowManager {
       }
     }
 
-    const shouldCenter =
-      props.center !== false && x === undefined && y === undefined;
+    const shouldCenter = props.center !== false && x === undefined && y === undefined;
 
     // Resolve targetDisplay if specified — takes precedence over parent-display centering.
     // Values: "primary", "cursor", or a stringified display index.
@@ -440,9 +421,7 @@ export class WindowManager {
         if (props.targetDisplay === "primary") {
           resolvedDisplay = screen.getPrimaryDisplay();
         } else if (props.targetDisplay === "cursor") {
-          resolvedDisplay = screen.getDisplayNearestPoint(
-            screen.getCursorScreenPoint(),
-          );
+          resolvedDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
         } else {
           const idx = parseInt(props.targetDisplay, 10);
           if (!isNaN(idx)) {
@@ -455,12 +434,8 @@ export class WindowManager {
     }
 
     if (shouldCenter && resolvedDisplay) {
-      x =
-        resolvedDisplay.workArea.x +
-        Math.round((resolvedDisplay.workArea.width - width) / 2);
-      y =
-        resolvedDisplay.workArea.y +
-        Math.round((resolvedDisplay.workArea.height - height) / 2);
+      x = resolvedDisplay.workArea.x + Math.round((resolvedDisplay.workArea.width - width) / 2);
+      y = resolvedDisplay.workArea.y + Math.round((resolvedDisplay.workArea.height - height) / 2);
     } else if (shouldCenter && parentWebContents) {
       // Default: center on the same display as the parent window
       try {
@@ -468,12 +443,8 @@ export class WindowManager {
         const parentBounds = parentWin?.getBounds();
         if (parentBounds) {
           const display = screen.getDisplayMatching(parentBounds);
-          x =
-            display.workArea.x +
-            Math.round((display.workArea.width - width) / 2);
-          y =
-            display.workArea.y +
-            Math.round((display.workArea.height - height) / 2);
+          x = display.workArea.x + Math.round((display.workArea.width - width) / 2);
+          y = display.workArea.y + Math.round((display.workArea.height - height) / 2);
         }
       } catch {
         // Fall through to Electron's default centering
@@ -495,8 +466,7 @@ export class WindowManager {
       frame: props.frame ?? true,
       titleBarStyle:
         props.titleBarStyle as Electron.BrowserWindowConstructorOptions["titleBarStyle"],
-      vibrancy:
-        props.vibrancy as Electron.BrowserWindowConstructorOptions["vibrancy"],
+      vibrancy: props.vibrancy as Electron.BrowserWindowConstructorOptions["vibrancy"],
       backgroundColor: props.backgroundColor,
       opacity: props.opacity,
       resizable: props.resizable ?? true,
@@ -559,17 +529,13 @@ export class WindowManager {
         }
         if (this.pendingWindows.size >= this.config.maxPendingWindows) {
           if (this.config.devWarnings) {
-            devWarning(
-              "Maximum pending windows reached. Registration rejected.",
-            );
+            devWarning("Maximum pending windows reached. Registration rejected.");
           }
           return false;
         }
         if (this.windows.size >= this.config.maxWindows) {
           if (this.config.devWarnings) {
-            devWarning(
-              "Maximum active windows reached. Registration rejected.",
-            );
+            devWarning("Maximum active windows reached. Registration rejected.");
           }
           return false;
         }
@@ -580,10 +546,7 @@ export class WindowManager {
         if (existing && existing.ownerWebContentsId !== senderId) {
           return false;
         }
-        const filteredProps = filterAllowedProps(
-          props,
-          this.config.devWarnings,
-        );
+        const filteredProps = filterAllowedProps(props, this.config.devWarnings);
         this.pendingWindows.set(id, {
           props: filteredProps,
           createdAt: Date.now(),
@@ -614,14 +577,9 @@ export class WindowManager {
         if (!checkOrigin()) return false;
         const entry = this.windows.get(id);
         if (!checkOwnership(id, entry)) return false;
-        const filteredProps = filterAllowedProps(
-          props,
-          this.config.devWarnings,
-        );
+        const filteredProps = filterAllowedProps(props, this.config.devWarnings);
         entry.instance.updateProps(
-          filteredProps as unknown as Parameters<
-            WindowInstance["updateProps"]
-          >[0],
+          filteredProps as unknown as Parameters<WindowInstance["updateProps"]>[0],
         );
         return true;
       },
@@ -754,13 +712,9 @@ let managerInstance: WindowManager | null = null;
  * manager.setupForWindow(mainWindow);
  * ```
  */
-export function setupWindowManager(
-  config?: WindowManagerConfig,
-): WindowManager {
+export function setupWindowManager(config?: WindowManagerConfig): WindowManager {
   if (managerInstance) {
-    devWarning(
-      "setupWindowManager() called multiple times. Returning existing instance.",
-    );
+    devWarning("setupWindowManager() called multiple times. Returning existing instance.");
     return managerInstance;
   }
   managerInstance = new WindowManager(config);

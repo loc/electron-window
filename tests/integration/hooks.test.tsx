@@ -570,11 +570,7 @@ describe("useWindowDisplay", () => {
     // Flush effects so subscribeToEvents is live
     await waitFor(() => {
       for (const w of getGlobalMockWindows().values()) {
-        if (
-          (w as { document: Document }).document?.querySelector(
-            '[data-testid="display-probe"]',
-          )
-        )
+        if ((w as { document: Document }).document?.querySelector('[data-testid="display-probe"]'))
           return true;
       }
       return false;

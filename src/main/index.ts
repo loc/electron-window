@@ -3,11 +3,7 @@
  * @module @loc/electron-window/main
  */
 
-export {
-  WindowManager,
-  setupWindowManager,
-  getWindowManager,
-} from "./WindowManager.js";
+export { WindowManager, setupWindowManager, getWindowManager } from "./WindowManager.js";
 export type {
   WindowManagerConfig,
   SetupOptions,

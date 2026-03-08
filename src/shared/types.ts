@@ -1,8 +1,4 @@
-import type {
-  Bounds,
-  DisplayInfo,
-  WindowState,
-} from "../generated-ipc/common/electron_window.js";
+import type { Bounds, DisplayInfo, WindowState } from "../generated-ipc/common/electron_window.js";
 
 // Re-export from generated IPC types to ensure structural identity.
 // Prevents "Type X is not assignable to Type X" errors when consumers
@@ -39,10 +35,7 @@ export type AlwaysOnTopLevel =
 /**
  * Style injection mode for window content
  */
-export type InjectStylesMode =
-  | "auto"
-  | false
-  | ((targetDocument: Document) => void);
+export type InjectStylesMode = "auto" | false | ((targetDocument: Document) => void);
 
 /**
  * Target display for window placement
@@ -52,11 +45,7 @@ export type TargetDisplay = number | "primary" | "cursor";
 /**
  * Title bar style options
  */
-export type TitleBarStyle =
-  | "default"
-  | "hidden"
-  | "hiddenInset"
-  | "customButtonsOnHover";
+export type TitleBarStyle = "default" | "hidden" | "hiddenInset" | "customButtonsOnHover";
 
 /** Vibrancy effect options (macOS) */
 export type VibrancyType =

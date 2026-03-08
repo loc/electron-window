@@ -1,15 +1,6 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
-import type {
-  WindowId,
-  WindowState,
-  WindowHandle,
-  Bounds,
-  DisplayInfo,
-} from "../shared/types.js";
-import type {
-  WindowContextValue,
-  WindowProviderContextValue,
-} from "./context.js";
+import type { WindowId, WindowState, WindowHandle, Bounds, DisplayInfo } from "../shared/types.js";
+import type { WindowContextValue, WindowProviderContextValue } from "./context.js";
 import { debounce } from "../shared/utils.js";
 import { BOUNDS_CHANGE_DEBOUNCE_MS } from "./windowUtils.js";
 
@@ -94,9 +85,7 @@ export interface WindowLifecycleResult {
   resetLifecycle: () => void;
 }
 
-export function useWindowLifecycle(
-  opts: WindowLifecycleOptions,
-): WindowLifecycleResult {
+export function useWindowLifecycle(opts: WindowLifecycleOptions): WindowLifecycleResult {
   const { windowId, isReady, provider } = opts;
 
   const [windowState, _setWindowState] = useState<WindowState | null>(null);

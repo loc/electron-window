@@ -22,9 +22,5 @@ import type { DisplayInfo } from "../../shared/types.js";
 export function useWindowDisplay(): DisplayInfo | null {
   const { subscribe, getDisplaySnapshot } = useWindowContext();
 
-  return useSyncExternalStore(
-    subscribe,
-    getDisplaySnapshot,
-    () => null
-  );
+  return useSyncExternalStore(subscribe, getDisplaySnapshot, () => null);
 }

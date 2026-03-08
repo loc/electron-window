@@ -21,9 +21,7 @@
 
 // Consumer's bundler replaces this if they set `define`. Without the define,
 // `typeof __ELECTRON_WINDOW_ALLOWED_ORIGINS__` is "undefined" at runtime.
-declare const __ELECTRON_WINDOW_ALLOWED_ORIGINS__:
-  | readonly string[]
-  | undefined;
+declare const __ELECTRON_WINDOW_ALLOWED_ORIGINS__: readonly string[] | undefined;
 
 export function __originHook(url: string | undefined): boolean {
   if (typeof __ELECTRON_WINDOW_ALLOWED_ORIGINS__ === "undefined") return true;
@@ -32,10 +30,7 @@ export function __originHook(url: string | undefined): boolean {
     const u = new URL(url);
     // Custom protocols (app://, file://) produce origin "null" in some engines —
     // reconstruct as protocol+host so "file://" and "app://main" can be matched.
-    const origin =
-      u.origin === "null" || u.origin === null
-        ? `${u.protocol}//${u.host}`
-        : u.origin;
+    const origin = u.origin === "null" || u.origin === null ? `${u.protocol}//${u.host}` : u.origin;
     return __ELECTRON_WINDOW_ALLOWED_ORIGINS__.includes(origin);
   } catch {
     return false;

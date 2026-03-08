@@ -1,12 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import React, { useState } from "react";
-import {
-  render,
-  screen,
-  waitFor,
-  fireEvent,
-  act,
-} from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import {
   PooledWindow,
   createWindowPool,
@@ -128,9 +122,7 @@ describe("<PooledWindow>", () => {
 
     // After acquire, the pool window's document should contain the portal.
     await waitFor(() => {
-      expect(
-        queryInPoolWindows('[data-testid="pooled-content"]'),
-      ).not.toBeNull();
+      expect(queryInPoolWindows('[data-testid="pooled-content"]')).not.toBeNull();
     });
   });
 
@@ -155,9 +147,7 @@ describe("<PooledWindow>", () => {
 
     // Wait until the window is acquired and shown (portal appears).
     await waitFor(() => {
-      expect(
-        queryInPoolWindows('[data-testid="pooled-content"]'),
-      ).not.toBeNull();
+      expect(queryInPoolWindows('[data-testid="pooled-content"]')).not.toBeNull();
     });
 
     const globalCountAfterOpen = getGlobalMockWindows().size;
@@ -280,10 +270,7 @@ describe("<PooledWindow>", () => {
 
   // 6. Rapid toggle doesn't leak — acquire/release cycle stays balanced
   it("handles rapid open/close cycles without leaking windows", async () => {
-    const pool = createWindowPool(
-      { transparent: true },
-      { minIdle: 1, maxIdle: 2 },
-    );
+    const pool = createWindowPool({ transparent: true }, { minIdle: 1, maxIdle: 2 });
 
     function TestApp() {
       const [open, setOpen] = useState(false);
@@ -416,10 +403,7 @@ describe("<PooledWindow>", () => {
 
   // 9. Close→reopen cycle reuses the same pool window (not destroyed + recreated)
   it("reuses the same window after close and reopen", async () => {
-    const pool = createWindowPool(
-      { transparent: true },
-      { minIdle: 1, maxIdle: 2 },
-    );
+    const pool = createWindowPool({ transparent: true }, { minIdle: 1, maxIdle: 2 });
 
     function TestApp() {
       const [open, setOpen] = useState(false);
@@ -448,17 +432,14 @@ describe("<PooledWindow>", () => {
     // Open — acquires from pool
     fireEvent.click(document.querySelector('[data-testid="open"]')!);
     await waitFor(() => {
-      expect(
-        queryInPoolWindows('[data-testid="reuse-content"]'),
-      ).not.toBeNull();
+      expect(queryInPoolWindows('[data-testid="reuse-content"]')).not.toBeNull();
     });
 
     // Wait for any background replenishment to settle
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     // Record total window.open calls after first acquire + replenishment
-    const openCallsAfterFirstAcquire = (window.open as ReturnType<typeof vi.fn>)
-      .mock.calls.length;
+    const openCallsAfterFirstAcquire = (window.open as ReturnType<typeof vi.fn>).mock.calls.length;
 
     // Close — should release back to pool (not destroy)
     fireEvent.click(document.querySelector('[data-testid="close"]')!);
@@ -472,23 +453,17 @@ describe("<PooledWindow>", () => {
     // Reopen — should reuse the same pool window (no new window.open)
     fireEvent.click(document.querySelector('[data-testid="open"]')!);
     await waitFor(() => {
-      expect(
-        queryInPoolWindows('[data-testid="reuse-content"]'),
-      ).not.toBeNull();
+      expect(queryInPoolWindows('[data-testid="reuse-content"]')).not.toBeNull();
     });
 
     // No new window.open calls for the reopen — pool reuses existing idle window
-    const openCallsAfterReopen = (window.open as ReturnType<typeof vi.fn>).mock
-      .calls.length;
+    const openCallsAfterReopen = (window.open as ReturnType<typeof vi.fn>).mock.calls.length;
     expect(openCallsAfterReopen).toBe(openCallsAfterFirstAcquire);
   });
 
   // 10. Regression: hide() firing unload shouldn't destroy pool windows
   it("survives unload events triggered by hide (Electron quirk)", async () => {
-    const pool = createWindowPool(
-      { transparent: true },
-      { minIdle: 1, maxIdle: 2 },
-    );
+    const pool = createWindowPool({ transparent: true }, { minIdle: 1, maxIdle: 2 });
 
     function TestApp() {
       const [open, setOpen] = useState(false);
@@ -516,14 +491,11 @@ describe("<PooledWindow>", () => {
     // Open
     fireEvent.click(document.querySelector('[data-testid="open"]')!);
     await waitFor(() => {
-      expect(
-        queryInPoolWindows('[data-testid="survive-content"]'),
-      ).not.toBeNull();
+      expect(queryInPoolWindows('[data-testid="survive-content"]')).not.toBeNull();
     });
 
     await new Promise((resolve) => setTimeout(resolve, 50));
-    const openCallsAfterAcquire = (window.open as ReturnType<typeof vi.fn>).mock
-      .calls.length;
+    const openCallsAfterAcquire = (window.open as ReturnType<typeof vi.fn>).mock.calls.length;
 
     // Close — triggers pool.release() which calls windowAction("hide")
     fireEvent.click(document.querySelector('[data-testid="close"]')!);
@@ -558,21 +530,17 @@ describe("<PooledWindow>", () => {
     // Reopen — should still reuse (no new window.open)
     fireEvent.click(document.querySelector('[data-testid="open"]')!);
     await waitFor(() => {
-      expect(
-        queryInPoolWindows('[data-testid="survive-content"]'),
-      ).not.toBeNull();
+      expect(queryInPoolWindows('[data-testid="survive-content"]')).not.toBeNull();
     });
 
-    const openCallsAfterReopen = (window.open as ReturnType<typeof vi.fn>).mock
-      .calls.length;
+    const openCallsAfterReopen = (window.open as ReturnType<typeof vi.fn>).mock.calls.length;
     expect(openCallsAfterReopen).toBe(openCallsAfterAcquire);
   });
 
   // 11. Regression: replenishment shouldn't prevent release from recycling.
   // Tests the RendererWindowPool directly for precise timing control.
   it("recycles window even when replenishment filled idle to maxIdle", async () => {
-    const { RendererWindowPool } =
-      await import("../../src/renderer/RendererWindowPool.js");
+    const { RendererWindowPool } = await import("../../src/renderer/RendererWindowPool.js");
 
     const unregisterWindow = vi.fn(async () => {});
     const updateWindow = vi.fn(async () => {});
@@ -652,9 +620,7 @@ describe("<PooledWindow>", () => {
 
     // updateWindow merges into mock window props — check alwaysOnTop is now true
     await waitFor(() => {
-      expect(getMockWindows().some((w) => w.props.alwaysOnTop === true)).toBe(
-        true,
-      );
+      expect(getMockWindows().some((w) => w.props.alwaysOnTop === true)).toBe(true);
     });
   });
 
@@ -683,22 +649,17 @@ describe("<PooledWindow>", () => {
     // updates window.state.bounds — verify the size was applied.
     await waitFor(() => {
       const wins = getMockWindows();
-      return wins.some(
-        (w) => w.state.bounds.width === 300 && w.state.bounds.height === 200,
-      );
+      return wins.some((w) => w.state.bounds.width === 300 && w.state.bounds.height === 200);
     });
 
     const wins = getMockWindows();
-    const sized = wins.find(
-      (w) => w.state.bounds.width === 300 && w.state.bounds.height === 200,
-    );
+    const sized = wins.find((w) => w.state.bounds.width === 300 && w.state.bounds.height === 200);
     expect(sized).toBeDefined();
   });
 
   // A4. Pool rebinds provider refs when provider remounts
   it("rebinds provider methods after WindowProvider remounts", async () => {
-    const { destroyWindowPool } =
-      await import("../../src/renderer/PooledWindow.js");
+    const { destroyWindowPool } = await import("../../src/renderer/PooledWindow.js");
     // minIdle: 0 so warmup doesn't create any idle windows — we only want
     // to test that the rebind happens and the new provider's methods are used.
     const poolDef = createWindowPool({ transparent: true }, { minIdle: 0 });
@@ -727,9 +688,7 @@ describe("<PooledWindow>", () => {
     // The new provider's registerWindow is used for the on-demand acquire,
     // proving the pool uses fresh refs after remount and not stale ones.
     await waitFor(() => {
-      expect(
-        queryInPoolWindows('[data-testid="rebind-content"]'),
-      ).not.toBeNull();
+      expect(queryInPoolWindows('[data-testid="rebind-content"]')).not.toBeNull();
     });
 
     destroyWindowPool(poolDef);
@@ -737,8 +696,7 @@ describe("<PooledWindow>", () => {
 
   // D5. In-flight tracking prevents over-creation during rapid acquires
   it("does not over-replenish idle windows when acquiring concurrently", async () => {
-    const { RendererWindowPool } =
-      await import("../../src/renderer/RendererWindowPool.js");
+    const { RendererWindowPool } = await import("../../src/renderer/RendererWindowPool.js");
 
     const registerWindow = vi.fn(async () => true);
     const unregisterWindow = vi.fn(async () => {});
@@ -784,10 +742,8 @@ describe("<PooledWindow>", () => {
   // a show() call, which would un-hide the released window (idle pool
   // windows visible on screen).
   it("release() prop-reset payload excludes visible (idle windows stay hidden)", async () => {
-    const { RendererWindowPool } =
-      await import("../../src/renderer/RendererWindowPool.js");
-    const { POOL_RELEASE_PROP_DEFAULTS } =
-      await import("../../src/shared/types.js");
+    const { RendererWindowPool } = await import("../../src/renderer/RendererWindowPool.js");
+    const { POOL_RELEASE_PROP_DEFAULTS } = await import("../../src/shared/types.js");
 
     // The defaults object must NOT contain visible — this is the primary
     // guard against regressing the show-on-release bug.
@@ -837,11 +793,8 @@ describe("<PooledWindow>", () => {
     // If you add a prop to CHANGEABLE_BEHAVIOR_PROPS (via PROP_REGISTRY),
     // this test forces you to decide which bucket it belongs in — it won't
     // pass until you either add a default or add to the non-resettable set.
-    const {
-      POOL_RELEASE_PROP_DEFAULTS,
-      POOL_NON_RESETTABLE_PROPS,
-      CHANGEABLE_BEHAVIOR_PROPS,
-    } = await import("../../src/shared/types.js");
+    const { POOL_RELEASE_PROP_DEFAULTS, POOL_NON_RESETTABLE_PROPS, CHANGEABLE_BEHAVIOR_PROPS } =
+      await import("../../src/shared/types.js");
 
     const defaultKeys = new Set(Object.keys(POOL_RELEASE_PROP_DEFAULTS));
     const uncovered: string[] = [];
@@ -880,9 +833,7 @@ describe("<PooledWindow>", () => {
     for (const win of getGlobalMockWindows().values()) {
       const w = win as { document: Document };
       if (!w.document) continue;
-      const styleNodes = w.document.head.querySelectorAll(
-        'style, link[rel="stylesheet"]',
-      );
+      const styleNodes = w.document.head.querySelectorAll('style, link[rel="stylesheet"]');
       expect(styleNodes.length).toBe(0);
     }
   });
@@ -892,8 +843,7 @@ describe("<PooledWindow>", () => {
   // M4: External destruction while no <PooledWindow> is mounted → dead entry
   // left in idle[]. acquire() must skip it rather than hand out a closed window.
   it("acquire() skips dead idle entries (externally destroyed while unmounted)", async () => {
-    const { RendererWindowPool } =
-      await import("../../src/renderer/RendererWindowPool.js");
+    const { RendererWindowPool } = await import("../../src/renderer/RendererWindowPool.js");
 
     const pool = new RendererWindowPool({
       shape: {},
@@ -929,8 +879,7 @@ describe("<PooledWindow>", () => {
   // IPC awaits. Without this, accessing .document on a closed window throws
   // and the styleCleanup leaks.
   it("release() handles window destroyed during IPC awaits without unhandled rejection", async () => {
-    const { RendererWindowPool } =
-      await import("../../src/renderer/RendererWindowPool.js");
+    const { RendererWindowPool } = await import("../../src/renderer/RendererWindowPool.js");
 
     const unregisterWindow = vi.fn(async () => {});
     // Make windowAction("hide") slow so we can destroy the window mid-release
@@ -940,13 +889,11 @@ describe("<PooledWindow>", () => {
       // resolves (microtask). We need to wait for that before resolving hide.
       resolveHide = resolveCalled;
     });
-    const windowAction = vi.fn(
-      async (_id: string, action: { type: string }) => {
-        if (action.type === "hide") {
-          await hideCalled;
-        }
-      },
-    );
+    const windowAction = vi.fn(async (_id: string, action: { type: string }) => {
+      if (action.type === "hide") {
+        await hideCalled;
+      }
+    });
 
     // maxIdle=1 suppresses acquire-time replenishment (idle+active >= maxIdle)
     // so the idle count after release is purely from THIS entry (or not).
@@ -966,9 +913,7 @@ describe("<PooledWindow>", () => {
     const releasePromise = pool.release(entry.id);
 
     // Wait for release to reach windowAction("hide")
-    await vi.waitFor(() =>
-      expect(windowAction).toHaveBeenCalledWith(entry.id, { type: "hide" }),
-    );
+    await vi.waitFor(() => expect(windowAction).toHaveBeenCalledWith(entry.id, { type: "hide" }));
 
     // Destroy the window while release is awaiting hide
     (entry.childWindow as unknown as { destroy: () => void }).destroy();
@@ -992,10 +937,8 @@ describe("<PooledWindow>", () => {
   // unmount. Otherwise a pending debounce fires the consumer's callback for
   // a window that was already released.
   it("cancels pending onBoundsChange debounce when open goes false", async () => {
-    const { BOUNDS_CHANGE_DEBOUNCE_MS } =
-      await import("../../src/renderer/windowUtils.js");
-    const { simulateMockWindowEvent, getMockWindows } =
-      await import("../../src/testing/index.js");
+    const { BOUNDS_CHANGE_DEBOUNCE_MS } = await import("../../src/renderer/windowUtils.js");
+    const { simulateMockWindowEvent, getMockWindows } = await import("../../src/testing/index.js");
 
     vi.useFakeTimers();
     const pool = createWindowPool({}, { minIdle: 0 });
@@ -1059,10 +1002,7 @@ describe("<PooledWindow>", () => {
 
     function TestApp({ tick }: { tick: number }) {
       // Deliberately WRONG — new poolDef each render
-      const pool = React.useMemo(
-        () => createWindowPool({}, { minIdle: 0 }),
-        [tick],
-      );
+      const pool = React.useMemo(() => createWindowPool({}, { minIdle: 0 }), [tick]);
       return (
         <MockWindowProvider>
           <PooledWindow pool={pool} open={false}>
@@ -1075,17 +1015,13 @@ describe("<PooledWindow>", () => {
     const { rerender } = render(<TestApp tick={0} />);
     // First render creates the pool — no warning yet
     expect(
-      warnSpy.mock.calls.some((c) =>
-        String(c[0]).includes("pool` prop identity changed"),
-      ),
+      warnSpy.mock.calls.some((c) => String(c[0]).includes("pool` prop identity changed")),
     ).toBe(false);
 
     rerender(<TestApp tick={1} />);
     // Second distinct poolDef → warning
     expect(
-      warnSpy.mock.calls.some((c) =>
-        String(c[0]).includes("pool` prop identity changed"),
-      ),
+      warnSpy.mock.calls.some((c) => String(c[0]).includes("pool` prop identity changed")),
     ).toBe(true);
 
     warnSpy.mockRestore();

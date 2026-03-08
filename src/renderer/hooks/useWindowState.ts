@@ -14,9 +14,7 @@ import type { Bounds, WindowState } from "../../shared/types.js";
 export function useWindowDocument(): Document {
   const { document } = useWindowContext();
   if (!document) {
-    throw new Error(
-      "useWindowDocument must be called inside an open <Window> or <PooledWindow>",
-    );
+    throw new Error("useWindowDocument must be called inside an open <Window> or <PooledWindow>");
   }
   return document;
 }

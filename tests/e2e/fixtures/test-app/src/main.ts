@@ -103,17 +103,14 @@ ipcMain.handle("test:close-child-window", (_event, id: string) => {
   return false;
 });
 
-ipcMain.handle(
-  "test:resize-child-window",
-  (_event, id: string, width: number, height: number) => {
-    const instance = manager.getWindow(id);
-    if (instance && !instance.destroyed && instance.window) {
-      instance.window.setSize(width, height);
-      return true;
-    }
-    return false;
-  },
-);
+ipcMain.handle("test:resize-child-window", (_event, id: string, width: number, height: number) => {
+  const instance = manager.getWindow(id);
+  if (instance && !instance.destroyed && instance.window) {
+    instance.window.setSize(width, height);
+    return true;
+  }
+  return false;
+});
 
 ipcMain.handle("test:get-child-web-preferences", (_event, id: string) => {
   const instance = manager.getWindow(id);

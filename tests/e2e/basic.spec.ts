@@ -1,10 +1,4 @@
-import {
-  test,
-  expect,
-  _electron as electron,
-  ElectronApplication,
-  Page,
-} from "@playwright/test";
+import { test, expect, _electron as electron, ElectronApplication, Page } from "@playwright/test";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -12,10 +6,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testAppPath = path.join(__dirname, "fixtures/test-app/dist/main.js");
 
 // Helper to wait for a condition
-async function waitFor(
-  fn: () => Promise<boolean>,
-  timeout = 5000,
-): Promise<void> {
+async function waitFor(fn: () => Promise<boolean>, timeout = 5000): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     if (await fn()) return;
@@ -85,9 +76,7 @@ test.describe("E2E: Window Lifecycle", () => {
 
   test("creates window when open becomes true", async () => {
     // Initially no child windows
-    const initialCount = await page.evaluate(() =>
-      window.testAPI.getWindowCount(),
-    );
+    const initialCount = await page.evaluate(() => window.testAPI.getWindowCount());
     expect(initialCount).toBe(0);
 
     // Open window
@@ -126,9 +115,7 @@ test.describe("E2E: Window Lifecycle", () => {
       return (await page.evaluate(() => window.testAPI.getWindowCount())) === 0;
     });
 
-    const countAfter = await page.evaluate(() =>
-      window.testAPI.getWindowCount(),
-    );
+    const countAfter = await page.evaluate(() => window.testAPI.getWindowCount());
     expect(countAfter).toBe(0);
   });
 
@@ -226,10 +213,7 @@ test.describe("E2E: Window Props", () => {
     });
 
     const windows = await page.evaluate(() => window.testAPI.getAllWindows());
-    const props = await page.evaluate(
-      (id) => window.testAPI.getWindowProps(id),
-      windows[0].id,
-    );
+    const props = await page.evaluate((id) => window.testAPI.getWindowProps(id), windows[0].id);
     expect(props.isAlwaysOnTop).toBe(true);
   });
 
@@ -244,10 +228,7 @@ test.describe("E2E: Window Props", () => {
     });
 
     const windows = await page.evaluate(() => window.testAPI.getAllWindows());
-    const props = await page.evaluate(
-      (id) => window.testAPI.getWindowProps(id),
-      windows[0].id,
-    );
+    const props = await page.evaluate((id) => window.testAPI.getWindowProps(id), windows[0].id);
     expect(props.isResizable).toBe(false);
   });
 
@@ -263,10 +244,7 @@ test.describe("E2E: Window Props", () => {
 
     // Initial state
     const windows = await page.evaluate(() => window.testAPI.getAllWindows());
-    let props = await page.evaluate(
-      (id) => window.testAPI.getWindowProps(id),
-      windows[0].id,
-    );
+    let props = await page.evaluate((id) => window.testAPI.getWindowProps(id), windows[0].id);
     expect(props.isAlwaysOnTop).toBe(false);
 
     // Change prop
@@ -277,10 +255,7 @@ test.describe("E2E: Window Props", () => {
     await page.waitForTimeout(100);
 
     // Verify changed
-    props = await page.evaluate(
-      (id) => window.testAPI.getWindowProps(id),
-      windows[0].id,
-    );
+    props = await page.evaluate((id) => window.testAPI.getWindowProps(id), windows[0].id);
     expect(props.isAlwaysOnTop).toBe(true);
   });
 
@@ -303,10 +278,7 @@ test.describe("E2E: Window Props", () => {
 
     await page.waitForTimeout(100);
 
-    const props = await page.evaluate(
-      (id) => window.testAPI.getWindowProps(id),
-      windows[0].id,
-    );
+    const props = await page.evaluate((id) => window.testAPI.getWindowProps(id), windows[0].id);
     expect(props.isResizable).toBe(false);
   });
 });
@@ -460,10 +432,7 @@ test.describe("E2E: Multiple Windows", () => {
 
     const windows = await page.evaluate(() => window.testAPI.getAllWindows());
     expect(windows.length).toBe(2);
-    expect(windows.map((w) => w.title).sort()).toEqual([
-      "Window 1",
-      "Window 2",
-    ]);
+    expect(windows.map((w) => w.title).sort()).toEqual(["Window 1", "Window 2"]);
   });
 
   test("each window has its own position", async () => {
@@ -506,10 +475,7 @@ test.describe("E2E: Security", () => {
 
   test("cannot access electron directly", async () => {
     const hasElectron = await page.evaluate(() => {
-      return (
-        typeof (window as unknown as { electron?: unknown }).electron !==
-        "undefined"
-      );
+      return typeof (window as unknown as { electron?: unknown }).electron !== "undefined";
     });
     expect(hasElectron).toBe(false);
   });
@@ -517,12 +483,9 @@ test.describe("E2E: Security", () => {
   test("preload APIs are properly exposed", async () => {
     const hasWindowManager = await page.evaluate(
       () =>
-        typeof (window as unknown as { electron_window?: unknown })
-          .electron_window !== "undefined",
+        typeof (window as unknown as { electron_window?: unknown }).electron_window !== "undefined",
     );
-    const hasTestAPI = await page.evaluate(
-      () => typeof window.testAPI !== "undefined",
-    );
+    const hasTestAPI = await page.evaluate(() => typeof window.testAPI !== "undefined");
     expect(hasWindowManager).toBe(true);
     expect(hasTestAPI).toBe(true);
   });
@@ -557,12 +520,12 @@ test.describe("E2E: Child Window Content", () => {
     const childWindow = await childWindowPromise;
     await childWindow.waitForLoadState("domcontentloaded");
 
-    await expect(
-      childWindow.locator('[data-testid="child-content"]'),
-    ).toBeVisible({ timeout: 5000 });
-    await expect(
-      childWindow.locator('[data-testid="child-content"]'),
-    ).toHaveText("Hello from child window");
+    await expect(childWindow.locator('[data-testid="child-content"]')).toBeVisible({
+      timeout: 5000,
+    });
+    await expect(childWindow.locator('[data-testid="child-content"]')).toHaveText(
+      "Hello from child window",
+    );
   });
 });
 
@@ -683,10 +646,7 @@ test.describe("E2E: Bounds Events", () => {
 
     await page.evaluate(() => window.__test__.clearEvents());
 
-    await page.evaluate(
-      (id) => window.testAPI.resizeChildWindow(id, 600, 500),
-      windows[0].id,
-    );
+    await page.evaluate((id) => window.testAPI.resizeChildWindow(id, 600, 500), windows[0].id);
 
     await waitFor(async () => {
       const events = await page.evaluate(() => window.__test__.getEvents());
@@ -736,10 +696,7 @@ test.describe("E2E: Multiple Windows", () => {
 
     const windows = await page.evaluate(() => window.testAPI.getAllWindows());
 
-    await page.evaluate(
-      (id) => window.testAPI.closeChildWindow(id),
-      windows[0].id,
-    );
+    await page.evaluate((id) => window.testAPI.closeChildWindow(id), windows[0].id);
 
     await waitFor(async () => {
       return (await page.evaluate(() => window.testAPI.getWindowCount())) === 1;
@@ -785,9 +742,7 @@ test.describe("E2E: Recreate On Shape Change", () => {
       return (await page.evaluate(() => window.testAPI.getWindowCount())) === 1;
     });
 
-    const initialWindows = await page.evaluate(() =>
-      window.testAPI.getAllWindows(),
-    );
+    const initialWindows = await page.evaluate(() => window.testAPI.getAllWindows());
     const initialId = initialWindows[0].id;
 
     await page.evaluate(() => {
@@ -799,9 +754,7 @@ test.describe("E2E: Recreate On Shape Change", () => {
       return windows.length === 1 && windows[0].id !== initialId;
     }, 10000);
 
-    const finalWindows = await page.evaluate(() =>
-      window.testAPI.getAllWindows(),
-    );
+    const finalWindows = await page.evaluate(() => window.testAPI.getAllWindows());
     expect(finalWindows.length).toBe(1);
     expect(finalWindows[0].id).not.toBe(initialId);
   });
@@ -839,9 +792,7 @@ test.describe("E2E: StrictMode", () => {
     // can fail with "Execution context was destroyed" if a child window dies
     // mid-evaluation.
     await waitFor(async () => {
-      const total = await page.evaluate(() =>
-        window.testAPI.getTotalBrowserWindowCount(),
-      );
+      const total = await page.evaluate(() => window.testAPI.getTotalBrowserWindowCount());
       return total === 0;
     });
     await page.evaluate(() => {
@@ -869,16 +820,12 @@ test.describe("E2E: StrictMode", () => {
     await page.waitForTimeout(500);
 
     // Managed count should be 1
-    const managedCount = await page.evaluate(() =>
-      window.testAPI.getWindowCount(),
-    );
+    const managedCount = await page.evaluate(() => window.testAPI.getWindowCount());
     expect(managedCount).toBe(1);
 
     // Total BrowserWindow count (minus main) should ALSO be 1 — no orphans
     // that the manager lost track of.
-    const totalCount = await page.evaluate(() =>
-      window.testAPI.getTotalBrowserWindowCount(),
-    );
+    const totalCount = await page.evaluate(() => window.testAPI.getTotalBrowserWindowCount());
     expect(totalCount).toBe(1);
   });
 
@@ -914,9 +861,7 @@ test.describe("E2E: StrictMode", () => {
     await page.waitForTimeout(500);
 
     // No orphans — neither managed nor unmanaged
-    const totalCount = await page.evaluate(() =>
-      window.testAPI.getTotalBrowserWindowCount(),
-    );
+    const totalCount = await page.evaluate(() => window.testAPI.getTotalBrowserWindowCount());
     expect(totalCount).toBe(0);
   });
 
@@ -982,14 +927,10 @@ test.describe("E2E: StrictMode", () => {
     await page.evaluate(() => window.__test__.setWindowOpen(true));
     await page.waitForTimeout(500);
 
-    const managedCount = await page.evaluate(() =>
-      window.testAPI.getWindowCount(),
-    );
+    const managedCount = await page.evaluate(() => window.testAPI.getWindowCount());
     expect(managedCount).toBeLessThanOrEqual(1);
 
-    const totalCount = await page.evaluate(() =>
-      window.testAPI.getTotalBrowserWindowCount(),
-    );
+    const totalCount = await page.evaluate(() => window.testAPI.getTotalBrowserWindowCount());
     expect(totalCount).toBeLessThanOrEqual(1);
   });
 });

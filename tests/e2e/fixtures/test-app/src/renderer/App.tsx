@@ -141,9 +141,7 @@ export function App() {
           </button>
           <button
             data-testid="toggle-window"
-            onClick={() =>
-              setState((prev) => ({ ...prev, windowOpen: !prev.windowOpen }))
-            }
+            onClick={() => setState((prev) => ({ ...prev, windowOpen: !prev.windowOpen }))}
             style={{ marginLeft: 10 }}
           >
             Toggle Window
@@ -165,8 +163,7 @@ export function App() {
                 }))
               }
             >
-              Toggle AlwaysOnTop ({state.windowProps.alwaysOnTop ? "ON" : "OFF"}
-              )
+              Toggle AlwaysOnTop ({state.windowProps.alwaysOnTop ? "ON" : "OFF"})
             </button>
             <button
               data-testid="toggle-resizable"
@@ -175,15 +172,13 @@ export function App() {
                   ...prev,
                   windowProps: {
                     ...prev.windowProps,
-                    resizable:
-                      prev.windowProps.resizable === false ? true : false,
+                    resizable: prev.windowProps.resizable === false ? true : false,
                   },
                 }))
               }
               style={{ marginLeft: 10 }}
             >
-              Toggle Resizable (
-              {state.windowProps.resizable !== false ? "ON" : "OFF"})
+              Toggle Resizable ({state.windowProps.resizable !== false ? "ON" : "OFF"})
             </button>
           </div>
         </div>
@@ -197,10 +192,7 @@ export function App() {
           }}
         >
           <strong>Events:</strong>
-          <pre
-            data-testid="events"
-            style={{ maxHeight: 200, overflow: "auto" }}
-          >
+          <pre data-testid="events" style={{ maxHeight: 200, overflow: "auto" }}>
             {JSON.stringify(state.events, null, 2)}
           </pre>
         </div>
