@@ -17,7 +17,13 @@ import {
   useWindowMinimized,
   useWindowFullscreen,
   useWindowDisplay,
+  useWindowState,
+  useWindowDocument,
+  clearPersistedBounds,
+  clearAllPersistedBounds,
 } from "../../src/renderer/hooks/index.js";
+import { useIsInsideWindow } from "../../src/renderer/context.js";
+import { MockWindow } from "../../src/testing/index.js";
 import { resetMockWindowsGlobal, getGlobalMockWindows } from "../setup.js";
 
 describe("useCurrentWindow", () => {
@@ -328,6 +334,30 @@ describe("useWindowVisible", () => {
         </MockWindowProvider>,
       );
     }).toThrow(/useWindowContext must be used within a Window/);
+  });
+
+  it("updates when shown/hidden events fire", async () => {
+    let isVisible: boolean | undefined;
+    function WindowContent() {
+      isVisible = useWindowVisible();
+      return <div>Content</div>;
+    }
+
+    render(
+      <MockWindowProvider>
+        <Window open>
+          <WindowContent />
+        </Window>
+      </MockWindowProvider>,
+    );
+    await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
+
+    const id = getMockWindows()[0].id;
+    simulateMockWindowEvent(id, { type: "hidden" });
+    await waitFor(() => expect(isVisible).toBe(false));
+
+    simulateMockWindowEvent(id, { type: "shown" });
+    await waitFor(() => expect(isVisible).toBe(true));
   });
 });
 
@@ -702,5 +732,187 @@ describe("re-render isolation", () => {
     await waitFor(() => {
       expect(renderCount).toBe(renderCountAfterMount + 3);
     });
+  });
+});
+
+// ─── Coverage gaps: hooks that had zero direct tests ───────────────────────
+
+describe("useWindowState", () => {
+  beforeEach(() => {
+    resetMockWindows();
+    resetMockWindowsGlobal();
+    vi.clearAllMocks();
+  });
+
+  it("returns full state object and updates on events", async () => {
+    let state: ReturnType<typeof useWindowState> | undefined;
+    function Probe() {
+      state = useWindowState();
+      return null;
+    }
+
+    render(
+      <MockWindowProvider>
+        <Window open>
+          <Probe />
+        </Window>
+      </MockWindowProvider>,
+    );
+    await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
+    await waitFor(() => expect(state).not.toBeNull());
+
+    expect(state?.isFocused).toBe(false);
+    expect(state?.bounds).toEqual(expect.objectContaining({ width: expect.any(Number) }));
+
+    simulateMockWindowEvent(getMockWindows()[0].id, { type: "focused" });
+    await waitFor(() => expect(state?.isFocused).toBe(true));
+  });
+});
+
+describe("useWindowDocument", () => {
+  beforeEach(() => {
+    resetMockWindows();
+    resetMockWindowsGlobal();
+    vi.clearAllMocks();
+  });
+
+  it("returns the child window's Document", async () => {
+    let doc: Document | null | undefined;
+    function Probe() {
+      doc = useWindowDocument();
+      return null;
+    }
+
+    render(
+      <MockWindowProvider>
+        <Window open>
+          <Probe />
+        </Window>
+      </MockWindowProvider>,
+    );
+    await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
+    await waitFor(() => expect(doc).toBeInstanceOf(Document));
+
+    // It's the child's document, not the parent test document
+    expect(doc).not.toBe(document);
+    const childWin = [...getGlobalMockWindows().values()][0] as {
+      document: Document;
+    };
+    expect(doc).toBe(childWin.document);
+  });
+});
+
+describe("useIsInsideWindow", () => {
+  // This hook is the non-throwing escape hatch for useWindowContext.
+  // Lets components conditionally call the other hooks.
+
+  it("returns false outside a Window", () => {
+    let inside: boolean | undefined;
+    function Probe() {
+      inside = useIsInsideWindow();
+      return null;
+    }
+    render(<Probe />);
+    expect(inside).toBe(false);
+  });
+
+  it("returns true inside a Window", async () => {
+    let inside: boolean | undefined;
+    function Probe() {
+      inside = useIsInsideWindow();
+      return null;
+    }
+
+    resetMockWindows();
+    resetMockWindowsGlobal();
+    render(
+      <MockWindowProvider>
+        <Window open>
+          <Probe />
+        </Window>
+      </MockWindowProvider>,
+    );
+    await waitFor(() => expect(inside).toBe(true));
+  });
+});
+
+describe("MockWindow (testing export)", () => {
+  // Dogfood the consumer-facing test helper — if its context shape drifts
+  // from what real hooks expect, consumers' tests break but ours wouldn't.
+
+  it("provides WindowContext such that hooks read the given state", () => {
+    let focused: boolean | undefined;
+    let bounds: ReturnType<typeof useWindowBounds> | undefined;
+    function Probe() {
+      focused = useWindowFocused();
+      bounds = useWindowBounds();
+      return null;
+    }
+
+    render(
+      <MockWindow
+        state={{
+          isFocused: true,
+          bounds: { x: 5, y: 10, width: 500, height: 400 },
+        }}
+      >
+        <Probe />
+      </MockWindow>,
+    );
+
+    expect(focused).toBe(true);
+    expect(bounds).toEqual({ x: 5, y: 10, width: 500, height: 400 });
+  });
+
+  it("useIsInsideWindow returns true inside MockWindow", () => {
+    let inside: boolean | undefined;
+    function Probe() {
+      inside = useIsInsideWindow();
+      return null;
+    }
+    render(
+      <MockWindow>
+        <Probe />
+      </MockWindow>,
+    );
+    expect(inside).toBe(true);
+  });
+});
+
+describe("clearPersistedBounds / clearAllPersistedBounds", () => {
+  const PREFIX = "electron-window:bounds:";
+
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("clearPersistedBounds removes one key", () => {
+    localStorage.setItem(
+      `${PREFIX}settings`,
+      JSON.stringify({ x: 0, y: 0, width: 800, height: 600 }),
+    );
+    localStorage.setItem(
+      `${PREFIX}editor`,
+      JSON.stringify({ x: 0, y: 0, width: 900, height: 700 }),
+    );
+
+    clearPersistedBounds("settings");
+
+    expect(localStorage.getItem(`${PREFIX}settings`)).toBeNull();
+    expect(localStorage.getItem(`${PREFIX}editor`)).not.toBeNull();
+  });
+
+  it("clearAllPersistedBounds removes every prefixed key, leaves others", () => {
+    localStorage.setItem(`${PREFIX}a`, "{}");
+    localStorage.setItem(`${PREFIX}b`, "{}");
+    localStorage.setItem(`${PREFIX}c`, "{}");
+    localStorage.setItem("unrelated-app-setting", "keep-me");
+
+    clearAllPersistedBounds();
+
+    expect(localStorage.getItem(`${PREFIX}a`)).toBeNull();
+    expect(localStorage.getItem(`${PREFIX}b`)).toBeNull();
+    expect(localStorage.getItem(`${PREFIX}c`)).toBeNull();
+    expect(localStorage.getItem("unrelated-app-setting")).toBe("keep-me");
   });
 });

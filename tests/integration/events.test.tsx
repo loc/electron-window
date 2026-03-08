@@ -86,6 +86,40 @@ describe("<Window> state events", () => {
     await waitFor(() => expect(onMaximize).toHaveBeenCalledOnce());
   });
 
+  it("calls onFocus when focused event fires", async () => {
+    const onFocus = vi.fn();
+    const onReady = vi.fn();
+
+    await renderAndWaitReady(
+      <MockWindowProvider>
+        <Window open onReady={onReady} onFocus={onFocus}>
+          <div>Content</div>
+        </Window>
+      </MockWindowProvider>,
+      onReady,
+    );
+
+    simulateMockWindowEvent(getMockWindows()[0].id, { type: "focused" });
+    await waitFor(() => expect(onFocus).toHaveBeenCalledOnce());
+  });
+
+  it("calls onBlur when blurred event fires", async () => {
+    const onBlur = vi.fn();
+    const onReady = vi.fn();
+
+    await renderAndWaitReady(
+      <MockWindowProvider>
+        <Window open onReady={onReady} onBlur={onBlur}>
+          <div>Content</div>
+        </Window>
+      </MockWindowProvider>,
+      onReady,
+    );
+
+    simulateMockWindowEvent(getMockWindows()[0].id, { type: "blurred" });
+    await waitFor(() => expect(onBlur).toHaveBeenCalledOnce());
+  });
+
   it("calls onUnmaximize when unmaximized event fires", async () => {
     const onUnmaximize = vi.fn();
     const onReady = vi.fn();

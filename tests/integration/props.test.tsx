@@ -284,6 +284,25 @@ describe("<Window> changeable props", () => {
     expect(mockWindows[0].props.alwaysOnTop).toBe(true);
   });
 
+  it("normalizes alwaysOnTop string levels to {alwaysOnTop: true, alwaysOnTopLevel}", async () => {
+    // The IPC schema validates alwaysOnTop as boolean. String z-levels
+    // ("floating", "screen-saver", etc.) must be split into two fields by
+    // the renderer before sending — otherwise the IPC layer rejects it.
+    render(
+      <MockWindowProvider>
+        <Window open alwaysOnTop="screen-saver">
+          <div>Content</div>
+        </Window>
+      </MockWindowProvider>,
+    );
+
+    await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
+
+    const props = getMockWindows()[0].props;
+    expect(props.alwaysOnTop).toBe(true);
+    expect(props.alwaysOnTopLevel).toBe("screen-saver");
+  });
+
   it("applies skipTaskbar prop", async () => {
     render(
       <MockWindowProvider>

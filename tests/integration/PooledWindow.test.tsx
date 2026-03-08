@@ -45,6 +45,23 @@ describe("createWindowPool", () => {
     expect(pool.config).toEqual({});
   });
 
+  it("RendererWindowPool throws when maxIdle < minIdle", async () => {
+    // Without this guard, release()'s single-shift eviction leaves the
+    // pool permanently above maxIdle — fail fast at construction instead.
+    const { RendererWindowPool } = await import("../../src/renderer/RendererWindowPool.js");
+    expect(
+      () =>
+        new RendererWindowPool({
+          shape: {},
+          config: { minIdle: 5, maxIdle: 2 },
+          registerWindow: vi.fn(async () => true),
+          unregisterWindow: vi.fn(async () => {}),
+          updateWindow: vi.fn(async () => {}),
+          windowAction: vi.fn(async () => {}),
+        }),
+    ).toThrow(/maxIdle.*must be >= minIdle/);
+  });
+
   it("PoolShape interface keys match POOL_SHAPE_PROPS runtime set", async () => {
     // Completeness trap guard: there are THREE places defining "pool shape
     // props" — the PoolShape interface (RendererWindowPool.ts), the

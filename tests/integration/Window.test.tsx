@@ -753,6 +753,88 @@ describe("<Window> user interactions - imperative methods", () => {
     expect(() => ref.current?.close()).not.toThrow();
   });
 
+  // Verify each handle method dispatches the CORRECT IPC action. A refactor
+  // that swapped e.g. focus/blur action types would pass the "doesn't throw"
+  // test above but break the window.
+  it("handle methods dispatch the correct windowAction types", async () => {
+    const ref = React.createRef<WindowRef>();
+    const windowActionSpy = vi.fn(async () => {});
+
+    function ActionSpy({ children }: { children: React.ReactNode }) {
+      const ctx = useWindowProviderContext();
+      const wrapped = useMemo(() => ({ ...ctx, windowAction: windowActionSpy }), [ctx]);
+      return (
+        <WindowProviderContext.Provider value={wrapped}>{children}</WindowProviderContext.Provider>
+      );
+    }
+
+    render(
+      <MockWindowProvider>
+        <ActionSpy>
+          <Window ref={ref} open>
+            <div>Content</div>
+          </Window>
+        </ActionSpy>
+      </MockWindowProvider>,
+    );
+
+    await waitFor(() => expect(ref.current?.isReady).toBe(true));
+    const id = ref.current!.id;
+    windowActionSpy.mockClear(); // drop the initial "show" call
+
+    ref.current!.focus();
+    expect(windowActionSpy).toHaveBeenLastCalledWith(id, { type: "focus" });
+
+    ref.current!.blur();
+    expect(windowActionSpy).toHaveBeenLastCalledWith(id, { type: "blur" });
+
+    ref.current!.minimize();
+    expect(windowActionSpy).toHaveBeenLastCalledWith(id, { type: "minimize" });
+
+    ref.current!.maximize();
+    expect(windowActionSpy).toHaveBeenLastCalledWith(id, { type: "maximize" });
+
+    ref.current!.unmaximize();
+    expect(windowActionSpy).toHaveBeenLastCalledWith(id, {
+      type: "unmaximize",
+    });
+
+    ref.current!.close();
+    expect(windowActionSpy).toHaveBeenLastCalledWith(id, { type: "close" });
+
+    ref.current!.forceClose();
+    expect(windowActionSpy).toHaveBeenLastCalledWith(id, {
+      type: "forceClose",
+    });
+
+    ref.current!.enterFullscreen();
+    expect(windowActionSpy).toHaveBeenLastCalledWith(id, {
+      type: "enterFullscreen",
+    });
+
+    ref.current!.exitFullscreen();
+    expect(windowActionSpy).toHaveBeenLastCalledWith(id, {
+      type: "exitFullscreen",
+    });
+
+    ref.current!.setBounds({ width: 500, height: 400 });
+    expect(windowActionSpy).toHaveBeenLastCalledWith(id, {
+      type: "setBounds",
+      bounds: { width: 500, height: 400 },
+    });
+
+    ref.current!.setTitle("New Title");
+    expect(windowActionSpy).toHaveBeenLastCalledWith(id, {
+      type: "setTitle",
+      title: "New Title",
+    });
+
+    // toggleMaximize reads isMaximized from state to decide which action.
+    // Window starts unmaximized → first call should maximize.
+    ref.current!.toggleMaximize();
+    expect(windowActionSpy).toHaveBeenLastCalledWith(id, { type: "maximize" });
+  });
+
   it("triggers onUserClose when user closes via beforeunload", async () => {
     const onUserClose = vi.fn();
 
