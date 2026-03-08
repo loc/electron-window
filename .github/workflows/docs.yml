@@ -1,8 +1,21 @@
 name: Deploy docs
 
+# Builds BOTH the release docs (root) and the main-branch preview (/next/)
+# every time. GitHub Pages deployments replace the entire site — you can't
+# ship partial updates — so whichever trigger fires, we assemble the full tree.
+#
+# - push to main: /next/ gets fresh content, root rebuilds from the same
+#   release tag as last time (no-op semantically, but required by Pages)
+# - workflow_call from release.yml: both are fresh (new tag → root, main → next)
+
 on:
   push:
     branches: [main]
+    paths:
+      - "docs/**"
+      - "src/**" # TypeDoc reads src/
+      - ".github/workflows/docs.yml"
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -10,22 +23,81 @@ permissions:
   pages: write
   id-token: write
 
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout main (for /next/)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main
+          fetch-depth: 0 # git describe --tags needs history
+
+      - name: Find latest release tag
+        id: release
+        run: |
+          cd main
+          TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          if [ -z "$TAG" ]; then
+            echo "No release tags yet — root will mirror main until first release"
+          fi
+
+      - name: Checkout release tag (for root)
+        uses: actions/checkout@v4
+        with:
+          # Fall back to main when no release exists yet. After first release,
+          # this is always a tag checkout.
+          ref: ${{ steps.release.outputs.tag || 'main' }}
+          path: release
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Install library deps
-        run: yarn install --frozen-lockfile
-      - name: Build library (generates IPC types)
-        run: yarn build
-      - name: Build docs
-        uses: withastro/action@v3
+          cache: yarn
+          cache-dependency-path: |
+            main/yarn.lock
+            release/yarn.lock
+
+      # Build release docs → staged root
+      - name: Build release docs
+        working-directory: release
+        run: |
+          yarn install --frozen-lockfile
+          yarn build  # TypeDoc needs generated IPC types
+          cd docs
+          yarn install --frozen-lockfile
+          yarn build
+      - name: Stage release docs at root
+        run: |
+          mkdir -p site
+          cp -r release/docs/dist/* site/
+
+      # Build main docs → staged /next/
+      - name: Build main docs
+        working-directory: main
+        env:
+          DOCS_CHANNEL: next
+        run: |
+          yarn install --frozen-lockfile
+          yarn build
+          cd docs
+          yarn install --frozen-lockfile
+          yarn build
+      - name: Stage main docs at /next/
+        run: |
+          mkdir -p site/next
+          cp -r main/docs/dist/* site/next/
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          path: ./docs
+          path: site
 
   deploy:
     needs: build
@@ -34,6 +106,5 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
+      - id: deployment
         uses: actions/deploy-pages@v4

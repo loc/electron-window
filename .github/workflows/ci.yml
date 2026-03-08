@@ -94,7 +94,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        electron: ["30", "31", "32", "33"]
+        # Stable-1, stable, and prerelease. Electron ships a major ~every 8
+        # weeks; bump the stable versions when a new one lands. `beta` is the
+        # npm dist-tag (not a version), so it always pulls the current beta.
+        electron: ["39", "40", "beta"]
+    # Prerelease failures are informational, not blocking.
+    continue-on-error: ${{ matrix.electron == 'beta' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

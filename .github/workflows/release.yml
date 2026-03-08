@@ -41,9 +41,19 @@ jobs:
       - name: Release
         env:
           # @semantic-release/npm reads NPM_TOKEN; for GitHub Packages we
-          # pass GITHUB_TOKEN as NPM_TOKEN. The registry is set via
-          # publishConfig.registry in package.json. @semantic-release/github
-          # also reads GITHUB_TOKEN directly for release/tag creation.
+          # pass GITHUB_TOKEN as NPM_TOKEN. @semantic-release/github also
+          # reads GITHUB_TOKEN directly for release/tag creation.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx semantic-release
+
+  # Deploy docs after a successful release so the root docs reflect the
+  # just-published version. docs.yml builds both root (from the new tag)
+  # and /next/ (from main).
+  docs:
+    needs: release
+    uses: ./.github/workflows/docs.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
