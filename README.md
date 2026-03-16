@@ -10,20 +10,9 @@ Declarative React components for Electron window management. Opens native window
 
 ## Install
 
-Published to GitHub Packages. Add to your `.npmrc`:
-
-```
-@loc:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
-```
-
-Then:
-
 ```bash
 npm install @loc/electron-window
 ```
-
-`GITHUB_TOKEN` needs `read:packages` scope. GitHub Packages requires auth even for public packages.
 
 ## Setup
 
