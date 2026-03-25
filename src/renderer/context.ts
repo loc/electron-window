@@ -27,6 +27,13 @@ export interface WindowContextValue {
    * Use this to portal overlays (Radix, Base UI, etc.) to the correct document.
    */
   document: Document | null;
+
+  /**
+   * AbortSignal that fires when the window closes/releases. Pass as the
+   * `signal` option to addEventListener / fetch / etc. for automatic
+   * cleanup without a manual useEffect teardown.
+   */
+  signal: AbortSignal | null;
 }
 
 /**

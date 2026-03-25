@@ -102,6 +102,11 @@ export const Window = forwardRef<WindowRef, WindowProps>(function Window(props, 
   // The DOM element in the child window that React portals into
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   const [childDocument, setChildDocument] = useState<Document | null>(null);
+  // AbortController per open cycle — exposed via context as `signal`.
+  // Consumers pass it to addEventListener/fetch for automatic cleanup
+  // on close without manual useEffect teardowns.
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const [windowSignal, setWindowSignal] = useState<AbortSignal | null>(null);
 
   const [isReady, setIsReady] = useState(false);
   const pendingShowRef = useRef<string | null>(null);
@@ -136,6 +141,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(function Window(props, 
     provider,
     childWindowRef,
     childDocument,
+    signal: windowSignal,
     onBoundsChange,
     onUserClose,
     onFocus,
@@ -167,6 +173,8 @@ export const Window = forwardRef<WindowRef, WindowProps>(function Window(props, 
   // is NOT reset here — each call site needs to decide whether to
   // unregister before or after (depends on whether main already knows).
   function resetComponentState(): void {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
     styleCleanupRef.current?.();
     styleCleanupRef.current = null;
     pendingShowRef.current = null;
@@ -175,6 +183,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(function Window(props, 
     prevPropsRef.current = null;
     setPortalTarget(null);
     setChildDocument(null);
+    setWindowSignal(null);
     setIsReady(false);
   }
 
@@ -339,8 +348,11 @@ export const Window = forwardRef<WindowRef, WindowProps>(function Window(props, 
         title: title ?? "",
       });
 
+      const ac = new AbortController();
+      abortControllerRef.current = ac;
       setPortalTarget(container);
       setChildDocument(win.document);
+      setWindowSignal(ac.signal);
       setIsReady(true);
 
       // Defer show to useLayoutEffect — React must commit the portal content
@@ -457,6 +469,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(function Window(props, 
       // and the main-process window registration.
       // resetComponentState()/resetLifecycle() are for LIFECYCLE teardown
       // (open=false, shape-change) where the component stays mounted.
+      abortControllerRef.current?.abort();
       styleCleanupRef.current?.();
       styleCleanupRef.current = null;
       lifecycle.debouncedBoundsChange.current.cancel();

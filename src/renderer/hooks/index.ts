@@ -8,6 +8,8 @@ export {
   useWindowBounds,
   useWindowState,
   useWindowDocument,
+  useWindowSignal,
+  useWindowEventListener,
 } from "./useWindowState.js";
 export { useWindowDisplay } from "./useWindowDisplay.js";
 export {

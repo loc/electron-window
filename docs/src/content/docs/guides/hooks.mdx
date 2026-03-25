@@ -98,6 +98,48 @@ function WindowContent() {
 
 Use the specific hooks (`useWindowFocused`, `useWindowBounds`, etc.) rather than `useWindowState` when possible — they avoid unnecessary re-renders.
 
+## Cleanup on close
+
+Components inside a `<Window>` often attach listeners or start fetches against the child document. Those need cleanup when the window closes — otherwise the listener retains the closed window's Document.
+
+### `useWindowEventListener(type, handler, options?)`
+
+Attaches an event listener to the child window's document that's automatically removed when the window closes or releases back to its pool. The handler can be an inline arrow — it's read through a ref, so re-renders don't re-subscribe.
+
+```tsx
+import { useWindowEventListener } from "@loc/electron-window";
+
+function WindowContent({ onClose }) {
+  useWindowEventListener("keydown", (e) => {
+    if (e.key === "Escape") onClose();
+  });
+  // No cleanup needed — listener is removed on window close.
+}
+```
+
+### `useWindowSignal()`
+
+Returns an `AbortSignal` that fires when the window closes. Pass to `addEventListener`, `fetch`, `MutationObserver`, etc. for automatic cleanup.
+
+```tsx
+import { useWindowSignal, useWindowDocument } from "@loc/electron-window";
+
+function WindowContent() {
+  const signal = useWindowSignal();
+  const doc = useWindowDocument();
+
+  useEffect(() => {
+    const obs = new ResizeObserver(handleResize);
+    obs.observe(doc.body);
+    signal.addEventListener("abort", () => obs.disconnect());
+    // Or for addEventListener/fetch, pass { signal } directly:
+    doc.addEventListener("visibilitychange", onVis, { signal });
+  }, [signal, doc]);
+}
+```
+
+For pooled windows, the signal is per-acquisition — aborted on release even though the underlying BrowserWindow stays alive for the next consumer.
+
 ## `usePersistedBounds(key, defaults)`
 
 For manual bounds persistence. See [Persistence](/electron-window/guides/persistence/) for full usage.

@@ -28,6 +28,8 @@ export {
   useWindowBounds,
   useWindowState,
   useWindowDocument,
+  useWindowSignal,
+  useWindowEventListener,
   useWindowDisplay,
   usePersistedBounds,
   clearPersistedBounds,
