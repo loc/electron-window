@@ -407,6 +407,9 @@ export class RendererWindowPool {
    * must run explicitly since destroy() doesn't fire unload.
    */
   private destroyEntry(entry: PoolEntry): void {
+    // Idempotency guard — the null-out below means a second call on the
+    // same entry would pass null to styleCleanup.
+    if (!entry.childWindow) return;
     entry.styleCleanup();
     const timer = this.idleTimers.get(entry.id);
     if (timer) {
@@ -414,6 +417,11 @@ export class RendererWindowPool {
       this.idleTimers.delete(entry.id);
     }
     void this.unregisterWindow(entry.id);
+    // Defensive null-out: if a closure (debounced callback, cancelled
+    // promise continuation) captured this entry, breaking the refs lets
+    // the Window and its detached DOM GC even while the entry lingers.
+    entry.childWindow = null as never;
+    entry.portalTarget = null as never;
   }
 
   private evictIdle(id: string): void {
