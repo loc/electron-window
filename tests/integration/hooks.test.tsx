@@ -795,12 +795,19 @@ describe("useWindowDocument", () => {
     await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
     await waitFor(() => expect(doc).toBeInstanceOf(Document));
 
-    // It's the child's document, not the parent test document
+    // It's the child's document, not the parent test document.
+    // In dev mode, doc is a Proxy around the child document (for stale-
+    // access detection), so identity comparison fails — but operations on
+    // it target the child's DOM.
     expect(doc).not.toBe(document);
     const childWin = [...getGlobalMockWindows().values()][0] as {
       document: Document;
     };
-    expect(doc).toBe(childWin.document);
+    const el = doc!.createElement("div");
+    el.id = "proxy-probe";
+    doc!.body.appendChild(el);
+    expect(childWin.document.getElementById("proxy-probe")).not.toBeNull();
+    expect(document.getElementById("proxy-probe")).toBeNull();
   });
 });
 

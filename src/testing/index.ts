@@ -461,3 +461,117 @@ export function MockWindow({
 
   return React.createElement(WindowContext.Provider, { value: contextValue }, children);
 }
+
+// ─── Leak testing ────────────────────────────────────────────────────────────
+
+export interface LeakTester {
+  /**
+   * Run `fn` and record which child windows were opened during it.
+   * Typically `fn` opens one or more <Window>s then closes them.
+   */
+  track: (fn: () => void | Promise<void>) => Promise<void>;
+  /**
+   * Assert that every window opened during `track()` has been GC'd.
+   * Forces garbage collection (requires `--expose-gc` or a CDP-capable
+   * test runner), waits a tick, then throws if any WeakRef still derefs.
+   */
+  expectNoLeaks: () => Promise<void>;
+}
+
+/**
+ * Create a leak tester for child windows.
+ *
+ * Requires dev/test mode (NODE_ENV !== "production" or `devWarnings` on
+ * WindowProvider) so that window tracking is active.
+ *
+ * For `expectNoLeaks()` to force GC, run your test process with
+ * `--js-flags=--expose-gc` (Electron) or `--expose-gc` (Node). Without
+ * it, GC is best-effort — the test may pass when there IS a leak simply
+ * because the VM hasn't collected yet.
+ *
+ * @example
+ * ```ts
+ * const leaks = createLeakTester();
+ * await leaks.track(async () => {
+ *   render(<MyWindowComponent open />);
+ *   // ... interact ...
+ *   render(<MyWindowComponent open={false} />);
+ * });
+ * await leaks.expectNoLeaks();
+ * ```
+ */
+export function createLeakTester(): LeakTester {
+  // Read the same global the renderer writes to. Declared inline rather
+  // than imported so this bundle doesn't need to resolve renderer paths.
+  const getRefs = (): readonly WeakRef<globalThis.Window>[] => {
+    const arr = (globalThis as Record<string, unknown>).__ELECTRON_WINDOW_TRACKED__ as
+      | WeakRef<globalThis.Window>[]
+      | undefined;
+    return arr ?? [];
+  };
+
+  let startLen = 0;
+  let endLen = 0;
+
+  return {
+    async track(fn) {
+      startLen = getRefs().length;
+      await fn();
+      endLen = getRefs().length;
+    },
+
+    async expectNoLeaks() {
+      await forceGC();
+      // Two microtask turns: FinalizationRegistry / WeakRef clearing is
+      // not guaranteed synchronous with gc(). A second turn covers the
+      // common case of a promise-resolution in between.
+      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
+
+      const refs = getRefs();
+      const slice = refs.slice(startLen, endLen);
+      const alive = slice.filter((r) => r.deref() !== undefined);
+
+      if (alive.length > 0) {
+        throw new Error(
+          `[electron-window] ${alive.length} of ${slice.length} window(s) opened during track() ` +
+            `were not garbage-collected. Something is retaining a reference to the ` +
+            `child Window or its Document (event listeners, closures, refs).`,
+        );
+      }
+    },
+  };
+}
+
+/**
+ * Force a garbage collection if possible. Tries, in order:
+ *  1. globalThis.gc (available with --expose-gc)
+ *  2. CDP HeapProfiler.collectGarbage (Playwright / Puppeteer attach)
+ *  3. Fallback: warn and continue (test may false-pass)
+ */
+async function forceGC(): Promise<void> {
+  const g = globalThis as Record<string, unknown>;
+
+  if (typeof g.gc === "function") {
+    (g.gc as () => void)();
+    return;
+  }
+
+  // Playwright exposes a CDP session on window.__PW_CDP__ in some setups,
+  // or the test can inject one. Check for a callable that takes a method name.
+  const cdp = g.__pw_cdp__ ?? g.__CDP__;
+  if (cdp && typeof (cdp as { send?: unknown }).send === "function") {
+    try {
+      await (cdp as { send: (m: string) => Promise<void> }).send("HeapProfiler.collectGarbage");
+      return;
+    } catch {
+      // fall through
+    }
+  }
+
+  console.warn(
+    "[electron-window] createLeakTester: cannot force GC. " +
+      "Run with --expose-gc (Node) or --js-flags=--expose-gc (Electron) for reliable leak detection. " +
+      "Without forced GC, expectNoLeaks() may pass even when a leak exists.",
+  );
+}

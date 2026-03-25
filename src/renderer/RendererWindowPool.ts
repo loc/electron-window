@@ -7,6 +7,7 @@ import type {
 } from "../shared/types.js";
 import { POOL_RELEASE_PROP_DEFAULTS } from "../shared/types.js";
 import { waitForWindowReady, initWindowDocument } from "./windowUtils.js";
+import { trackWindow, scheduleLeakCheck } from "./leakTracking.js";
 
 /**
  * The immutable creation-only props that define a pool's window shape.
@@ -166,6 +167,7 @@ export class RendererWindowPool {
         void this.unregisterWindow(id);
         return;
       }
+      trackWindow(childWindow);
 
       try {
         await waitForWindowReady(childWindow, () => this.isDestroyed);
@@ -270,6 +272,7 @@ export class RendererWindowPool {
         void this.unregisterWindow(id);
         throw new Error("window.open returned null");
       }
+      trackWindow(childWindow);
 
       try {
         await waitForWindowReady(childWindow, () => this.isDestroyed);
@@ -417,6 +420,7 @@ export class RendererWindowPool {
       this.idleTimers.delete(entry.id);
     }
     void this.unregisterWindow(entry.id);
+    scheduleLeakCheck(entry.childWindow, entry.id);
     // Defensive null-out: if a closure (debounced callback, cancelled
     // promise continuation) captured this entry, breaking the refs lets
     // the Window and its detached DOM GC even while the entry lingers.

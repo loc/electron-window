@@ -11,6 +11,8 @@ import { usePersistedBounds } from "./hooks/usePersistedBounds.js";
 import { devWarning, generateWindowId } from "../shared/utils.js";
 import { waitForWindowReady, initWindowDocument } from "./windowUtils.js";
 import { useWindowLifecycle, useWindowHandle } from "./useWindowLifecycle.js";
+import { trackWindow, scheduleLeakCheck } from "./leakTracking.js";
+import { markDocDestroyed } from "./docProxy.js";
 
 /**
  * Extract the window shape (creation-only props) for change detection.
@@ -173,6 +175,10 @@ export const Window = forwardRef<WindowRef, WindowProps>(function Window(props, 
   // is NOT reset here — each call site needs to decide whether to
   // unregister before or after (depends on whether main already knows).
   function resetComponentState(): void {
+    const id = windowIdRef.current;
+    const win = childWindowRef.current;
+    markDocDestroyed(id);
+    if (win) scheduleLeakCheck(win, id);
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
     styleCleanupRef.current?.();
@@ -286,6 +292,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(function Window(props, 
         return;
       }
       childWindowRef.current = win;
+      trackWindow(win);
 
       try {
         await waitForWindowReady(win, () => cancelled);
@@ -469,6 +476,10 @@ export const Window = forwardRef<WindowRef, WindowProps>(function Window(props, 
       // and the main-process window registration.
       // resetComponentState()/resetLifecycle() are for LIFECYCLE teardown
       // (open=false, shape-change) where the component stays mounted.
+      const id = windowIdRef.current;
+      const win = childWindowRef.current;
+      markDocDestroyed(id);
+      if (win) scheduleLeakCheck(win, id);
       abortControllerRef.current?.abort();
       styleCleanupRef.current?.();
       styleCleanupRef.current = null;

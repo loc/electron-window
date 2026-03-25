@@ -365,6 +365,38 @@ test("handles bounds change", async () => {
 });
 ```
 
+### Leak detection
+
+Child windows portal DOM across documents — it's easy to accidentally retain
+a closed window via an event listener, ref, or closure. `createLeakTester`
+asserts that windows opened during a block were actually garbage-collected
+after close:
+
+```ts
+import { createLeakTester } from "@loc/electron-window/testing";
+
+test("closing the settings window releases it", async () => {
+  const leaks = createLeakTester();
+
+  await leaks.track(async () => {
+    await openSettingsWindow();
+    await closeSettingsWindow();
+  });
+
+  await leaks.expectNoLeaks(); // throws if the child Window is still reachable
+});
+```
+
+Run your test process with `--expose-gc` (Node) or `--js-flags=--expose-gc`
+(Electron) so `expectNoLeaks()` can force a collection. Without it the check
+is best-effort and may false-pass.
+
+**Automatic detection in dev:** when `gc` is exposed, closing a window also
+schedules a background check — if the window hasn't been collected ~5s later,
+an error is logged with debugging hints. Additionally, `useWindowDocument()`
+wraps the returned Document in a Proxy that warns on any access after the
+window closes, printing the stack where it was originally acquired.
+
 ## Security
 
 - `webPreferences` cannot be set from the renderer — only via `setupWindowManager` in the main process. The library enforces `nodeIntegration: false`, `contextIsolation: true`, and `sandbox: true` (default) on all child windows regardless of consumer config.
