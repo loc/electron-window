@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createDeferred, generateWindowId, debounce, sleep } from "../../src/shared/utils.js";
 import { handleStyleInjection, __getStyleSubscriberCount } from "../../src/renderer/windowUtils.js";
+import { wrapDocument, markDocDestroyed } from "../../src/renderer/docProxy.js";
+import { trackWindow, markExpectedDead } from "../../src/renderer/leakTracking.js";
 
 describe("createDeferred", () => {
   it("creates a promise that can be resolved externally", async () => {
@@ -302,5 +304,118 @@ describe("preload __originHook — reads window.location.href", () => {
     vi.resetModules();
     const hook = await loadPreloadHook();
     expect(hook()).toBe(true);
+  });
+});
+
+describe("docProxy — stale-access detection", () => {
+  function makeDoc(): Document {
+    return document.implementation.createHTMLDocument("child");
+  }
+
+  it("warns once on access after markDocDestroyed", () => {
+    const doc = makeDoc();
+    const proxy = wrapDocument(doc, "win_abc");
+
+    // Pre-destroy: normal access works, no warning.
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(proxy.body).toBeDefined();
+    expect(errSpy).not.toHaveBeenCalled();
+
+    // Post-destroy: access warns (once, even for multiple accesses).
+    markDocDestroyed("win_abc");
+    void proxy.body;
+    void proxy.title;
+    expect(errSpy).toHaveBeenCalledTimes(1);
+    expect(errSpy.mock.calls[0][0]).toMatch(/Stale Document access.*win_abc/);
+    expect(errSpy.mock.calls[0][0]).toMatch(/Acquired at:/);
+
+    errSpy.mockRestore();
+  });
+
+  it("document methods work through the proxy (no Illegal invocation)", () => {
+    // DOM methods internal-slot-check `this`. The proxy auto-binds so
+    // proxy.createElement("div") doesn't throw.
+    const doc = makeDoc();
+    const proxy = wrapDocument(doc, "win_methods");
+
+    expect(() => proxy.createElement("div")).not.toThrow();
+    expect(() => proxy.querySelector("body")).not.toThrow();
+    const el = proxy.createElement("span");
+    expect(el.tagName).toBe("SPAN");
+  });
+
+  it("returns the same proxy for the same (doc, windowId) within a cycle", () => {
+    // Identity stability — consumers can use it as an effect dep.
+    const doc = makeDoc();
+    const p1 = wrapDocument(doc, "win_stable");
+    const p2 = wrapDocument(doc, "win_stable");
+    expect(p1).toBe(p2);
+  });
+
+  it("returns a fresh proxy after destroy (pool reuse case)", () => {
+    // Same Document, same windowId, but previous cycle was destroyed —
+    // the old proxy keeps warning, the new one starts fresh.
+    const doc = makeDoc();
+    // Spy BEFORE any proxy access — vitest's expect() serializer may
+    // touch proxy properties during diff formatting, which would fire
+    // the once-only warning and set state.warned before we can observe it.
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const oldProxy = wrapDocument(doc, "win_pool");
+    markDocDestroyed("win_pool");
+    const newProxy = wrapDocument(doc, "win_pool");
+
+    // Identity check via Object.is directly (avoids serializer).
+    expect(Object.is(newProxy, oldProxy)).toBe(false);
+
+    errSpy.mockClear();
+    void newProxy.body; // fresh proxy, no warning
+    expect(errSpy).not.toHaveBeenCalled();
+    void oldProxy.body; // stale proxy still warns
+    expect(errSpy).toHaveBeenCalledTimes(1);
+    errSpy.mockRestore();
+  });
+
+  it("defaultView access is also caught", () => {
+    // jsdom's createHTMLDocument gives defaultView=null, so this test
+    // only verifies the null-passthrough path doesn't crash.
+    const doc = makeDoc();
+    const proxy = wrapDocument(doc, "win_dv");
+    expect(proxy.defaultView).toBeNull();
+  });
+});
+
+describe("leakTracking — trackWindow", () => {
+  it("pushes a WeakRef to the global array", () => {
+    const key = "__ELECTRON_WINDOW_TRACKED__";
+    const before =
+      ((globalThis as Record<string, unknown>)[key] as unknown[] | undefined)?.length ?? 0;
+
+    // Any object works for WeakRef; cast a plain object as Window.
+    const fakeWin = {} as unknown as globalThis.Window;
+    trackWindow(fakeWin);
+
+    const arr = (globalThis as Record<string, unknown>)[key] as WeakRef<object>[];
+    expect(arr.length).toBe(before + 1);
+    expect(arr[arr.length - 1].deref()).toBe(fakeWin);
+  });
+
+  it("markExpectedDead returns unique tokens for the same windowId", () => {
+    // windowId is stable across open→close→open (only regenerated on
+    // recreateOnShapeChange). Without per-call tokens, the second close's
+    // pendingGC entry overwrites the first, and the first's FR callback
+    // deletes the second's entry — masking a real leak.
+    const win1 = {} as unknown as globalThis.Window;
+    const win2 = {} as unknown as globalThis.Window;
+
+    const t1 = markExpectedDead(win1, "win_same");
+    const t2 = markExpectedDead(win2, "win_same");
+
+    expect(t1).toBeDefined();
+    expect(t2).toBeDefined();
+    expect(t1).not.toBe(t2);
+    // Both include the original id for diagnostics
+    expect(t1).toContain("win_same");
+    expect(t2).toContain("win_same");
   });
 });

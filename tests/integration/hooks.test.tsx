@@ -795,12 +795,19 @@ describe("useWindowDocument", () => {
     await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
     await waitFor(() => expect(doc).toBeInstanceOf(Document));
 
-    // It's the child's document, not the parent test document
+    // It's the child's document, not the parent test document.
+    // In dev mode, doc is a Proxy around the child document (for stale-
+    // access detection), so identity comparison fails — but operations on
+    // it target the child's DOM.
     expect(doc).not.toBe(document);
     const childWin = [...getGlobalMockWindows().values()][0] as {
       document: Document;
     };
-    expect(doc).toBe(childWin.document);
+    const el = doc!.createElement("div");
+    el.id = "proxy-probe";
+    doc!.body.appendChild(el);
+    expect(childWin.document.getElementById("proxy-probe")).not.toBeNull();
+    expect(document.getElementById("proxy-probe")).toBeNull();
   });
 });
 
@@ -1056,11 +1063,9 @@ describe("useWindowEventListener", () => {
 
   it("removes listener when the window closes (via AbortSignal)", async () => {
     const handler = vi.fn();
-    let childDoc: Document | undefined;
 
     function Probe() {
       useWindowEventListener("click", handler);
-      childDoc = useWindowDocument();
       return null;
     }
 
@@ -1077,16 +1082,20 @@ describe("useWindowEventListener", () => {
     }
 
     render(<App />);
-    await waitFor(() => expect(childDoc).toBeInstanceOf(Document));
+    await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
 
-    const doc = childDoc!;
+    // Use the raw child document (not useWindowDocument's proxy) — we
+    // intentionally dispatch on it after close, and the proxy would
+    // console.error on stale access. The listener is attached to the
+    // raw doc either way.
+    const doc = ([...getGlobalMockWindows().values()][0] as { document: Document }).document;
     act(() => doc.dispatchEvent(new MouseEvent("click")));
     await waitFor(() => expect(handler).toHaveBeenCalledTimes(1));
 
     fireEvent.click(document.querySelector('[data-testid="close"]')!);
 
-    // After close, events on the (now-stale) doc don't fire the handler —
-    // the AbortSignal removed the listener.
+    // After close, events on the doc don't fire the handler — the
+    // AbortSignal removed the listener.
     handler.mockClear();
     act(() => doc.dispatchEvent(new MouseEvent("click")));
     expect(handler).not.toHaveBeenCalled();

@@ -16,6 +16,7 @@ import {
 } from "../shared/types.js";
 import { useWindowLifecycle, useWindowHandle } from "./useWindowLifecycle.js";
 import { devWarning } from "../shared/utils.js";
+import { markDocDestroyed } from "./docProxy.js";
 
 // Lifecycle / meta props that are never forwarded as IPC props on acquire.
 // Shape props (transparent, frame, titleBarStyle, vibrancy) are excluded
@@ -287,6 +288,8 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(funct
   // EVERY teardown path. Hook-owned state (windowState, displayInfo,
   // debounce) is reset by lifecycle.resetLifecycle() — call both.
   function resetComponentState(): void {
+    const id = entryRef.current?.id;
+    if (id) markDocDestroyed(id);
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
     entryRef.current = null;

@@ -7,6 +7,7 @@ import type {
 } from "../shared/types.js";
 import { POOL_RELEASE_PROP_DEFAULTS } from "../shared/types.js";
 import { waitForWindowReady, initWindowDocument } from "./windowUtils.js";
+import { trackWindow, scheduleLeakCheck } from "./leakTracking.js";
 
 /**
  * The immutable creation-only props that define a pool's window shape.
@@ -166,6 +167,7 @@ export class RendererWindowPool {
         void this.unregisterWindow(id);
         return;
       }
+      trackWindow(childWindow);
 
       try {
         await waitForWindowReady(childWindow, () => this.isDestroyed);
@@ -196,6 +198,7 @@ export class RendererWindowPool {
       childWindow.addEventListener("unload", () => {
         if (childWindow.closed) {
           styleCleanup();
+          scheduleLeakCheck(childWindow, id);
           this.debugLog("window destroyed externally", id);
           this.handleWindowDestroyed(id);
         }
@@ -270,6 +273,7 @@ export class RendererWindowPool {
         void this.unregisterWindow(id);
         throw new Error("window.open returned null");
       }
+      trackWindow(childWindow);
 
       try {
         await waitForWindowReady(childWindow, () => this.isDestroyed);
@@ -303,6 +307,7 @@ export class RendererWindowPool {
       childWindow.addEventListener("unload", () => {
         if (childWindow.closed) {
           styleCleanup();
+          scheduleLeakCheck(childWindow, id);
           this.handleWindowDestroyed(id);
         }
       });
@@ -417,6 +422,7 @@ export class RendererWindowPool {
       this.idleTimers.delete(entry.id);
     }
     void this.unregisterWindow(entry.id);
+    scheduleLeakCheck(entry.childWindow, entry.id);
     // Defensive null-out: if a closure (debounced callback, cancelled
     // promise continuation) captured this entry, breaking the refs lets
     // the Window and its detached DOM GC even while the entry lingers.
@@ -491,7 +497,10 @@ export class RendererWindowPool {
     // The pool's own unload listener would do this, but BrowserWindow.destroy()
     // from main doesn't fire unload — this path must clean up explicitly.
     const entry = this.active.get(id) ?? this.idle.find((e) => e.id === id);
-    entry?.styleCleanup();
+    if (entry) {
+      entry.styleCleanup();
+      scheduleLeakCheck(entry.childWindow, id);
+    }
     this.handleWindowDestroyed(id);
   }
 

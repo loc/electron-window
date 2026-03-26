@@ -1,6 +1,7 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { useWindowContext } from "../context.js";
 import type { Bounds, WindowState } from "../../shared/types.js";
+import { wrapDocument } from "../docProxy.js";
 
 /**
  * Returns the child window's Document object.
@@ -9,14 +10,19 @@ import type { Bounds, WindowState } from "../../shared/types.js";
  * correct document — Radix's default is the parent window's document, which
  * causes portals to render in the wrong window.
  *
+ * In dev/test, the returned Document is wrapped in a Proxy that warns on
+ * access after the window closes — catches the common leak of stashing
+ * the document in a ref or closure past its lifecycle.
+ *
  * @throws if called outside an open `<Window>` or `<PooledWindow>`
  */
 export function useWindowDocument(): Document {
-  const { document } = useWindowContext();
+  const { document, windowId } = useWindowContext();
   if (!document) {
     throw new Error("useWindowDocument must be called inside an open <Window> or <PooledWindow>");
   }
-  return document;
+  // Proxy is identity-stable per (doc, windowId) — safe to call on every render.
+  return wrapDocument(document, windowId ?? "");
 }
 
 /**
