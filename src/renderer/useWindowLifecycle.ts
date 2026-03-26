@@ -39,6 +39,8 @@ export interface WindowLifecycleOptions {
   childWindowRef?: React.RefObject<globalThis.Window | null>;
   /** The child window's Document, for portaling UI library overlays */
   childDocument?: Document | null;
+  /** AbortSignal that fires on window close/release, exposed to hooks via context */
+  signal?: AbortSignal | null;
   onBoundsChange?: (bounds: Bounds) => void;
   onUserClose?: () => void;
   onFocus?: () => void;
@@ -284,8 +286,9 @@ export function useWindowLifecycle(opts: WindowLifecycleOptions): WindowLifecycl
       getSnapshot,
       getDisplaySnapshot,
       document: opts.childDocument ?? null,
+      signal: opts.signal ?? null,
     }),
-    [windowId, subscribe, getSnapshot, getDisplaySnapshot, opts.childDocument],
+    [windowId, subscribe, getSnapshot, getDisplaySnapshot, opts.childDocument, opts.signal],
   );
 
   return {

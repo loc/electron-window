@@ -219,6 +219,12 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(funct
   const [childDocument, setChildDocument] = useState<Document | null>(null);
   const [windowId, setWindowId] = useState<WindowId | null>(null);
   const [isReady, setIsReady] = useState(false);
+  // AbortController per acquisition — exposed via context as `signal`.
+  // Aborted on release so consumers' addEventListener/fetch calls clean
+  // up automatically, even though the underlying Document stays alive
+  // in the pool for the next consumer.
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const [windowSignal, setWindowSignal] = useState<AbortSignal | null>(null);
   const pendingShowRef = useRef<string | null>(null);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
@@ -255,6 +261,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(funct
     provider,
     childWindowRef,
     childDocument,
+    signal: windowSignal,
     onBoundsChange,
     onUserClose,
     onFocus,
@@ -280,12 +287,15 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(funct
   // EVERY teardown path. Hook-owned state (windowState, displayInfo,
   // debounce) is reset by lifecycle.resetLifecycle() — call both.
   function resetComponentState(): void {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
     entryRef.current = null;
     pendingShowRef.current = null;
     prevPropsRef.current = null;
     childWindowRef.current = null;
     setPortalTarget(null);
     setChildDocument(null);
+    setWindowSignal(null);
     setWindowId(null);
     setIsReady(false);
   }
@@ -391,8 +401,11 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(funct
         },
         title: title ?? "",
       });
+      const ac = new AbortController();
+      abortControllerRef.current = ac;
       setPortalTarget(entry.portalTarget);
       setChildDocument(entry.childWindow.document);
+      setWindowSignal(ac.signal);
       setIsReady(true);
       prevPropsRef.current = { ...rest, title, visible };
 

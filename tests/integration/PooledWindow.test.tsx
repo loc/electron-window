@@ -13,7 +13,11 @@ import {
   simulateMockUserClose,
   simulateMockWindowEvent,
 } from "../../src/testing/index.js";
-import { useCurrentWindow, useWindowFocused } from "../../src/renderer/hooks/index.js";
+import {
+  useCurrentWindow,
+  useWindowFocused,
+  useWindowSignal,
+} from "../../src/renderer/hooks/index.js";
 import { resetMockWindowsGlobal, getGlobalMockWindows } from "../setup.js";
 
 // Query content from the pool window's document (portals render there, not in
@@ -1164,5 +1168,53 @@ describe("<PooledWindow>", () => {
 
     act(() => simulateMockWindowEvent(handleId!, { type: "blurred" }));
     await waitFor(() => expect(focused).toBe(false));
+  });
+
+  it("useWindowSignal aborts per-acquisition, fresh on next acquire", async () => {
+    // The distinguishing pooled-window case: the same BrowserWindow is
+    // reused across open→false→open, but the signal must be per-ACQUISITION
+    // so listeners from the previous use don't survive.
+    const pool = createWindowPool({}, { minIdle: 0 });
+    const signals: AbortSignal[] = [];
+    const onReady = vi.fn();
+
+    function Child() {
+      const s = useWindowSignal();
+      React.useEffect(() => {
+        signals.push(s);
+      }, [s]);
+      return null;
+    }
+
+    function App() {
+      const [open, setOpen] = useState(true);
+      return (
+        <MockWindowProvider>
+          <button data-testid="toggle" onClick={() => setOpen((o) => !o)} />
+          <PooledWindow pool={pool} open={open} onReady={onReady}>
+            <Child />
+          </PooledWindow>
+        </MockWindowProvider>
+      );
+    }
+
+    render(<App />);
+    await waitFor(() => expect(onReady).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(signals).toHaveLength(1));
+    const first = signals[0];
+    expect(first.aborted).toBe(false);
+
+    // Release → abort fires. The underlying BrowserWindow stays alive
+    // in the pool (minIdle:0 but we just released, idle=1).
+    fireEvent.click(screen.getByTestId("toggle"));
+    expect(first.aborted).toBe(true);
+
+    // Re-acquire → fresh signal, not the old aborted one.
+    fireEvent.click(screen.getByTestId("toggle"));
+    await waitFor(() => expect(onReady).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(signals.length).toBeGreaterThanOrEqual(2));
+    const second = signals[signals.length - 1];
+    expect(second).not.toBe(first);
+    expect(second.aborted).toBe(false);
   });
 });

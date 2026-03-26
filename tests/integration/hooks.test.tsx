@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import React from "react";
-import { render, waitFor } from "@testing-library/react";
+import React, { useState } from "react";
+import { render, waitFor, fireEvent, act } from "@testing-library/react";
 import { Window } from "../../src/renderer/Window.js";
 import {
   MockWindowProvider,
@@ -19,6 +19,8 @@ import {
   useWindowDisplay,
   useWindowState,
   useWindowDocument,
+  useWindowSignal,
+  useWindowEventListener,
   clearPersistedBounds,
   clearAllPersistedBounds,
 } from "../../src/renderer/hooks/index.js";
@@ -914,5 +916,222 @@ describe("clearPersistedBounds / clearAllPersistedBounds", () => {
     expect(localStorage.getItem(`${PREFIX}b`)).toBeNull();
     expect(localStorage.getItem(`${PREFIX}c`)).toBeNull();
     expect(localStorage.getItem("unrelated-app-setting")).toBe("keep-me");
+  });
+});
+
+describe("useWindowSignal", () => {
+  beforeEach(() => {
+    resetMockWindows();
+    resetMockWindowsGlobal();
+    vi.clearAllMocks();
+  });
+
+  it("throws when signal is null (window not yet open)", () => {
+    // MockWindow provides the context but signal: null — simulates the
+    // window-mounting-but-not-ready case. useWindowContext passes (we're
+    // inside a context) but useWindowSignal's own guard fires.
+    function Probe() {
+      useWindowSignal();
+      return null;
+    }
+    expect(() =>
+      render(
+        <MockWindowProvider>
+          <MockWindow id="test">
+            <Probe />
+          </MockWindow>
+        </MockWindowProvider>,
+      ),
+    ).toThrow(/useWindowSignal must be called inside an open/);
+  });
+
+  it("returns an AbortSignal that aborts when the window closes", async () => {
+    let signal: AbortSignal | undefined;
+    const onAbort = vi.fn();
+
+    function Probe() {
+      signal = useWindowSignal();
+      React.useEffect(() => {
+        signal?.addEventListener("abort", onAbort);
+      }, [signal]);
+      return null;
+    }
+
+    function App() {
+      const [open, setOpen] = useState(true);
+      return (
+        <MockWindowProvider>
+          <button onClick={() => setOpen(false)}>close</button>
+          <Window open={open}>
+            <Probe />
+          </Window>
+        </MockWindowProvider>
+      );
+    }
+
+    render(<App />);
+    await waitFor(() => expect(signal).toBeInstanceOf(AbortSignal));
+    expect(signal!.aborted).toBe(false);
+    expect(onAbort).not.toHaveBeenCalled();
+
+    fireEvent.click(document.querySelector("button")!);
+
+    // Signal aborts synchronously in resetComponentState on open→false
+    expect(signal!.aborted).toBe(true);
+    expect(onAbort).toHaveBeenCalledTimes(1);
+  });
+
+  it("provides a fresh signal on each open cycle", async () => {
+    // The signal is per-open-cycle, not per-component-instance. A
+    // toggle should give a NEW unaborted signal.
+    const signals: AbortSignal[] = [];
+
+    function Probe() {
+      const s = useWindowSignal();
+      React.useEffect(() => {
+        signals.push(s);
+      }, [s]);
+      return null;
+    }
+
+    function App() {
+      const [open, setOpen] = useState(true);
+      return (
+        <MockWindowProvider>
+          <button data-testid="toggle" onClick={() => setOpen((o) => !o)} />
+          <Window open={open}>
+            <Probe />
+          </Window>
+        </MockWindowProvider>
+      );
+    }
+
+    render(<App />);
+    await waitFor(() => expect(signals).toHaveLength(1));
+    const first = signals[0];
+
+    fireEvent.click(document.querySelector('[data-testid="toggle"]')!);
+    expect(first.aborted).toBe(true);
+
+    fireEvent.click(document.querySelector('[data-testid="toggle"]')!);
+    await waitFor(() => expect(signals.length).toBeGreaterThanOrEqual(2));
+
+    const second = signals[signals.length - 1];
+    expect(second).not.toBe(first);
+    expect(second.aborted).toBe(false);
+  });
+});
+
+describe("useWindowEventListener", () => {
+  beforeEach(() => {
+    resetMockWindows();
+    resetMockWindowsGlobal();
+    vi.clearAllMocks();
+  });
+
+  it("attaches to the child document and fires on events", async () => {
+    const handler = vi.fn();
+
+    function Probe() {
+      useWindowEventListener("keydown", handler);
+      return null;
+    }
+
+    render(
+      <MockWindowProvider>
+        <Window open>
+          <Probe />
+        </Window>
+      </MockWindowProvider>,
+    );
+
+    await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
+    // Wait for the effect to attach
+    await waitFor(() => {
+      const childDoc = ([...getGlobalMockWindows().values()][0] as { document: Document }).document;
+      act(() => childDoc.dispatchEvent(new KeyboardEvent("keydown", { key: "a" })));
+      expect(handler).toHaveBeenCalled();
+    });
+  });
+
+  it("removes listener when the window closes (via AbortSignal)", async () => {
+    const handler = vi.fn();
+    let childDoc: Document | undefined;
+
+    function Probe() {
+      useWindowEventListener("click", handler);
+      childDoc = useWindowDocument();
+      return null;
+    }
+
+    function App() {
+      const [open, setOpen] = useState(true);
+      return (
+        <MockWindowProvider>
+          <button data-testid="close" onClick={() => setOpen(false)} />
+          <Window open={open}>
+            <Probe />
+          </Window>
+        </MockWindowProvider>
+      );
+    }
+
+    render(<App />);
+    await waitFor(() => expect(childDoc).toBeInstanceOf(Document));
+
+    const doc = childDoc!;
+    act(() => doc.dispatchEvent(new MouseEvent("click")));
+    await waitFor(() => expect(handler).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(document.querySelector('[data-testid="close"]')!);
+
+    // After close, events on the (now-stale) doc don't fire the handler —
+    // the AbortSignal removed the listener.
+    handler.mockClear();
+    act(() => doc.dispatchEvent(new MouseEvent("click")));
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("reads handler through a ref — inline arrows don't re-subscribe", async () => {
+    // If the hook put `handler` in the effect deps, every render with an
+    // inline arrow would remove+re-add the listener. The ref pattern means
+    // the wrapped listener persists and reads the latest handler.
+    let childDoc: Document | undefined;
+    let received: string | undefined;
+
+    function Probe({ suffix }: { suffix: string }) {
+      childDoc = useWindowDocument();
+      useWindowEventListener("keydown", (e) => {
+        received = e.key + suffix;
+      });
+      return null;
+    }
+
+    const { rerender } = render(
+      <MockWindowProvider>
+        <Window open>
+          <Probe suffix="-first" />
+        </Window>
+      </MockWindowProvider>,
+    );
+    await waitFor(() => expect(childDoc).toBeInstanceOf(Document));
+    const doc = childDoc!;
+    const addSpy = vi.spyOn(doc, "addEventListener");
+
+    // Re-render with a NEW inline arrow — handler identity changes.
+    rerender(
+      <MockWindowProvider>
+        <Window open>
+          <Probe suffix="-second" />
+        </Window>
+      </MockWindowProvider>,
+    );
+
+    // No re-subscription on the child document.
+    expect(addSpy).not.toHaveBeenCalled();
+
+    // The latest handler runs (reads "-second", not "-first").
+    act(() => doc.dispatchEvent(new KeyboardEvent("keydown", { key: "x" })));
+    await waitFor(() => expect(received).toBe("x-second"));
   });
 });

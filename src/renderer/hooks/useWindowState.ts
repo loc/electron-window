@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { useWindowContext } from "../context.js";
 import type { Bounds, WindowState } from "../../shared/types.js";
 
@@ -17,6 +17,73 @@ export function useWindowDocument(): Document {
     throw new Error("useWindowDocument must be called inside an open <Window> or <PooledWindow>");
   }
   return document;
+}
+
+/**
+ * Returns an AbortSignal that fires when the **window** closes or releases
+ * back to its pool. Pass to `addEventListener`, `fetch`, observers, etc.
+ * for automatic cleanup on window close.
+ *
+ * The signal is WINDOW-scoped, not component-scoped — if your component
+ * may unmount while the window stays open (conditional rendering), you
+ * still need a useEffect cleanup return. Prefer {@link useWindowEventListener}
+ * which handles both cases.
+ *
+ * @example
+ * ```ts
+ * const signal = useWindowSignal();
+ * const doc = useWindowDocument();
+ * useEffect(() => {
+ *   doc.addEventListener("keydown", onKey, { signal });
+ *   // signal removes on WINDOW close. Still return cleanup for
+ *   // COMPONENT unmount (e.g. conditional <Panel> inside a window):
+ *   return () => doc.removeEventListener("keydown", onKey);
+ * }, [signal, doc]);
+ * ```
+ */
+export function useWindowSignal(): AbortSignal {
+  const { signal } = useWindowContext();
+  if (!signal) {
+    throw new Error("useWindowSignal must be called inside an open <Window> or <PooledWindow>");
+  }
+  return signal;
+}
+
+/**
+ * Attach an event listener to the window's document that is automatically
+ * removed when the window closes. Wraps `addEventListener(type, handler,
+ * { signal })` in a useEffect so the handler can be an inline arrow.
+ *
+ * Re-attaches when `type` changes. The handler is read through a ref so
+ * it can change identity without re-subscribing.
+ *
+ * @example
+ * ```ts
+ * useWindowEventListener("keydown", (e) => {
+ *   if (e.key === "Escape") close();
+ * });
+ * ```
+ */
+export function useWindowEventListener<K extends keyof DocumentEventMap>(
+  type: K,
+  handler: (event: DocumentEventMap[K]) => void,
+  options?: Omit<AddEventListenerOptions, "signal">,
+): void {
+  const { document, signal } = useWindowContext();
+  const handlerRef = useRef(handler);
+  handlerRef.current = handler;
+
+  const { capture, passive, once } = options ?? {};
+
+  useEffect(() => {
+    if (!document || !signal) return;
+    const wrapped = (e: DocumentEventMap[K]) => handlerRef.current(e);
+    document.addEventListener(type, wrapped, { capture, passive, once, signal });
+    // The signal removes the listener on window close. This cleanup
+    // handles the dep-change case (e.g. type change) where the window
+    // is still open and the signal hasn't fired.
+    return () => document.removeEventListener(type, wrapped, { capture });
+  }, [document, signal, type, capture, passive, once]);
 }
 
 const DEFAULT_BOUNDS: Bounds = { x: 0, y: 0, width: 0, height: 0 };

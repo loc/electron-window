@@ -98,6 +98,58 @@ function WindowContent() {
 
 Use the specific hooks (`useWindowFocused`, `useWindowBounds`, etc.) rather than `useWindowState` when possible — they avoid unnecessary re-renders.
 
+## Cleanup on close
+
+Components inside a `<Window>` often attach listeners or start fetches against the child document. Those need cleanup when the window closes — otherwise the listener retains the closed window's Document.
+
+### `useWindowEventListener(type, handler, options?)`
+
+Attaches an event listener to the child window's document that's automatically removed when the window closes or releases back to its pool. The handler can be an inline arrow — it's read through a ref, so re-renders don't re-subscribe.
+
+```tsx
+import { useWindowEventListener } from "@loc/electron-window";
+
+function WindowContent({ onClose }) {
+  useWindowEventListener("keydown", (e) => {
+    if (e.key === "Escape") onClose();
+  });
+  // No cleanup needed — listener is removed on window close.
+}
+```
+
+### `useWindowSignal()`
+
+Returns an `AbortSignal` that fires when the **window** closes. Pass to `addEventListener`, `fetch`, `MutationObserver`, etc. for automatic cleanup.
+
+:::caution
+The signal is window-scoped, not component-scoped. If your component may unmount while the window stays open (e.g., it's conditionally rendered inside a `<Window>`), the signal-only pattern leaks — you still need a `useEffect` cleanup return. Prefer `useWindowEventListener` which handles both cases.
+:::
+
+```tsx
+import { useWindowSignal, useWindowDocument } from "@loc/electron-window";
+
+function WindowContent() {
+  const signal = useWindowSignal();
+  const doc = useWindowDocument();
+
+  useEffect(() => {
+    const obs = new ResizeObserver(handleResize);
+    obs.observe(doc.body);
+    signal.addEventListener("abort", () => obs.disconnect());
+    doc.addEventListener("visibilitychange", onVis, { signal });
+    // Still return cleanup for COMPONENT unmount — the signal only
+    // fires on WINDOW close. Without this, a conditionally-rendered
+    // child that unmounts leaves its observer/listener attached.
+    return () => {
+      obs.disconnect();
+      doc.removeEventListener("visibilitychange", onVis);
+    };
+  }, [signal, doc]);
+}
+```
+
+For pooled windows, the signal is per-acquisition — aborted on release even though the underlying BrowserWindow stays alive for the next consumer.
+
 ## `usePersistedBounds(key, defaults)`
 
 For manual bounds persistence. See [Persistence](/electron-window/guides/persistence/) for full usage.

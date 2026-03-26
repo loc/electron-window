@@ -454,6 +454,7 @@ export function MockWindow({
       getSnapshot: () => fullState,
       getDisplaySnapshot: () => null,
       document: null,
+      signal: null,
     }),
     [id, fullState],
   );
