@@ -1063,11 +1063,9 @@ describe("useWindowEventListener", () => {
 
   it("removes listener when the window closes (via AbortSignal)", async () => {
     const handler = vi.fn();
-    let childDoc: Document | undefined;
 
     function Probe() {
       useWindowEventListener("click", handler);
-      childDoc = useWindowDocument();
       return null;
     }
 
@@ -1084,16 +1082,20 @@ describe("useWindowEventListener", () => {
     }
 
     render(<App />);
-    await waitFor(() => expect(childDoc).toBeInstanceOf(Document));
+    await waitFor(() => expect(getGlobalMockWindows().size).toBe(1));
 
-    const doc = childDoc!;
+    // Use the raw child document (not useWindowDocument's proxy) — we
+    // intentionally dispatch on it after close, and the proxy would
+    // console.error on stale access. The listener is attached to the
+    // raw doc either way.
+    const doc = ([...getGlobalMockWindows().values()][0] as { document: Document }).document;
     act(() => doc.dispatchEvent(new MouseEvent("click")));
     await waitFor(() => expect(handler).toHaveBeenCalledTimes(1));
 
     fireEvent.click(document.querySelector('[data-testid="close"]')!);
 
-    // After close, events on the (now-stale) doc don't fire the handler —
-    // the AbortSignal removed the listener.
+    // After close, events on the doc don't fire the handler — the
+    // AbortSignal removed the listener.
     handler.mockClear();
     act(() => doc.dispatchEvent(new MouseEvent("click")));
     expect(handler).not.toHaveBeenCalled();
