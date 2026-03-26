@@ -52,7 +52,12 @@ export function getTrackedWindowRefs(): readonly WeakRef<globalThis.Window>[] {
  * hasn't fired yet. If an entry lingers past the GC-check timeout, the
  * window is being retained by something.
  */
-const pendingGC = new Map<string, { closedAt: number }>();
+const pendingGC = new Map<string, { closedAt: number; id: string }>();
+
+// Per-call sequence so scheduleLeakCheck entries don't collide when the
+// same windowId is reused across open→close→open (windowId is stable in
+// Window.tsx, only regenerated on recreateOnShapeChange).
+let checkSeq = 0;
 
 /**
  * FinalizationRegistry callback clears pendingGC when the Window is
@@ -63,8 +68,8 @@ let gcRegistry: FinalizationRegistry<string> | undefined;
 function getRegistry(): FinalizationRegistry<string> | undefined {
   if (gcRegistry) return gcRegistry;
   if (typeof FinalizationRegistry === "undefined") return undefined;
-  gcRegistry = new FinalizationRegistry<string>((id) => {
-    pendingGC.delete(id);
+  gcRegistry = new FinalizationRegistry<string>((token) => {
+    pendingGC.delete(token);
   });
   return gcRegistry;
 }
@@ -77,12 +82,14 @@ function getRegistry(): FinalizationRegistry<string> | undefined {
  *
  * No-op outside dev/test.
  */
-export function markExpectedDead(win: globalThis.Window, id: string): void {
+export function markExpectedDead(win: globalThis.Window, id: string): string | undefined {
   if (!isDev()) return;
   const registry = getRegistry();
   if (!registry) return;
-  pendingGC.set(id, { closedAt: Date.now() });
-  registry.register(win, id);
+  const token = `${id}:${checkSeq++}`;
+  pendingGC.set(token, { closedAt: Date.now(), id });
+  registry.register(win, token);
+  return token;
 }
 
 /**
@@ -98,7 +105,8 @@ export function markExpectedDead(win: globalThis.Window, id: string): void {
  */
 export function scheduleLeakCheck(win: globalThis.Window, id: string): void {
   if (!isDev()) return;
-  markExpectedDead(win, id);
+  const token = markExpectedDead(win, id);
+  if (!token) return;
 
   const g = globalThis as Record<string, unknown>;
   if (typeof g.gc !== "function") return;
@@ -106,12 +114,12 @@ export function scheduleLeakCheck(win: globalThis.Window, id: string): void {
   setTimeout(() => {
     (g.gc as () => void)();
     setTimeout(() => {
-      const entry = pendingGC.get(id);
+      const entry = pendingGC.get(token);
       if (entry) {
-        pendingGC.delete(id);
+        pendingGC.delete(token);
         const ageMs = Date.now() - entry.closedAt;
         console.error(
-          `[electron-window] Window "${id}" was closed ${ageMs}ms ago but has not been ` +
+          `[electron-window] Window "${entry.id}" was closed ${ageMs}ms ago but has not been ` +
             `garbage-collected. Something is retaining a reference to the child Window, ` +
             `its Document, or a DOM node inside it. Common causes: event listeners ` +
             `added via useWindowDocument() without cleanup, refs holding DOM nodes, ` +

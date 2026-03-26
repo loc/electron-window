@@ -198,6 +198,7 @@ export class RendererWindowPool {
       childWindow.addEventListener("unload", () => {
         if (childWindow.closed) {
           styleCleanup();
+          scheduleLeakCheck(childWindow, id);
           this.debugLog("window destroyed externally", id);
           this.handleWindowDestroyed(id);
         }
@@ -306,6 +307,7 @@ export class RendererWindowPool {
       childWindow.addEventListener("unload", () => {
         if (childWindow.closed) {
           styleCleanup();
+          scheduleLeakCheck(childWindow, id);
           this.handleWindowDestroyed(id);
         }
       });
@@ -495,7 +497,10 @@ export class RendererWindowPool {
     // The pool's own unload listener would do this, but BrowserWindow.destroy()
     // from main doesn't fire unload — this path must clean up explicitly.
     const entry = this.active.get(id) ?? this.idle.find((e) => e.id === id);
-    entry?.styleCleanup();
+    if (entry) {
+      entry.styleCleanup();
+      scheduleLeakCheck(entry.childWindow, id);
+    }
     this.handleWindowDestroyed(id);
   }
 

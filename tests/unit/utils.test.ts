@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createDeferred, generateWindowId, debounce, sleep } from "../../src/shared/utils.js";
 import { handleStyleInjection, __getStyleSubscriberCount } from "../../src/renderer/windowUtils.js";
 import { wrapDocument, markDocDestroyed } from "../../src/renderer/docProxy.js";
-import { trackWindow } from "../../src/renderer/leakTracking.js";
+import { trackWindow, markExpectedDead } from "../../src/renderer/leakTracking.js";
 
 describe("createDeferred", () => {
   it("creates a promise that can be resolved externally", async () => {
@@ -398,5 +398,24 @@ describe("leakTracking — trackWindow", () => {
     const arr = (globalThis as Record<string, unknown>)[key] as WeakRef<object>[];
     expect(arr.length).toBe(before + 1);
     expect(arr[arr.length - 1].deref()).toBe(fakeWin);
+  });
+
+  it("markExpectedDead returns unique tokens for the same windowId", () => {
+    // windowId is stable across open→close→open (only regenerated on
+    // recreateOnShapeChange). Without per-call tokens, the second close's
+    // pendingGC entry overwrites the first, and the first's FR callback
+    // deletes the second's entry — masking a real leak.
+    const win1 = {} as unknown as globalThis.Window;
+    const win2 = {} as unknown as globalThis.Window;
+
+    const t1 = markExpectedDead(win1, "win_same");
+    const t2 = markExpectedDead(win2, "win_same");
+
+    expect(t1).toBeDefined();
+    expect(t2).toBeDefined();
+    expect(t1).not.toBe(t2);
+    // Both include the original id for diagnostics
+    expect(t1).toContain("win_same");
+    expect(t2).toContain("win_same");
   });
 });
