@@ -119,7 +119,11 @@ function WindowContent({ onClose }) {
 
 ### `useWindowSignal()`
 
-Returns an `AbortSignal` that fires when the window closes. Pass to `addEventListener`, `fetch`, `MutationObserver`, etc. for automatic cleanup.
+Returns an `AbortSignal` that fires when the **window** closes. Pass to `addEventListener`, `fetch`, `MutationObserver`, etc. for automatic cleanup.
+
+:::caution
+The signal is window-scoped, not component-scoped. If your component may unmount while the window stays open (e.g., it's conditionally rendered inside a `<Window>`), the signal-only pattern leaks — you still need a `useEffect` cleanup return. Prefer `useWindowEventListener` which handles both cases.
+:::
 
 ```tsx
 import { useWindowSignal, useWindowDocument } from "@loc/electron-window";
@@ -132,8 +136,14 @@ function WindowContent() {
     const obs = new ResizeObserver(handleResize);
     obs.observe(doc.body);
     signal.addEventListener("abort", () => obs.disconnect());
-    // Or for addEventListener/fetch, pass { signal } directly:
     doc.addEventListener("visibilitychange", onVis, { signal });
+    // Still return cleanup for COMPONENT unmount — the signal only
+    // fires on WINDOW close. Without this, a conditionally-rendered
+    // child that unmounts leaves its observer/listener attached.
+    return () => {
+      obs.disconnect();
+      doc.removeEventListener("visibilitychange", onVis);
+    };
   }, [signal, doc]);
 }
 ```

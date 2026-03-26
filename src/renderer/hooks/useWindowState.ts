@@ -20,17 +20,25 @@ export function useWindowDocument(): Document {
 }
 
 /**
- * Returns an AbortSignal that fires when the window closes or releases
+ * Returns an AbortSignal that fires when the **window** closes or releases
  * back to its pool. Pass to `addEventListener`, `fetch`, observers, etc.
- * for automatic cleanup without a manual useEffect teardown.
+ * for automatic cleanup on window close.
+ *
+ * The signal is WINDOW-scoped, not component-scoped — if your component
+ * may unmount while the window stays open (conditional rendering), you
+ * still need a useEffect cleanup return. Prefer {@link useWindowEventListener}
+ * which handles both cases.
  *
  * @example
  * ```ts
  * const signal = useWindowSignal();
+ * const doc = useWindowDocument();
  * useEffect(() => {
  *   doc.addEventListener("keydown", onKey, { signal });
- *   // no return — signal handles removal on close
- * }, []);
+ *   // signal removes on WINDOW close. Still return cleanup for
+ *   // COMPONENT unmount (e.g. conditional <Panel> inside a window):
+ *   return () => doc.removeEventListener("keydown", onKey);
+ * }, [signal, doc]);
  * ```
  */
 export function useWindowSignal(): AbortSignal {
