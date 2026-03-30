@@ -27,21 +27,32 @@ You don't need to do anything for these — the library guarantees them:
 
 ## What you can still get wrong
 
-### Stashing the child document
+### Escaping the child document outside the portal
+
+A local `useRef` inside a `<Window>` child is fine — the component unmounts
+when the window closes, and the ref is GC'd with it. The leak happens when
+the document **escapes** the portal subtree into something that outlives it:
 
 ```tsx
-// ❌ leaks — the ref outlives the window
+// ❌ leaks — module scope outlives the window
+let cachedDoc: Document | undefined;
+
 function Bad() {
-  const docRef = useRef<Document>();
-  const doc = useWindowDocument();
-  docRef.current = doc;
+  cachedDoc = useWindowDocument(); // escapes to module scope
   // ...
+}
+
+// ❌ also leaks — store/context above <Window> outlives it
+function AlsoBad() {
+  const doc = useWindowDocument();
+  useStore.setState({ childDoc: doc }); // escapes to Zustand
 }
 ```
 
-`useWindowDocument()` returns a fresh value per open cycle. Storing it in a
-ref or closure that outlives the `<Window>` pins the entire child DOM. Call
-the hook directly each render instead — it's cheap.
+Anything above the `<Window>` in the React tree — module state, Zustand/Redux
+stores, contexts, or a parent callback like `onReady(doc)` — will hold the
+document past close. Call `useWindowDocument()` directly each render inside
+window children instead; it's cheap.
 
 In development, the returned `Document` is proxied: any access after the
 window closes logs a `console.error` with the stack where it was originally
