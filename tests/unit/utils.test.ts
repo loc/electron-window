@@ -376,11 +376,39 @@ describe("docProxy — stale-access detection", () => {
     errSpy.mockRestore();
   });
 
-  it("defaultView access is also caught", () => {
-    // jsdom's createHTMLDocument gives defaultView=null, so this test
-    // only verifies the null-passthrough path doesn't crash.
+  it("defaultView (Window) access is also proxied and caught after destroy", () => {
+    // createHTMLDocument gives defaultView=null; use an iframe for a real one.
+    const iframe = document.createElement("iframe");
+    document.body.appendChild(iframe);
+    const childDoc = iframe.contentDocument!;
+
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const proxy = wrapDocument(childDoc, "win_dv");
+
+    // Pre-destroy: defaultView is a proxied Window, methods work.
+    const win = proxy.defaultView!;
+    expect(win).not.toBeNull();
+    expect(() => win.addEventListener("resize", () => {})).not.toThrow();
+    expect(errSpy).not.toHaveBeenCalled();
+    // Identity-stable within a cycle.
+    expect(proxy.defaultView).toBe(win);
+
+    // Post-destroy: Window access warns. This is the leak path a
+    // Document-only proxy would miss — consumer stashes doc.defaultView
+    // and calls addEventListener on it after close.
+    markDocDestroyed("win_dv");
+    void win.innerWidth;
+    expect(errSpy).toHaveBeenCalledTimes(1);
+    expect(errSpy.mock.calls[0][0]).toMatch(/Window \(via document\.defaultView\).*win_dv/);
+
+    errSpy.mockRestore();
+    iframe.remove();
+  });
+
+  it("defaultView null-passthrough doesn't crash", () => {
+    // createHTMLDocument has no browsing context → defaultView is null.
     const doc = makeDoc();
-    const proxy = wrapDocument(doc, "win_dv");
+    const proxy = wrapDocument(doc, "win_dvnull");
     expect(proxy.defaultView).toBeNull();
   });
 });
