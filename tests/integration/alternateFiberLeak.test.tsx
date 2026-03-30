@@ -109,6 +109,7 @@ function findRetentionPaths(
 
 // Module-scope so it doesn't close over test locals.
 let externalSetContainer: ((c: Element | null) => void) | null = null;
+let externalSetMounted: ((m: boolean) => void) | null = null;
 
 /**
  * Mirrors Window/PooledWindow WITHOUT the fix — demonstrates the leak.
@@ -137,6 +138,17 @@ function PortalHostFixed(): ReactNode {
       {container ? createPortal(<span>popout content</span>, container) : null}
     </div>
   );
+}
+
+/**
+ * Wraps a PortalHost and allows unmounting it while keeping the root alive.
+ * Tests the unmount path (vs setContainer(null)): does the PARENT's alternate
+ * retain the unmounted child's fiber → its memoizedState → portalContainer?
+ */
+function UnmountWrapper({ Host }: { Host: () => ReactNode }): ReactNode {
+  const [mounted, setMounted] = useState(true);
+  externalSetMounted = setMounted;
+  return <div data-testid="wrapper">{mounted ? <Host /> : null}</div>;
 }
 
 // ─── Harness ─────────────────────────────────────────────────────────────────
@@ -184,6 +196,7 @@ async function openPortal(h: Harness, Host: () => ReactNode): Promise<void> {
 describe("React alternate-fiber portal leak", () => {
   afterEach(() => {
     externalSetContainer = null;
+    externalSetMounted = null;
   });
 
   // it.fails: test is EXPECTED to fail. CI stays green while the bug exists;
@@ -266,6 +279,65 @@ describe("React alternate-fiber portal leak", () => {
     // is one sync call. The effect-scheduled flush happens on the NEXT commit,
     // which act() also flushes.
     await act(async () => externalSetContainer!(null));
+
+    const leaks = findRetentionPaths(
+      getRootFiber(h.root),
+      [h.portalContainer],
+      ["portalContainer"],
+    );
+    expect(leaks).toEqual([]);
+
+    act(() => h.root.unmount());
+    h.iframe.remove();
+    h.hostEl.remove();
+  });
+
+  // ─── Unmount path (vs setContainer(null)) ───────────────────────────────
+  //
+  // Our useFlushAlternateOnPortalClear fires on portalTarget→null while the
+  // component STAYS MOUNTED. If <Window> unmounts entirely (consumer stops
+  // rendering it), the effect doesn't run — but the PARENT's alternate might
+  // hold the old child-fiber chain → portalTarget. These tests check whether
+  // React's own unmount handling already clears this path.
+
+  it("UNMOUNT PATH: React clears alternate when PortalHost unmounts (no workaround needed)", async () => {
+    // If this PASSES, React's detachFiberAfterEffects handles unmount
+    // correctly and our flush hook doesn't need to cover this path.
+    // If it FAILS, we need a different fix (can't flush from an unmounting
+    // component) — likely a parent-side flush on child unregister.
+    const h = setupHarness();
+    await act(async () => h.root.render(<UnmountWrapper Host={PortalHostUnfixed} />));
+    await act(async () => externalSetContainer!(h.portalContainer));
+    expect(h.childDoc.querySelector("span")?.textContent).toBe("popout content");
+
+    // Unmount PortalHostUnfixed entirely (not setContainer(null)).
+    await act(async () => externalSetMounted!(false));
+    expect(h.childDoc.querySelector("span")).toBeNull();
+
+    const leaks = findRetentionPaths(
+      getRootFiber(h.root),
+      [h.portalContainer, h.childDoc],
+      ["portalContainer", "childDoc"],
+    );
+    // React nulls stateNode in detachFiberAfterEffects on unmount, but does
+    // it clear the PARENT's alternate.child chain? This is the open question.
+    expect(leaks).toEqual([]);
+
+    act(() => h.root.unmount());
+    h.iframe.remove();
+    h.hostEl.remove();
+  });
+
+  it("UNMOUNT PATH: library-shaped component (with flush hook) clears on unmount", async () => {
+    // Same as above but with our hook. If the UNFIXED test passes, this is
+    // redundant. If UNFIXED fails but this passes, the hook's useEffect
+    // cleanup somehow helps (unlikely — effect cleanup runs before unmount
+    // commit, not after).
+    const h = setupHarness();
+    await act(async () => h.root.render(<UnmountWrapper Host={PortalHostFixed} />));
+    await act(async () => externalSetContainer!(h.portalContainer));
+
+    await act(async () => externalSetMounted!(false));
 
     const leaks = findRetentionPaths(
       getRootFiber(h.root),
