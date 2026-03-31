@@ -547,6 +547,12 @@ export class WindowInstance {
       this.browserWindow.destroy();
       this.browserWindow = null;
       this.isDestroyed = true;
+      // removeAllListeners() stripped our own 'closed' handler (:219) too.
+      // Emit Closed explicitly so WindowManager.windows.delete runs and the
+      // renderer gets notified — otherwise external imperative destroy()
+      // (documented in getting-started.mdx) leaks the map entry and leaves
+      // the renderer ghost-open.
+      this.onEvent({ type: WindowEventType.Closed, id: this.id });
     }
   }
 

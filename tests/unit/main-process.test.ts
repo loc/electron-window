@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { RENDERER_ALLOWED_PROPS } from "../../src/shared/types.js";
 import { WindowInstance } from "../../src/main/WindowInstance.js";
 import { WindowManager } from "../../src/main/WindowManager.js";
+import { WindowEventType } from "../../src/generated-ipc/common/electron_window.js";
 
 // ---------------------------------------------------------------------------
 // Mock helpers
@@ -1136,6 +1137,36 @@ describe("WindowInstance after destroy", () => {
     instance.destroy();
     instance.destroy();
     expect(bw.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("emits Closed on destroy() so external imperative destroy cleans up map + notifies renderer", () => {
+    // removeAllListeners() strips our own 'closed' listener, so Electron's
+    // synchronous 'closed' emission on BrowserWindow.destroy() never reaches
+    // us. destroy() must emit Closed explicitly — otherwise the DOCUMENTED
+    // pattern (getting-started.mdx: manager.getAllWindows().forEach(w =>
+    // w.destroy())) leaks the WindowManager.windows entry and leaves the
+    // renderer ghost-open.
+    const onEvent = vi.fn();
+    const { instance } = createWindowInstance({}, onEvent);
+    onEvent.mockClear(); // ignore Shown from construction
+
+    instance.destroy();
+
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ type: WindowEventType.Closed }));
+  });
+
+  it("does not double-emit Closed on second destroy call", () => {
+    // The if-block guards on !this.isDestroyed, so the explicit emit only
+    // fires once even if destroy() is called again.
+    const onEvent = vi.fn();
+    const { instance } = createWindowInstance({}, onEvent);
+    onEvent.mockClear();
+
+    instance.destroy();
+    instance.destroy();
+
+    const closedCalls = onEvent.mock.calls.filter((c) => c[0]?.type === WindowEventType.Closed);
+    expect(closedCalls).toHaveLength(1);
   });
 });
 

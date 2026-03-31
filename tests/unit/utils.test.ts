@@ -3,6 +3,7 @@ import { createDeferred, generateWindowId, debounce, sleep } from "../../src/sha
 import { handleStyleInjection, __getStyleSubscriberCount } from "../../src/renderer/windowUtils.js";
 import { wrapDocument, markDocDestroyed } from "../../src/renderer/docProxy.js";
 import { trackWindow, markExpectedDead } from "../../src/renderer/leakTracking.js";
+import { createLeakTester } from "../../src/testing/index.js";
 
 describe("createDeferred", () => {
   it("creates a promise that can be resolved externally", async () => {
@@ -445,5 +446,41 @@ describe("leakTracking — trackWindow", () => {
     // Both include the original id for diagnostics
     expect(t1).toContain("win_same");
     expect(t2).toContain("win_same");
+  });
+});
+
+describe("createLeakTester — empty-slice guard", () => {
+  // expectNoLeaks() used to pass silently when slice.length === 0 — i.e.,
+  // the test asserted nothing. Three reachable paths: track() never called,
+  // code under test silently failed to open a window, or NODE_ENV=production
+  // makes trackWindow a no-op. All three now throw instead of false-pass.
+
+  it("throws when track() was never called", async () => {
+    const leaks = createLeakTester();
+    // startLen/endLen stay at 0/0 defaults → slice(0, 0) is empty
+    await expect(leaks.expectNoLeaks()).rejects.toThrow(/no windows were tracked/);
+  });
+
+  it("throws when track() ran but no windows were opened", async () => {
+    const leaks = createLeakTester();
+    await leaks.track(async () => {
+      // code under test that silently failed to open anything
+    });
+    await expect(leaks.expectNoLeaks()).rejects.toThrow(/no windows were tracked/);
+  });
+
+  it("does not throw when at least one window was tracked", async () => {
+    const leaks = createLeakTester();
+    let fakeWin: object | undefined = {};
+    await leaks.track(async () => {
+      trackWindow(fakeWin as globalThis.Window);
+    });
+    fakeWin = undefined; // drop strong ref so the WeakRef can clear
+
+    // This may throw for leak reasons (no --expose-gc here), but not for
+    // the empty-slice reason. We only care that we get past the guard.
+    await leaks.expectNoLeaks().catch((e) => {
+      expect((e as Error).message).not.toMatch(/no windows were tracked/);
+    });
   });
 });
