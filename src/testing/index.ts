@@ -530,6 +530,20 @@ export function createLeakTester(): LeakTester {
 
       const refs = getRefs();
       const slice = refs.slice(startLen, endLen);
+
+      // Zero windows tracked → the test asserted nothing. This is never
+      // intentional: either track() wasn't called, the code under test
+      // silently failed to open a window, or trackWindow is a prod-build
+      // no-op (NODE_ENV not 'development'/'test'). Throw rather than
+      // false-pass — a vacuous leak assertion defeats the feature.
+      if (slice.length === 0) {
+        throw new Error(
+          "[electron-window] expectNoLeaks: no windows were tracked during track(). " +
+            "Either track() was not called, the code under test opened no windows, " +
+            "or trackWindow is a no-op (NODE_ENV not 'development'/'test').",
+        );
+      }
+
       const alive = slice.filter((r) => r.deref() !== undefined);
 
       if (alive.length > 0) {
