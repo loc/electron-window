@@ -271,7 +271,7 @@ export class WindowManager {
       }
       for (const [id, entry] of this.windows) {
         if (entry.ownerWebContentsId === ownerId) {
-          entry.instance.destroy();
+          entry.instance.destroy({ emitClosed: false });
           this.windows.delete(id);
         }
       }
@@ -571,7 +571,7 @@ export class WindowManager {
         const entry = this.windows.get(id);
         if (entry) {
           if (!checkOwnership(id, entry)) return false;
-          entry.instance.destroy();
+          entry.instance.destroy({ emitClosed: false });
           this.windows.delete(id);
         }
         return true;
@@ -594,7 +594,7 @@ export class WindowManager {
         if (!checkOrigin()) return false;
         const entry = this.windows.get(id);
         if (!checkOwnership(id, entry)) return false;
-        entry.instance.destroy();
+        entry.instance.destroy({ emitClosed: false });
         this.windows.delete(id);
         return true;
       },
@@ -694,7 +694,7 @@ export class WindowManager {
 
   destroy(): void {
     for (const entry of this.windows.values()) {
-      entry.instance.destroy();
+      entry.instance.destroy({ emitClosed: false });
     }
     this.windows.clear();
   }

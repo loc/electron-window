@@ -1168,6 +1168,22 @@ describe("WindowInstance after destroy", () => {
     const closedCalls = onEvent.mock.calls.filter((c) => c[0]?.type === WindowEventType.Closed);
     expect(closedCalls).toHaveLength(1);
   });
+
+  it("skips Closed emission when emitClosed: false (internal callers)", () => {
+    // UnregisterWindow IPC and other WindowManager-internal paths: the
+    // renderer already ran resetComponentState() before the IPC. windowId
+    // is stable across open/close cycles, so a Closed event arriving during
+    // the setState-batch window races with the NEXT open — the stale Closed
+    // handler runs resetComponentState on the new window's state.
+    const onEvent = vi.fn();
+    const { instance } = createWindowInstance({}, onEvent);
+    onEvent.mockClear();
+
+    instance.destroy({ emitClosed: false });
+
+    const closedCalls = onEvent.mock.calls.filter((c) => c[0]?.type === WindowEventType.Closed);
+    expect(closedCalls).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------

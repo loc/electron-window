@@ -535,7 +535,18 @@ export class WindowInstance {
     if (this.browserWindow && !this.isDestroyed) this.browserWindow.hide();
   }
 
-  destroy(): void {
+  /**
+   * Destroy the underlying BrowserWindow.
+   *
+   * @param opts.emitClosed - Whether to emit WindowEventType.Closed. Defaults
+   *   to true so external imperative destroy (documented in
+   *   getting-started.mdx) cleans up WindowManager.windows and notifies the
+   *   renderer. Internal callers (UnregisterWindow IPC etc.) pass false:
+   *   the renderer already ran resetComponentState before the IPC, and
+   *   windowId is stable across open/close cycles — so a Closed event
+   *   arriving during the setState-batch window races with the NEXT open.
+   */
+  destroy(opts?: { emitClosed?: boolean }): void {
     this.emitBoundsChange.cancel();
     if (this.browserWindow && !this.isDestroyed) {
       // Remove listeners BEFORE destroy — Electron's internal
@@ -548,11 +559,11 @@ export class WindowInstance {
       this.browserWindow = null;
       this.isDestroyed = true;
       // removeAllListeners() stripped our own 'closed' handler (:219) too.
-      // Emit Closed explicitly so WindowManager.windows.delete runs and the
-      // renderer gets notified — otherwise external imperative destroy()
-      // (documented in getting-started.mdx) leaks the map entry and leaves
-      // the renderer ghost-open.
-      this.onEvent({ type: WindowEventType.Closed, id: this.id });
+      // Emit Closed explicitly for external callers so WindowManager.windows
+      // delete runs and the renderer gets notified.
+      if (opts?.emitClosed !== false) {
+        this.onEvent({ type: WindowEventType.Closed, id: this.id });
+      }
     }
   }
 
