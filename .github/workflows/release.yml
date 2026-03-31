@@ -18,12 +18,12 @@ jobs:
       id-token: write # npm trusted publishing via OIDC
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           # npm trusted publishing needs npm CLI 11.5.1+ (Node 22.14+).
           # Node 20's npm ~10 doesn't auto-detect GHA OIDC → ENONPMTOKEN.
