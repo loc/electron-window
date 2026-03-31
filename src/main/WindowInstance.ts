@@ -538,6 +538,12 @@ export class WindowInstance {
   destroy(): void {
     this.emitBoundsChange.cancel();
     if (this.browserWindow && !this.isDestroyed) {
+      // Remove listeners BEFORE destroy — Electron's internal
+      // visibilityChanged handler can fire after destroy() when a system
+      // visibility event is in flight, throwing "Object has been destroyed".
+      // Our own listeners already guard on this.isDestroyed, but Electron's
+      // internals don't. (electron/electron#40478)
+      this.browserWindow.removeAllListeners();
       this.browserWindow.destroy();
       this.browserWindow = null;
       this.isDestroyed = true;

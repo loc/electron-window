@@ -1,4 +1,12 @@
-import { useState, useRef, useCallback, useMemo, useEffect, useImperativeHandle } from "react";
+import {
+  useState,
+  useRef,
+  useCallback,
+  useMemo,
+  useEffect,
+  useReducer,
+  useImperativeHandle,
+} from "react";
 import type { WindowId, WindowState, WindowHandle, Bounds, DisplayInfo } from "../shared/types.js";
 import type { WindowContextValue, WindowProviderContextValue } from "./context.js";
 import { debounce } from "../shared/utils.js";
@@ -366,4 +374,40 @@ export function useWindowHandle(
       ...handleMethods,
     };
   }, [isReady, windowId, handleMethods, windowState]);
+}
+
+/**
+ * Force a second React commit after `portalTarget` transitions to null,
+ * so the alternate fiber releases its reference to the child window.
+ *
+ * React double-buffers fibers (current + alternate). After
+ * `setPortalTarget(null)` commits, the ALTERNATE fiber still holds the old
+ * portalTarget in `memoizedState.baseState`, `.memoizedState`, and
+ * `memoizedProps.children.containerInfo` — all of which pin
+ * `portalTarget.ownerDocument.defaultView` → the child BrowserWindow.
+ * The alternate is only overwritten when `createWorkInProgress` reuses
+ * its slot on a SUBSEQUENT commit, which never happens if the component
+ * settles after close.
+ *
+ * This hook watches portalTarget; when it drops to null, it dispatches a
+ * nonce to schedule that second commit. The dispatch runs from a useEffect
+ * (post-commit), so React 18+ auto-batching does NOT merge it with
+ * `setPortalTarget(null)` — a sync call in `resetComponentState()` would
+ * be batched into one commit and not fix anything.
+ *
+ * Cost: one extra render of Window/PooledWindow with portalTarget=null,
+ * which short-circuits at `if (!portalTarget) return null`. No DOM work.
+ *
+ * Verified against React 19.2.4 via fiber-tree walk — see
+ * tests/integration/alternateFiberLeak.test.tsx.
+ */
+export function useFlushAlternateOnPortalClear(portalTarget: unknown): void {
+  const [, flush] = useReducer((n: number) => n + 1, 0);
+  const prev = useRef(portalTarget);
+  useEffect(() => {
+    if (portalTarget === null && prev.current !== null) {
+      flush();
+    }
+    prev.current = portalTarget;
+  }, [portalTarget]);
 }

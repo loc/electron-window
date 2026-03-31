@@ -10,7 +10,11 @@ import {
 import { usePersistedBounds } from "./hooks/usePersistedBounds.js";
 import { devWarning, generateWindowId } from "../shared/utils.js";
 import { waitForWindowReady, initWindowDocument } from "./windowUtils.js";
-import { useWindowLifecycle, useWindowHandle } from "./useWindowLifecycle.js";
+import {
+  useWindowLifecycle,
+  useWindowHandle,
+  useFlushAlternateOnPortalClear,
+} from "./useWindowLifecycle.js";
 import { trackWindow, scheduleLeakCheck } from "./leakTracking.js";
 import { markDocDestroyed } from "./docProxy.js";
 
@@ -103,6 +107,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(function Window(props, 
 
   // The DOM element in the child window that React portals into
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  useFlushAlternateOnPortalClear(portalTarget);
   const [childDocument, setChildDocument] = useState<Document | null>(null);
   // AbortController per open cycle — exposed via context as `signal`.
   // Consumers pass it to addEventListener/fetch for automatic cleanup

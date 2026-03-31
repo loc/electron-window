@@ -33,6 +33,7 @@ export default defineConfig({
             "guides/persistence",
             "guides/testing",
             "guides/security",
+            "guides/memory",
             "guides/patterns",
           ],
         },

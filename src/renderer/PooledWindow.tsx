@@ -14,7 +14,11 @@ import {
   POOL_SHAPE_PROPS,
   CHANGEABLE_BEHAVIOR_PROPS,
 } from "../shared/types.js";
-import { useWindowLifecycle, useWindowHandle } from "./useWindowLifecycle.js";
+import {
+  useWindowLifecycle,
+  useWindowHandle,
+  useFlushAlternateOnPortalClear,
+} from "./useWindowLifecycle.js";
 import { devWarning } from "../shared/utils.js";
 import { markDocDestroyed } from "./docProxy.js";
 
@@ -217,6 +221,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(funct
   }, [poolDef]); // eslint-disable-line react-hooks/exhaustive-deps -- provider rebind is handled above
 
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  useFlushAlternateOnPortalClear(portalTarget);
   const [childDocument, setChildDocument] = useState<Document | null>(null);
   const [windowId, setWindowId] = useState<WindowId | null>(null);
   const [isReady, setIsReady] = useState(false);

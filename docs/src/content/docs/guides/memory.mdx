@@ -1,0 +1,149 @@
+---
+title: "Memory"
+description: "How the library prevents child-window leaks, and how to avoid introducing your own."
+---
+
+A leaked child window pins its entire DOM tree, all loaded scripts, and the
+V8 context. In long-running Electron apps this accumulates — the typical
+symptom is the renderer OOMing at the 4GB heap limit after a day of normal
+use.
+
+## What the library handles
+
+You don't need to do anything for these — the library guarantees them:
+
+- **React alternate-fiber retention.** React double-buffers fibers; after
+  `setPortalTarget(null)` the alternate still holds the old container until a
+  *second* commit overwrites it. The library forces that second commit
+  automatically when a `<Window>` closes.
+- **Style-injection subscribers.** The shared `MutationObserver` that mirrors
+  parent `<head>` styles into child documents is unsubscribed on close from
+  every teardown path.
+- **Electron internal listeners.** `removeAllListeners()` runs before
+  `BrowserWindow.destroy()` so Electron's own `visibilityChanged` handler
+  doesn't fire on a dead window.
+- **Pool entry references.** Pooled window entries null their `childWindow`
+  and `portalTarget` refs on destroy.
+
+## What you can still get wrong
+
+### Escaping the child document outside the portal
+
+A local `useRef` inside a `<Window>` child is fine — the component unmounts
+when the window closes, and the ref is GC'd with it. The leak happens when
+the document **escapes** the portal subtree into something that outlives it:
+
+```tsx
+// ❌ leaks — module scope outlives the window
+let cachedDoc: Document | undefined;
+
+function Bad() {
+  cachedDoc = useWindowDocument(); // escapes to module scope
+  // ...
+}
+
+// ❌ also leaks — store/context above <Window> outlives it
+function AlsoBad() {
+  const doc = useWindowDocument();
+  useStore.setState({ childDoc: doc }); // escapes to Zustand
+}
+```
+
+Anything above the `<Window>` in the React tree — module state, Zustand/Redux
+stores, contexts, or a parent callback like `onReady(doc)` — will hold the
+document past close. Call `useWindowDocument()` directly each render inside
+window children instead; it's cheap.
+
+In development, the returned `Document` is proxied: any access after the
+window closes logs a `console.error` with the stack where it was originally
+acquired.
+
+### Event listeners on child DOM
+
+```tsx
+// ❌ leaks — listener closure + no cleanup
+function Bad() {
+  const doc = useWindowDocument();
+  useEffect(() => {
+    doc.addEventListener("keydown", handleKey);
+    // missing return () => doc.removeEventListener(...)
+  }, [doc]);
+}
+```
+
+The listener closure captures your component's state and keeps the child
+document reachable. Use `useWindowSignal()` — it aborts automatically on
+close:
+
+```tsx
+// ✅ cleaned up automatically
+function Good() {
+  const doc = useWindowDocument();
+  const signal = useWindowSignal();
+  useEffect(() => {
+    doc.addEventListener("keydown", handleKey, { signal });
+  }, [doc, signal]);
+}
+```
+
+Or use `useWindowEventListener()` which wraps this pattern:
+
+```tsx
+useWindowEventListener("keydown", handleKey);
+```
+
+### Third-party portal containers
+
+UI libraries like Radix UI, Base UI, and Floating UI default to
+`document.body` for portal overlays. Inside a `<Window>`, that's the
+*parent* document — overlays render in the wrong window and leak a reference
+from parent DOM to child state.
+
+Point them at the child document:
+
+```tsx
+import * as Popover from "@radix-ui/react-popover";
+
+function WindowContent() {
+  const doc = useWindowDocument();
+  return (
+    <Popover.Root>
+      <Popover.Trigger>Open</Popover.Trigger>
+      <Popover.Portal container={doc.body}>
+        <Popover.Content>...</Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+```
+
+### Caching libraries
+
+React Query, SWR, Zustand, and similar caches are scoped to the parent React
+tree (because `<Window>` children stay in the parent tree via `createPortal`).
+If a cached value references child-document DOM nodes, the cache retains them
+past close.
+
+Either scope cache entries to the window's lifecycle (invalidate on
+`onClose`) or keep DOM out of cached values.
+
+## Verifying in tests
+
+See [Testing](/electron-window/guides/testing/) for `createLeakTester()`,
+which WeakRef-tracks `window.open()` returns and asserts collection after
+close:
+
+```ts
+import { createLeakTester } from "@loc/electron-window/testing";
+
+const leaks = createLeakTester();
+await leaks.track(async () => {
+  await openSettingsWindow();
+  await closeSettingsWindow();
+});
+await leaks.expectNoLeaks(); // throws if child Window still reachable
+```
+
+For end-to-end verification in real Chromium, the library's own e2e suite
+uses CDP's `HeapProfiler.collectGarbage` + WeakRef tracking — see
+`tests/e2e/alternateFiberLeak.spec.ts` in the source for the pattern.

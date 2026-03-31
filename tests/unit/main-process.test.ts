@@ -67,6 +67,7 @@ function createMockBrowserWindow() {
     unmaximize: vi.fn(),
     close: vi.fn(),
     destroy: vi.fn(),
+    removeAllListeners: vi.fn(),
 
     webContents: { id: 1, setWindowOpenHandler: vi.fn() },
   };
