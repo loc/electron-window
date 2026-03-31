@@ -15,7 +15,7 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
-      id-token: write # provenance attestation + (later) trusted publishing
+      id-token: write # npm trusted publishing via OIDC
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,7 +25,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # npm trusted publishing needs npm CLI 11.5.1+ (Node 22.14+).
+          # Node 20's npm ~10 doesn't auto-detect GHA OIDC → ENONPMTOKEN.
+          node-version: "lts/*"
           cache: "yarn"
 
       - name: Install dependencies
@@ -40,14 +42,10 @@ jobs:
       - name: Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Bootstrap: first publish uses NPM_TOKEN (Automation token from
-          # npmjs.com). After the package exists, configure trusted publishing
-          # at npmjs.com/package/@loc/electron-window/access → then this secret
-          # can be deleted and OIDC takes over.
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          # Provenance works with or without trusted publishing — generates
-          # the "published via GitHub Actions" attestation badge.
-          NPM_CONFIG_PROVENANCE: "true"
+          # No NPM_TOKEN — trusted publisher is configured at npmjs.com/
+          # package/@loc/electron-window/access. npm CLI detects GHA's OIDC
+          # env via id-token: write and does the exchange automatically.
+          # Provenance is automatic with trusted publishing.
         run: npx semantic-release
 
   # Deploy docs after a successful release so the root docs reflect the
