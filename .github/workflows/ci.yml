@@ -113,7 +113,14 @@ jobs:
           cache: "yarn"
       - run: yarn install --immutable
       - name: Install Electron ${{ matrix.electron }}
-        run: yarn add -D electron@${{ matrix.electron }}
+        # yarn 1 sometimes skips electron's postinstall when `yarn add`
+        # swaps versions over an existing install — `dist/` ends up empty
+        # and every later step (chrome-sandbox fix, build, e2e) fails. The
+        # install script downloads the prebuilt binary if it's missing and
+        # is a no-op if it's already there.
+        run: |
+          yarn add -D electron@${{ matrix.electron }}
+          node node_modules/electron/install.js
       # Re-run after the electron install — `yarn add` reinstalls the binary
       # and resets permissions. Same Ubuntu 24.04 userns issue as the e2e job.
       - name: Fix chrome-sandbox
