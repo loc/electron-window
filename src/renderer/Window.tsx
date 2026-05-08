@@ -317,7 +317,7 @@ export const Window = forwardRef<WindowRef, WindowProps>(function Window(props, 
         return;
       }
 
-      const { container, cleanup: styleCleanup } = initWindowDocument(win.document, {
+      const { container, cleanup: styleCleanup } = initWindowDocument(win, {
         injectStyles,
         title,
       });

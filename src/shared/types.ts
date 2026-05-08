@@ -38,6 +38,58 @@ export type AlwaysOnTopLevel =
 export type InjectStylesMode = "auto" | false | ((targetDocument: Document) => void);
 
 /**
+ * Per-window setup hook for pooled windows.
+ *
+ * Runs once for each window the pool creates, after the document has been
+ * initialized (`<base>` href, style injection, and the `#root` portal
+ * container are all in place) and **before React portals any content in**.
+ * Custom elements registered here upgrade synchronously as React inserts
+ * them — no flash of unstyled/unupgraded content the way a `useLayoutEffect`
+ * (which runs after mount) would risk. Use it for realm-specific
+ * initialization that must happen on the child window's globals — registering
+ * custom elements on the child `customElements` registry, patching
+ * prototypes, syncing `document.documentElement` attributes, etc.
+ *
+ * Unlike the function form of {@link InjectStylesMode}, this is *additive*:
+ * it runs regardless of `injectStyles` mode and does not replace the default
+ * `"auto"` style mirroring.
+ *
+ * Optionally return a cleanup function. It runs **at most once**, when the
+ * window is destroyed (pool teardown, idle eviction, external close) —
+ * alongside the style observer cleanup. It does NOT run on release back to
+ * the pool: the hook fires once per window *lifetime*, not once per use.
+ * The hook must be synchronous — an `async` hook's rejection escapes the
+ * error guard and its returned cleanup is dropped (the library logs an
+ * error if it detects this).
+ *
+ * **Errors are contained.** A throwing setup hook (or cleanup) is caught and
+ * logged to `console.error`; it won't take down pool warm-up or teardown.
+ * Don't rely on a hook side-effect that you haven't verified actually ran.
+ *
+ * **What survives across pool reuse:** registrations on realm globals
+ * (`customElements`, prototype patches), `documentElement` attributes, and
+ * `<head>` contents persist. The pool's `release()` resets `body.className`,
+ * `doc.title`, clears `#root`'s contents, and removes any other `<body>`
+ * children between uses — don't rely on those from setup.
+ *
+ * **If your setup throws partway through, no cleanup is captured** — the
+ * return value is never reached. If partial mutations must be undone on
+ * failure (only), use `try/catch` and re-throw: catch, roll back, `throw err`.
+ * (Don't reach for `try/finally` — `finally` runs on success too and would
+ * unconditionally undo your setup.)
+ *
+ * The `childWindow` parameter is typed `Window & typeof globalThis` (not the
+ * codebase's usual `globalThis.Window`) so realm constructors like
+ * `childWindow.HTMLElement` and realm globals like `childWindow.customElements`
+ * are reachable without a cast — they live on the global-object intersection,
+ * not on `Window` alone.
+ */
+export type WindowSetupCallback = (
+  childWindow: Window & typeof globalThis,
+  doc: Document,
+) => void | (() => void);
+
+/**
  * Target display for window placement
  */
 export type TargetDisplay = number | "primary" | "cursor";
@@ -497,7 +549,7 @@ export interface BaseWindowProps {
    * How to inject styles into the new window.
    * - "auto": Copy <style> and <link> tags from parent (default)
    * - false: No injection (for CSS-in-JS)
-   * - function: Custom injection
+   * - function: Custom injection (replaces the auto mirroring entirely)
    */
   injectStyles?: InjectStylesMode;
 

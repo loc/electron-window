@@ -8,6 +8,7 @@ import type {
   WindowPoolConfig,
   BaseWindowProps,
   InjectStylesMode,
+  WindowSetupCallback,
 } from "../shared/types.js";
 import {
   CREATION_ONLY_PROPS,
@@ -62,6 +63,7 @@ export interface WindowPoolDefinition {
   config?: WindowPoolConfig;
   debug?: boolean;
   injectStyles?: InjectStylesMode;
+  onWindowSetup?: WindowSetupCallback;
 }
 
 // Singleton pool instances keyed by pool definition. Pools outlive individual
@@ -80,14 +82,28 @@ const poolInstances = new WeakMap<WindowPoolDefinition, RendererWindowPool>();
  * @param options.injectStyles - How to inject styles into pool windows.
  *   - "auto": Copy <style> and <link> tags from parent (default)
  *   - false: No injection (for CSS-in-JS frameworks)
- *   - function: Custom injection
+ *   - function: Custom injection (REPLACES auto mirroring)
+ * @param options.onWindowSetup - Per-window setup hook. Runs once for each
+ *   window the pool creates (including pre-warmed idle windows), after
+ *   `<base>`, styles, and the `#root` portal container are in place — and
+ *   before React portals any content in. Must be synchronous. Use it for
+ *   realm-specific initialization on the child window — custom element
+ *   registration, prototype patches, etc. Additive: runs regardless of
+ *   `injectStyles` mode. Optionally return a cleanup function; it runs
+ *   when the window is destroyed. See {@link WindowSetupCallback} for the
+ *   full contract.
  */
 export function createWindowPool(
   shape: PoolShape,
   config?: WindowPoolConfig,
-  options?: { injectStyles?: InjectStylesMode },
+  options?: { injectStyles?: InjectStylesMode; onWindowSetup?: WindowSetupCallback },
 ): WindowPoolDefinition {
-  return { shape, config: config ?? {}, injectStyles: options?.injectStyles };
+  return {
+    shape,
+    config: config ?? {},
+    injectStyles: options?.injectStyles,
+    onWindowSetup: options?.onWindowSetup,
+  };
 }
 
 /** @deprecated Use createWindowPool instead */
@@ -201,6 +217,7 @@ export const PooledWindow = forwardRef<PooledWindowRef, PooledWindowProps>(funct
         config: poolDef.config,
         debug: poolDef.debug,
         injectStyles: poolDef.injectStyles,
+        onWindowSetup: poolDef.onWindowSetup,
         registerWindow: provider.registerWindow,
         unregisterWindow: provider.unregisterWindow,
         updateWindow: provider.updateWindow,

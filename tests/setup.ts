@@ -4,6 +4,15 @@ import "@testing-library/jest-dom/vitest";
 // Track mock windows for testing
 const mockWindows = new Map<string, MockWindow>();
 
+// LIMITATION: MockWindow is a plain object, not a real browsing context. It
+// has no realm globals — no `customElements`, no `HTMLElement` constructor, no
+// per-realm prototypes. The `Window & typeof globalThis` cast in
+// `initWindowDocument` (the type `onWindowSetup` callbacks receive) is sound
+// at runtime in Electron (a child window IS a global object) but not against
+// this mock. Tests can assert *that* `onWindowSetup` runs and what it
+// receives; they cannot exercise the realm-global use case (e.g.
+// `childWindow.customElements.define(...)`) without first adding those
+// globals to MockWindow.
 class MockWindow {
   innerWidth = 800;
   innerHeight = 600;

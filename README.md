@@ -174,7 +174,7 @@ The `default*` / controlled split follows React's `defaultValue` / `value` patte
 | `persistBounds`         | `string`                           | —        | Unique key. Saves bounds to localStorage, restores on reopen.    |
 | `recreateOnShapeChange` | `boolean`                          | `false`  | Recreate window when creation-only props change.                 |
 | `name`                  | `string`                           | —        | Debug label for DevTools and warning messages.                   |
-| `injectStyles`          | `"auto" \| false \| (doc) => void` | `"auto"` | How to copy styles into the child window. `false` for CSS-in-JS. |
+| `injectStyles`          | `"auto" \| false \| (doc) => void` | `"auto"` | How to copy styles into the child window. `false` for CSS-in-JS. The function form replaces auto mirroring entirely. |
 
 ## Hooks
 
@@ -266,6 +266,44 @@ function App() {
 On `open={true}`: acquires a pre-warmed window from the pool (instant). On `open={false}`: hides and returns to pool (no destroy/recreate cost).
 
 Shape props (`transparent`, `frame`, `titleBarStyle`, `vibrancy`) and `injectStyles` are fixed by the pool definition. Most other props work per-use: `defaultWidth`/`defaultHeight` size the window on each acquire, and behavior props (`alwaysOnTop`, `opacity`, etc.) update live while open. `targetDisplay`, `persistBounds`, and `recreateOnShapeChange` are not accepted on `<PooledWindow>` (TypeScript error) — pool windows are pre-created and reused, so these don't fit the model.
+
+### Per-window setup (`onWindowSetup`)
+
+Each pooled window is its own browsing-context realm — it has its own `customElements` registry, its own prototypes, its own `document`. Code that registers globals on the *parent* window (e.g. a library calling `customElements.define(...)` at import time) won't be visible inside a pooled window.
+
+`onWindowSetup` is a per-window hook that runs once for each window the pool creates — including pre-warmed idle windows — right after the document is initialized (`<base>`, styles, and the `#root` container are in place) and **before React portals any content in**. That ordering matters: custom elements registered here upgrade synchronously as React inserts them, so there's no flash of unupgraded content the way a `useLayoutEffect` (which runs after mount) would risk.
+
+```tsx
+const popoutPool = createWindowPool(
+  { frame: true },
+  { minIdle: 1 },
+  {
+    // injectStyles stays "auto" — onWindowSetup is additive, not a replacement
+    onWindowSetup: (childWindow, doc) => {
+      // Register custom elements on the child realm's registry
+      if (!childWindow.customElements.get("my-widget")) {
+        childWindow.customElements.define("my-widget", class extends childWindow.HTMLElement {});
+      }
+      // Sync a documentElement attribute from the parent
+      doc.documentElement.dataset.theme = document.documentElement.dataset.theme;
+
+      // Optional cleanup, runs when the window is destroyed (pool teardown,
+      // idle eviction, or external close — not on hide/release back to pool).
+      return () => {
+        /* tear down listeners, observers, etc. */
+      };
+    },
+  },
+);
+```
+
+This is the sanctioned home for "auto styles **plus** a bit more per-window setup." The function form of `injectStyles` *replaces* the auto `<style>`/`<link>` mirroring — use it only when you want full control over style injection. `onWindowSetup` runs regardless of `injectStyles` mode.
+
+The hook **must be synchronous**. An `async` hook's rejection escapes the error guard and its returned cleanup is silently dropped — TypeScript won't warn (its `void` return rule is permissive), but the library detects it at runtime and logs an error. Do dynamic imports at module scope; keep the hook itself sync.
+
+**What survives across pool reuse.** The hook runs once per window *lifetime*, not once per use. A pooled window is acquired and released many times before it's destroyed, and `release()` resets `body.className`, `doc.title`, clears `#root`'s contents, and removes any other `<body>` children (e.g. portal mount points appended directly to `body`) between uses to prevent state leaking between consumers. Mutations to those will be silently reverted after the first reuse cycle. Mutations that **do** persist: realm globals (`customElements` registrations, prototype patches), `documentElement` attributes, and `<head>` contents (the style observer manages those separately). Stick to those in `onWindowSetup`; anything per-acquire belongs in your component's effect.
+
+For non-pooled `<Window>`, you don't need `onWindowSetup` — the window's lifetime matches your component's, so a `useWindowDocument()` + `useLayoutEffect` does the same job at the same time.
 
 **[Full pooling guide →](https://loc.github.io/electron-window/guides/pooling/)** — pool lifetime, `destroyWindowPool`, HMR handling, and the close-button behavior difference vs `<Window>`.
 

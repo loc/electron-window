@@ -1,5 +1,5 @@
 import { sleep } from "../shared/utils.js";
-import type { InjectStylesMode } from "../shared/types.js";
+import type { InjectStylesMode, WindowSetupCallback } from "../shared/types.js";
 
 export const WINDOW_READY_TIMEOUT_MS = 4000;
 export const BOUNDS_CHANGE_DEBOUNCE_MS = 100;
@@ -25,22 +25,47 @@ export async function waitForWindowReady(
 export interface InitWindowDocumentResult {
   /** The portal container element */
   container: HTMLElement;
-  /** Call to disconnect the style observer and clean up */
+  /**
+   * Call when the child window is destroyed. Runs the consumer's
+   * `onWindowSetup` teardown (if any) and disconnects the style observer.
+   * Idempotent: callers can reach teardown from multiple paths (unload
+   * listener, pool eviction, external destroy) without double-running
+   * consumer cleanup.
+   */
   cleanup: () => void;
+}
+
+export interface InitWindowDocumentOptions {
+  injectStyles?: InjectStylesMode;
+  title?: string;
+  /**
+   * Per-window setup hook. Runs after `<base>`, styles, and the `#root`
+   * portal container are in place. Additive — runs regardless of
+   * `injectStyles` mode. Optionally returns a cleanup, which is folded
+   * into the returned `cleanup()`.
+   */
+  onWindowSetup?: WindowSetupCallback;
 }
 
 /**
  * Set up a child window's document for portal rendering.
- * Clears the document, adds a base href, injects styles, creates the portal container.
+ * Clears the document, adds a base href, injects styles, creates the portal
+ * container, and runs the consumer's `onWindowSetup` hook.
  *
  * When injectStyles is "auto", a MutationObserver keeps child styles in sync
- * with the parent as new styles are added/removed/modified (e.g., Tailwind JIT, HMR).
- * Call cleanup() when the child window closes to disconnect the observer.
+ * with the parent as new styles are added/removed/modified (e.g., Tailwind JIT,
+ * HMR). Call cleanup() when the child window closes to disconnect the observer
+ * and run any consumer-provided teardown.
+ *
+ * Takes the child `Window` (not just its `Document`) so the setup hook can
+ * reach realm globals — `customElements`, prototype constructors, etc. —
+ * which live on the window, not the document.
  */
 export function initWindowDocument(
-  doc: Document,
-  options: { injectStyles?: InjectStylesMode; title?: string } = {},
+  childWindow: globalThis.Window,
+  options: InitWindowDocumentOptions = {},
 ): InitWindowDocumentResult {
+  const doc = childWindow.document;
   doc.head.innerHTML = "";
   doc.body.innerHTML = "";
 
@@ -48,7 +73,12 @@ export function initWindowDocument(
   base.href = window.location.origin;
   doc.head.appendChild(base);
 
-  const cleanup = handleStyleInjection(doc, options.injectStyles ?? "auto");
+  // `let` (not `const`) so the cleanup closure can null these out after
+  // running — see the cleanup body below for why.
+  let styleCleanup: (() => void) | undefined = handleStyleInjection(
+    doc,
+    options.injectStyles ?? "auto",
+  );
 
   if (options.title) {
     doc.title = options.title;
@@ -57,6 +87,67 @@ export function initWindowDocument(
   const container = doc.createElement("div");
   container.id = "root";
   doc.body.appendChild(container);
+
+  // Run consumer setup AFTER <base>, styles, and #root are in place — this
+  // is the invariant the hook's contract documents, so it lives next to the
+  // code that establishes it. Errors are caught so a faulty hook can't
+  // poison window creation. Cast: `window.open()` is typed `Window | null`,
+  // but a same-origin child window is genuinely a global object at runtime,
+  // and the hook needs realm constructors (`childWindow.HTMLElement`) and
+  // realm globals (`childWindow.customElements`) that only exist on the
+  // global-object intersection type. This is the one place in the codebase
+  // that uses `Window & typeof globalThis` instead of `globalThis.Window` —
+  // the divergence is the point.
+  let setupCleanup: (() => void) | undefined;
+  if (options.onWindowSetup) {
+    try {
+      const result = options.onWindowSetup(childWindow as Window & typeof globalThis, doc);
+      if (result instanceof Promise) {
+        // TS's permissive `void` rule lets `async (win, doc) => ...` through
+        // the type check. An async hook would (a) have its rejection escape
+        // the try/catch as an unhandled rejection, and (b) silently drop any
+        // cleanup it eventually resolves to (`typeof Promise !== "function"`).
+        // Fail loud instead of silently mishandling both.
+        console.error(
+          "[electron-window] onWindowSetup must be synchronous. " +
+            "An async hook's errors are not caught and its returned cleanup is dropped. " +
+            "Do dynamic imports at module scope and call sync APIs in the hook.",
+        );
+        result.catch((err) => {
+          console.error("[electron-window] async onWindowSetup rejected:", err);
+        });
+      } else if (typeof result === "function") {
+        setupCleanup = result;
+      }
+    } catch (err) {
+      console.error("[electron-window] onWindowSetup threw:", err);
+    }
+  }
+
+  // Combined, one-shot cleanup. The style subscriber's teardown is naturally
+  // idempotent (Set.delete), but a consumer's setup teardown may not be —
+  // and callers can reach this from overlapping paths (unload listener +
+  // notifyDestroyed + destroyEntry).
+  let cleaned = false;
+  const cleanup = (): void => {
+    if (cleaned) return;
+    cleaned = true;
+    if (setupCleanup) {
+      try {
+        setupCleanup();
+      } catch (err) {
+        console.error("[electron-window] onWindowSetup cleanup threw:", err);
+      }
+    }
+    styleCleanup?.();
+    // Drop captured refs so a lingering reference to `cleanup` (held by the
+    // unload listener, a PoolEntry, or a debounced callback) doesn't pin the
+    // consumer's setup closure — which plausibly captures the child Window
+    // and its detached realm. Mirrors the defensive null-out in
+    // RendererWindowPool.destroyEntry.
+    setupCleanup = undefined;
+    styleCleanup = undefined;
+  };
 
   return { container, cleanup };
 }
