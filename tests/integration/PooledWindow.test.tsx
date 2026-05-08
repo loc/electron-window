@@ -149,6 +149,277 @@ describe("createWindowPool", () => {
     expect(a.shape).toEqual(b.shape);
     expect(a.config).toEqual(b.config);
   });
+
+  it("threads onWindowSetup through to the pool definition", () => {
+    const onWindowSetup = vi.fn();
+    const pool = createWindowPool({}, undefined, { onWindowSetup });
+    expect(pool.onWindowSetup).toBe(onWindowSetup);
+  });
+});
+
+// ─── onWindowSetup ───────────────────────────────────────────────────────────
+
+describe("onWindowSetup", () => {
+  beforeEach(() => {
+    resetMockWindows();
+    resetMockWindowsGlobal();
+    vi.clearAllMocks();
+  });
+
+  async function makePool(
+    onWindowSetup: import("../../src/shared/types.js").WindowSetupCallback,
+    config: { minIdle?: number; maxIdle?: number } = { minIdle: 1, maxIdle: 3 },
+  ) {
+    const { RendererWindowPool } = await import("../../src/renderer/RendererWindowPool.js");
+    return new RendererWindowPool({
+      shape: {},
+      config,
+      onWindowSetup,
+      registerWindow: vi.fn(async () => true),
+      unregisterWindow: vi.fn(async () => {}),
+      updateWindow: vi.fn(async () => {}),
+      windowAction: vi.fn(async () => {}),
+    });
+  }
+
+  it("fires once per pooled window with the child window and document", async () => {
+    const calls: Array<{ win: unknown; doc: Document }> = [];
+    // maxIdle=1 keeps the pool from replenishing in the background after
+    // acquire() — that path is async and would make `calls.length` racy.
+    const pool = await makePool(
+      (win, doc) => {
+        calls.push({ win, doc });
+      },
+      { minIdle: 1, maxIdle: 1 },
+    );
+
+    // Pre-warmed idle window (created during warmUp, not on first acquire)
+    await pool.warmUp();
+    expect(calls).toHaveLength(1);
+
+    // The callback receives the *child* window/doc, not the parent's.
+    expect(calls[0]!.win).not.toBe(window);
+    expect(calls[0]!.doc).not.toBe(document);
+    expect((calls[0]!.win as { document: Document }).document).toBe(calls[0]!.doc);
+
+    // Document was already initialized by initWindowDocument when the hook ran:
+    // <base> and #root exist.
+    expect(calls[0]!.doc.querySelector("base")).not.toBeNull();
+    expect(calls[0]!.doc.getElementById("root")).not.toBeNull();
+
+    // Acquiring the pre-warmed window does NOT re-run setup (it ran at create time).
+    const e1 = await pool.acquire();
+    expect(calls).toHaveLength(1);
+
+    // On-the-fly creation when the pool is exhausted DOES run setup.
+    const e2 = await pool.acquire();
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.win).not.toBe(calls[0]!.win);
+
+    await pool.release(e1.id);
+    await pool.release(e2.id);
+    pool.destroy();
+  });
+
+  it("runs the returned cleanup when the window is destroyed, not on release", async () => {
+    const cleanup = vi.fn();
+    const pool = await makePool(() => cleanup, { minIdle: 1, maxIdle: 1 });
+
+    await pool.warmUp();
+    const entry = await pool.acquire();
+    expect(cleanup).not.toHaveBeenCalled();
+
+    // Release returns the window to the idle pool — it stays alive, no cleanup.
+    await pool.release(entry.id);
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(pool.getIdleCount()).toBe(1);
+
+    // destroy() tears down all idle entries → cleanup fires once per window.
+    pool.destroy();
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs the returned cleanup when the window is closed externally (unload)", async () => {
+    const cleanup = vi.fn();
+    const pool = await makePool(() => cleanup, { minIdle: 1, maxIdle: 1 });
+
+    await pool.warmUp();
+    const entry = await pool.acquire();
+    expect(cleanup).not.toHaveBeenCalled();
+
+    // External close → unload listener fires setupCleanup + styleCleanup.
+    (entry.childWindow as unknown as { simulateUnload: () => void }).simulateUnload();
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    pool.destroy();
+  });
+
+  it("returned cleanup is idempotent across overlapping teardown paths", async () => {
+    const cleanup = vi.fn();
+    const pool = await makePool(() => cleanup, { minIdle: 1, maxIdle: 1 });
+
+    await pool.warmUp();
+    const entry = await pool.acquire();
+
+    // Main-process `closed` event arrives → notifyDestroyed tears down the entry.
+    pool.notifyDestroyed(entry.id);
+    expect(cleanup).toHaveBeenCalledTimes(1);
+
+    // The unload listener captures the same setupCleanup wrapper. A late
+    // renderer-side unload must not double-run the consumer's cleanup —
+    // unlike the style subscriber's Set.delete(), consumer code may not
+    // be naturally idempotent.
+    (entry.childWindow as unknown as { simulateUnload: () => void }).simulateUnload();
+    expect(cleanup).toHaveBeenCalledTimes(1);
+
+    pool.destroy();
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it("a throwing onWindowSetup does not break window creation", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const pool = await makePool(() => {
+      throw new Error("boom");
+    });
+
+    await pool.warmUp();
+    expect(pool.getIdleCount()).toBe(1);
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("onWindowSetup threw"),
+      expect.any(Error),
+    );
+
+    // The window is still usable.
+    const entry = await pool.acquire();
+    expect(entry.childWindow.closed).toBe(false);
+    await pool.release(entry.id);
+    pool.destroy();
+    consoleError.mockRestore();
+  });
+
+  it("runs setup independently of injectStyles mode", async () => {
+    const { RendererWindowPool } = await import("../../src/renderer/RendererWindowPool.js");
+    const customInject = vi.fn();
+    const onWindowSetup = vi.fn();
+    const pool = new RendererWindowPool({
+      shape: {},
+      config: { minIdle: 1 },
+      // Function form REPLACES auto mirroring — onWindowSetup must still run.
+      injectStyles: customInject,
+      onWindowSetup,
+      registerWindow: vi.fn(async () => true),
+      unregisterWindow: vi.fn(async () => {}),
+      updateWindow: vi.fn(async () => {}),
+      windowAction: vi.fn(async () => {}),
+    });
+
+    await pool.warmUp();
+    expect(customInject).toHaveBeenCalledTimes(1);
+    expect(onWindowSetup).toHaveBeenCalledTimes(1);
+    pool.destroy();
+  });
+
+  it("warns and discards an async onWindowSetup instead of dropping its cleanup silently", async () => {
+    // TS's permissive `void` rule lets `async (win, doc) => ...` pass the
+    // type check. The runtime check should fail loud instead of silently
+    // mishandling the rejection and the dropped cleanup.
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const cleanup = vi.fn();
+    const pool = await makePool(
+      // No `@ts-expect-error` — TS's permissive `void` return-type rule means
+      // `async () => fn` IS assignable to `() => void | (() => void)`. That's
+      // exactly the footgun the runtime check is for: the type system can't
+      // catch it, so the library must.
+      async () => {
+        await Promise.resolve();
+        return cleanup;
+      },
+      { minIdle: 1, maxIdle: 1 },
+    );
+
+    await pool.warmUp();
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("onWindowSetup must be synchronous"),
+    );
+
+    // The eventually-resolved cleanup was never captured — it does NOT run
+    // on destroy. (This is the failure mode the warning is for.)
+    pool.destroy();
+    // Flush the microtask queue so the async hook's promise settles.
+    await Promise.resolve();
+    expect(cleanup).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it("a throwing cleanup does not break pool teardown", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const cleanupCalls: number[] = [];
+    let n = 0;
+    const pool = await makePool(
+      () => {
+        const i = ++n;
+        return () => {
+          cleanupCalls.push(i);
+          throw new Error(`cleanup ${i} boom`);
+        };
+      },
+      { minIdle: 2, maxIdle: 2 },
+    );
+
+    await pool.warmUp();
+    expect(pool.getIdleCount()).toBe(2);
+
+    // destroy() iterates all idle entries — a throwing cleanup on the first
+    // must not skip the second.
+    pool.destroy();
+    expect(cleanupCalls).toHaveLength(2);
+    expect(pool.getIdleCount()).toBe(0);
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("onWindowSetup cleanup threw"),
+      expect.any(Error),
+    );
+    consoleError.mockRestore();
+  });
+
+  it("threads through createWindowPool → <PooledWindow> → pool", async () => {
+    // The other tests in this block drive RendererWindowPool directly. This
+    // one exercises the full prop-threading path: createWindowPool stores the
+    // hook on WindowPoolDefinition, PooledWindow passes it to the pool
+    // constructor, the pool runs it during warmUp.
+    const onWindowSetup = vi.fn();
+    const pool = createWindowPool({}, { minIdle: 1, maxIdle: 1 }, { onWindowSetup });
+
+    function TestApp() {
+      const [open, setOpen] = useState(false);
+      return (
+        <MockWindowProvider>
+          <button onClick={() => setOpen(true)}>Open</button>
+          <PooledWindow pool={pool} open={open}>
+            <div data-testid="setup-content">Content</div>
+          </PooledWindow>
+        </MockWindowProvider>
+      );
+    }
+
+    render(<TestApp />);
+
+    // warmUp runs onWindowSetup once for the pre-warmed idle window — before
+    // any acquire.
+    await waitFor(() => {
+      expect(onWindowSetup).toHaveBeenCalledTimes(1);
+    });
+    const [calledWin, calledDoc] = onWindowSetup.mock.calls[0]!;
+    expect(calledWin).not.toBe(window);
+    expect(calledDoc).not.toBe(document);
+    expect((calledWin as { document: Document }).document).toBe(calledDoc);
+    expect((calledDoc as Document).getElementById("root")).not.toBeNull();
+
+    // Acquiring the pre-warmed window does NOT re-run setup.
+    fireEvent.click(document.querySelector("button")!);
+    await waitFor(() => {
+      expect(queryInPoolWindows('[data-testid="setup-content"]')).not.toBeNull();
+    });
+    expect(onWindowSetup).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ─── <PooledWindow> ──────────────────────────────────────────────────────────

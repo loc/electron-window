@@ -4,6 +4,7 @@ import type {
   InjectStylesMode,
   TitleBarStyle,
   VibrancyType,
+  WindowSetupCallback,
 } from "../shared/types.js";
 import { POOL_RELEASE_PROP_DEFAULTS } from "../shared/types.js";
 import { waitForWindowReady, initWindowDocument } from "./windowUtils.js";
@@ -24,7 +25,11 @@ interface PoolEntry {
   id: string;
   childWindow: globalThis.Window;
   portalTarget: HTMLElement;
-  styleCleanup: () => void;
+  /**
+   * Combined teardown returned by `initWindowDocument` — runs the consumer's
+   * `onWindowSetup` cleanup and disconnects the style observer. Idempotent.
+   */
+  cleanup: () => void;
 }
 
 export interface RendererWindowPoolOptions {
@@ -32,6 +37,13 @@ export interface RendererWindowPoolOptions {
   config?: WindowPoolConfig;
   debug?: boolean;
   injectStyles?: InjectStylesMode;
+  /**
+   * Per-window setup hook. Runs once for each window the pool creates —
+   * including pre-warmed idle windows — after `initWindowDocument` finishes
+   * (`<base>`, styles, and `#root` are in place). Forwarded to
+   * `initWindowDocument`; see {@link WindowSetupCallback} for the contract.
+   */
+  onWindowSetup?: WindowSetupCallback;
   // Injected by PooledWindow from WindowProviderContext
   registerWindow: (id: string, props: Record<string, unknown>) => Promise<boolean>;
   unregisterWindow: (id: string) => Promise<void>;
@@ -66,6 +78,7 @@ export class RendererWindowPool {
   private windowAction: RendererWindowPoolOptions["windowAction"];
   private readonly debug: boolean;
   private readonly injectStyles: InjectStylesMode;
+  private readonly onWindowSetup?: WindowSetupCallback;
 
   private isDestroyed = false;
   private inFlight = 0;
@@ -90,6 +103,7 @@ export class RendererWindowPool {
     this.windowAction = options.windowAction;
     this.debug = options.debug ?? false;
     this.injectStyles = options.injectStyles ?? "auto";
+    this.onWindowSetup = options.onWindowSetup;
   }
 
   /**
@@ -182,13 +196,11 @@ export class RendererWindowPool {
         return;
       }
 
-      const { container: portalTarget, cleanup: styleCleanup } = initWindowDocument(
-        childWindow.document,
-        {
-          injectStyles: this.injectStyles,
-        },
-      );
-      const entry: PoolEntry = { id, childWindow, portalTarget, styleCleanup };
+      const { container: portalTarget, cleanup } = initWindowDocument(childWindow, {
+        injectStyles: this.injectStyles,
+        onWindowSetup: this.onWindowSetup,
+      });
+      const entry: PoolEntry = { id, childWindow, portalTarget, cleanup };
       this.idle.push(entry);
       this.debugLog("idle window ready", id);
 
@@ -197,7 +209,7 @@ export class RendererWindowPool {
       // treat it as destruction if the window is actually closed.
       childWindow.addEventListener("unload", () => {
         if (childWindow.closed) {
-          styleCleanup();
+          cleanup();
           scheduleLeakCheck(childWindow, id);
           this.debugLog("window destroyed externally", id);
           this.handleWindowDestroyed(id);
@@ -289,24 +301,22 @@ export class RendererWindowPool {
         throw new Error("Pool destroyed during acquire");
       }
 
-      const { container: portalTarget, cleanup: styleCleanup } = initWindowDocument(
-        childWindow.document,
-        {
-          injectStyles: this.injectStyles,
-        },
-      );
+      const { container: portalTarget, cleanup } = initWindowDocument(childWindow, {
+        injectStyles: this.injectStyles,
+        onWindowSetup: this.onWindowSetup,
+      });
       const newEntry: PoolEntry = {
         id,
         childWindow,
         portalTarget,
-        styleCleanup,
+        cleanup,
       };
       this.active.set(id, newEntry);
 
       // Handle external destruction for on-the-fly windows too
       childWindow.addEventListener("unload", () => {
         if (childWindow.closed) {
-          styleCleanup();
+          cleanup();
           scheduleLeakCheck(childWindow, id);
           this.handleWindowDestroyed(id);
         }
@@ -356,7 +366,7 @@ export class RendererWindowPool {
     // The window may have been destroyed main-side during the IPC awaits
     // above (e.g., parent-crash cleanup). Accessing .document on a closed
     // Window proxy throws. release() is void-ed by callers, so that throw
-    // becomes an unhandled rejection AND skips styleCleanup → subscriber leak.
+    // becomes an unhandled rejection AND skips cleanup → subscriber leak.
     if (entry.childWindow.closed) {
       this.debugLog("window closed during release, discarding", id);
       this.destroyEntry(entry);
@@ -408,14 +418,14 @@ export class RendererWindowPool {
    * Destroy a pool entry. Pool windows have hideOnClose: true, so
    * childWindow.close() would be a no-op (preventDefaulted + hidden +
    * spurious userCloseRequested event). We rely solely on unregisterWindow →
-   * BrowserWindow.destroy() which bypasses the close handler. styleCleanup
+   * BrowserWindow.destroy() which bypasses the close handler. cleanup()
    * must run explicitly since destroy() doesn't fire unload.
    */
   private destroyEntry(entry: PoolEntry): void {
     // Idempotency guard — the null-out below means a second call on the
-    // same entry would pass null to styleCleanup.
+    // same entry would pass null to cleanup.
     if (!entry.childWindow) return;
-    entry.styleCleanup();
+    entry.cleanup();
     const timer = this.idleTimers.get(entry.id);
     if (timer) {
       clearTimeout(timer);
@@ -498,7 +508,7 @@ export class RendererWindowPool {
     // from main doesn't fire unload — this path must clean up explicitly.
     const entry = this.active.get(id) ?? this.idle.find((e) => e.id === id);
     if (entry) {
-      entry.styleCleanup();
+      entry.cleanup();
       scheduleLeakCheck(entry.childWindow, id);
     }
     this.handleWindowDestroyed(id);

@@ -95,6 +95,6 @@ Setting `open={false}` destroys the window via `BrowserWindow.destroy()`, which 
 | `persistBounds`         | `string`                           | —        | Unique key. Saves bounds to localStorage, restores on reopen.    |
 | `recreateOnShapeChange` | `boolean`                          | `false`  | Recreate window when creation-only props change.                 |
 | `name`                  | `string`                           | —        | Debug label for DevTools and warning messages.                   |
-| `injectStyles`          | `"auto" \| false \| (doc) => void` | `"auto"` | How to copy styles into the child window. `false` for CSS-in-JS. |
+| `injectStyles`          | `"auto" \| false \| (doc) => void` | `"auto"` | How to copy styles into the child window. `false` for CSS-in-JS. The function form replaces auto mirroring entirely. |
 
 For `persistBounds` and the `usePersistedBounds` hook, see [Persistence](/electron-window/guides/persistence/).

@@ -63,6 +63,7 @@ export type {
   TitleBarStyle,
   VibrancyType,
   InjectStylesMode,
+  WindowSetupCallback,
   TargetDisplay,
   WindowPoolConfig,
 } from "../shared/types.js";
