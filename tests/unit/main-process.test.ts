@@ -2096,3 +2096,132 @@ describe("child window security and parent lifecycle", () => {
     expect(manager.getAllWindows()).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests: owns()
+// ---------------------------------------------------------------------------
+
+describe("WindowManager.owns()", () => {
+  function createManagerWithChild() {
+    (globalThis as Record<string, unknown>).__lastImpl__ = undefined;
+    const manager = new WindowManager({ devWarnings: false });
+    const parent = createMockParentWindow();
+    manager.setupForWindow(parent as unknown as import("electron").BrowserWindow);
+    const impl = getLastImpl();
+
+    impl.RegisterWindow("child", {} as never);
+    const openHandler = parent.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (arg: {
+      frameName: string;
+      url: string;
+    }) => unknown;
+    openHandler({ frameName: "child", url: "about:blank" });
+    const didCreate = parent.webContents.on.mock.calls.find(
+      (c) => c[0] === "did-create-window",
+    )?.[1] as (bw: unknown, details: { frameName: string }) => void;
+    const childBW = createMockBrowserWindow();
+    didCreate(childBW, { frameName: "child" });
+
+    return { manager, parent, impl, childBW };
+  }
+
+  it("returns true for a managed child window", () => {
+    const { manager, childBW } = createManagerWithChild();
+    expect(manager.owns(childBW as unknown as import("electron").BrowserWindow)).toBe(true);
+  });
+
+  it("returns false for an unrelated BrowserWindow", () => {
+    const { manager } = createManagerWithChild();
+    const unrelated = createMockBrowserWindow();
+    expect(manager.owns(unrelated as unknown as import("electron").BrowserWindow)).toBe(false);
+  });
+
+  it("returns false after DestroyWindow", () => {
+    const { manager, impl, childBW } = createManagerWithChild();
+    impl.DestroyWindow("child");
+    expect(manager.owns(childBW as unknown as import("electron").BrowserWindow)).toBe(false);
+  });
+
+  it("returns false after UnregisterWindow", () => {
+    const { manager, impl, childBW } = createManagerWithChild();
+    impl.UnregisterWindow("child");
+    expect(manager.owns(childBW as unknown as import("electron").BrowserWindow)).toBe(false);
+  });
+
+  it("returns false after parent WebContents is destroyed", () => {
+    const { manager, parent, childBW } = createManagerWithChild();
+    const destroyedCb = (parent.webContents.once as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c) => c[0] === "destroyed",
+    )?.[1] as () => void;
+    destroyedCb();
+    expect(manager.owns(childBW as unknown as import("electron").BrowserWindow)).toBe(false);
+  });
+
+  it("returns false after manager.destroy()", () => {
+    const { manager, childBW } = createManagerWithChild();
+    manager.destroy();
+    expect(manager.owns(childBW as unknown as import("electron").BrowserWindow)).toBe(false);
+  });
+
+  it("re-registering an active id evicts the old BrowserWindow from owns()", () => {
+    // A renderer can register the same id twice (e.g., HMR remount before
+    // unmount cleanup runs). Without cleanup, the old BrowserWindow stays in
+    // ownedBrowserWindows forever and the old instance's `closed` listener
+    // would later removeManagedWindow() the *new* entry.
+    const { manager, parent, impl, childBW: oldBW } = createManagerWithChild();
+    const openHandler = parent.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (arg: {
+      frameName: string;
+      url: string;
+    }) => unknown;
+    const didCreate = parent.webContents.on.mock.calls.find(
+      (c) => c[0] === "did-create-window",
+    )?.[1] as (bw: unknown, details: { frameName: string }) => void;
+
+    // Re-register the SAME id with a new BrowserWindow.
+    impl.RegisterWindow("child", {} as never);
+    openHandler({ frameName: "child", url: "about:blank" });
+    const newBW = createMockBrowserWindow();
+    didCreate(newBW, { frameName: "child" });
+
+    expect(oldBW.destroy).toHaveBeenCalled();
+    expect(manager.owns(oldBW as unknown as import("electron").BrowserWindow)).toBe(false);
+    expect(manager.owns(newBW as unknown as import("electron").BrowserWindow)).toBe(true);
+  });
+
+  it("a different renderer cannot register over an active id (RegisterWindow rejects)", () => {
+    // Cross-owner overwrite of an ACTIVE window is a DoS vector — without the
+    // check, renderer B that learns A's window id could re-register it and
+    // open a new window, evicting (destroying) A's window. Mirrors the
+    // existing pendingWindows cross-owner check.
+    (globalThis as Record<string, unknown>).__lastImpl__ = undefined;
+    const manager = new WindowManager({ devWarnings: false });
+
+    const parentA = createMockParentWindow({ id: 1 });
+    manager.setupForWindow(parentA as unknown as import("electron").BrowserWindow);
+    const implA = getLastImpl();
+
+    const parentB = createMockParentWindow({ id: 2 });
+    manager.setupForWindow(parentB as unknown as import("electron").BrowserWindow);
+    const implB = getLastImpl();
+
+    // A registers and opens "victim".
+    implA.RegisterWindow("victim", {} as never);
+    const openA = parentA.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (arg: {
+      frameName: string;
+      url: string;
+    }) => unknown;
+    openA({ frameName: "victim", url: "about:blank" });
+    const didCreateA = parentA.webContents.on.mock.calls.find(
+      (c) => c[0] === "did-create-window",
+    )?.[1] as (bw: unknown, details: { frameName: string }) => void;
+    const victimBW = createMockBrowserWindow();
+    didCreateA(victimBW, { frameName: "victim" });
+    expect(manager.owns(victimBW as unknown as import("electron").BrowserWindow)).toBe(true);
+
+    // B tries to register the same id — rejected.
+    expect(implB.RegisterWindow("victim", {} as never)).toBe(false);
+
+    // A's window is untouched.
+    expect(victimBW.destroy).not.toHaveBeenCalled();
+    expect(manager.owns(victimBW as unknown as import("electron").BrowserWindow)).toBe(true);
+  });
+});
