@@ -128,6 +128,16 @@ manager.setupForWindow(mainWindow, {
 
 Don't try to do this from your own `webContents.on("did-create-window")` listener — that is the same event the library uses to install its handler, and which one wins depends on registration order and event-loop timing. `childWindowOpenHandler` and `onChildWindowCreated` run **after** the library has wired the child, so there's no race.
 
+## Owner reload reaps children
+
+When the owner WebContents performs a **hard main-frame navigation** (reload, `loadURL()`, full page nav), the library destroys that owner's managed child windows. Without this, a reload orphans the popouts: they stay on screen with stale content while the React tree that was portaling into them is gone.
+
+The reaper does **not** fire on SPA `pushState` navigations or iframe loads — only hard navs. If your owner page re-adopts existing popouts after a reload, opt out:
+
+```ts
+manager.setupForWindow(mainWindow, { reapOnOwnerNavigate: false });
+```
+
 ## Main-process API
 
 `setupWindowManager` returns (and `getWindowManager()` retrieves) a `WindowManager` instance. Useful for tray menus, "close all windows", or anything else in the main process that needs to touch child windows:
