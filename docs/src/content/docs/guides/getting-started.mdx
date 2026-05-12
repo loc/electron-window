@@ -140,6 +140,20 @@ app.on("browser-window-focus", (_e, win) => {
 
 `WindowInstance` wraps a `BrowserWindow` with the library's lifecycle methods. `instance.window` gives you the underlying Electron object if you need something the wrapper doesn't expose.
 
+### Quitting cleanly
+
+`hideOnClose` pool windows veto their own `close` event. `app.quit()` waits for all `BrowserWindow`s to drain — a window that vetoes its own close stalls the quit forever. The library disarms its windows on `app.on("before-quit")` automatically (and re-arms them via `cancelQuit()` if another listener vetoes the quit), so plain `app.quit()`, the macOS `Cmd-Q` path, and unsaved-changes-prompt-then-cancel all Just Work. On Windows, `session-end` (logoff/shutdown) is handled per-window inside the library too.
+
+The one gap: `electron-updater`'s `autoUpdater.quitAndInstall()` emits `before-quit-for-update` on **its own emitter**, not Electron's `app`. Call `prepareForQuit()` yourself there:
+
+```ts
+import { autoUpdater } from "electron-updater";
+
+autoUpdater.on("before-quit-for-update", () => {
+  getWindowManager()?.prepareForQuit();
+});
+```
+
 ## Troubleshooting
 
 **Window doesn't appear / nothing happens:**

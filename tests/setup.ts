@@ -180,6 +180,13 @@ export class SlowMockWindow {
 
 // Mock Electron in test environment
 vi.mock("electron", () => ({
+  app: {
+    on: vi.fn(),
+    once: vi.fn(),
+    off: vi.fn(),
+    prependListener: vi.fn(),
+    removeListener: vi.fn(),
+  },
   BrowserWindow: vi.fn(),
   ipcMain: {
     handle: vi.fn(),
