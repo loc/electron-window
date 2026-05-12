@@ -112,6 +112,22 @@ manager.setupForWindow(mainWindow, {
 
 Without this, a dev warning fires: `"window.open to <url> denied. Not a managed window and no fallbackWindowOpenHandler provided."`
 
+The same applies to `window.open()` calls from **inside** a managed child window (a `<a target="_blank">` link in a popout). The library installs its own `setWindowOpenHandler` on every child — by default it denies everything. Pass `childWindowOpenHandler` to handle these, and `onChildWindowCreated` for anything else you need to attach (context menu, devtools):
+
+```ts
+manager.setupForWindow(mainWindow, {
+  childWindowOpenHandler: ({ url }) => {
+    if (url.startsWith("https://")) shell.openExternal(url);
+    return { action: "deny" };
+  },
+  onChildWindowCreated: (win) => {
+    win.webContents.on("context-menu", (_e, params) => showSpellcheckMenu(win, params));
+  },
+});
+```
+
+Don't try to do this from your own `webContents.on("did-create-window")` listener — that is the same event the library uses to install its handler, and which one wins depends on registration order and event-loop timing. `childWindowOpenHandler` and `onChildWindowCreated` run **after** the library has wired the child, so there's no race.
+
 ## Main-process API
 
 `setupWindowManager` returns (and `getWindowManager()` retrieves) a `WindowManager` instance. Useful for tray menus, "close all windows", or anything else in the main process that needs to touch child windows:
