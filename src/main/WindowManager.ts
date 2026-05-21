@@ -72,6 +72,28 @@ export interface SetupOptions {
    * (`console.error`) so they cannot abort child-window registration.
    */
   onChildWindowCreated?: (win: BrowserWindow, ctx: { windowId: WindowId }) => void;
+
+  /**
+   * Reap this owner's child windows when the owner WebContents performs a
+   * hard main-frame navigation (reload, `loadURL()`, full page nav).
+   *
+   * Default: `true`.
+   *
+   * Without this, a reload of the owner orphans its popouts: the React tree
+   * that was portaling into them is gone, but the BrowserWindows stay on
+   * screen with stale, non-interactive content. The owner's `destroyed`
+   * event (which the library already handles) does NOT fire on reload —
+   * only on close/crash — so reload needs its own hook.
+   *
+   * The filter is deliberately narrow: `did-start-navigation` with
+   * `isMainFrame && !isSameDocument`. Do NOT loosen this to
+   * `did-start-loading` — that fires on SPA `pushState` and iframe loads
+   * and would reap popouts on every in-app tab switch.
+   *
+   * Set to `false` if your owner page has logic to re-adopt existing
+   * popouts after a reload.
+   */
+  reapOnOwnerNavigate?: boolean;
 }
 
 /**
@@ -356,11 +378,9 @@ export class WindowManager {
 
     dispatchers.set(webContents, dispatcher);
 
-    // When the parent WebContents is destroyed (crash, navigation away,
-    // explicit close), clean up its child windows. Without this, a renderer
-    // that opens N windows then crashes leaves N orphaned BrowserWindows
-    // in the map with no controller.
-    webContents.once("destroyed", () => {
+    // Reap every pending registration and live child window owned by this
+    // WebContents. Used on owner teardown (destroyed) and owner hard-nav.
+    const reapOwnedWindows = (): void => {
       const ownerId = webContents.id;
       for (const [id, entry] of this.pendingWindows) {
         if (entry.ownerWebContentsId === ownerId) {
@@ -373,8 +393,33 @@ export class WindowManager {
           this.removeManagedWindow(id);
         }
       }
+    };
+
+    // When the parent WebContents is destroyed (crash, navigation away,
+    // explicit close), clean up its child windows. Without this, a renderer
+    // that opens N windows then crashes leaves N orphaned BrowserWindows
+    // in the map with no controller.
+    webContents.once("destroyed", () => {
+      reapOwnedWindows();
       dispatchers.delete(webContents);
     });
+
+    // Also reap when the owner performs a HARD main-frame navigation
+    // (reload, loadURL, full page nav). The "destroyed" handler above does
+    // not fire on reload — only on close/crash — so a reload would orphan
+    // the popouts: still on screen, but their content was a portal into a
+    // React tree that no longer exists.
+    //
+    // The filter is load-bearing. `did-start-loading` ALSO fires on SPA
+    // pushState navigations and iframe loads — using it would reap popouts
+    // on every in-app tab switch. `did-start-navigation` with
+    // `isMainFrame && !isSameDocument` fires on hard nav only.
+    if (options?.reapOnOwnerNavigate !== false) {
+      webContents.on("did-start-navigation", (details) => {
+        if (!details.isMainFrame || details.isSameDocument) return;
+        reapOwnedWindows();
+      });
+    }
 
     webContents.setWindowOpenHandler((details) => {
       const { frameName, url } = details;

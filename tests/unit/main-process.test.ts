@@ -2487,3 +2487,75 @@ describe("child window setup hooks", () => {
     expect(manager.owns(childBW as unknown as import("electron").BrowserWindow)).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests: reapOnOwnerNavigate — reap children on owner hard navigation
+// ---------------------------------------------------------------------------
+
+describe("reapOnOwnerNavigate", () => {
+  function setupWithOptions(options?: import("../../src/main/WindowManager.js").SetupOptions) {
+    (globalThis as Record<string, unknown>).__lastImpl__ = undefined;
+    const manager = new WindowManager({ devWarnings: false });
+    const parent = createMockParentWindow();
+    manager.setupForWindow(parent as unknown as import("electron").BrowserWindow, options);
+    const impl = getLastImpl();
+
+    const openHandler = parent.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (arg: {
+      frameName: string;
+      url: string;
+    }) => unknown;
+    const didCreate = parent.webContents.on.mock.calls.find(
+      (c) => c[0] === "did-create-window",
+    )?.[1] as (bw: unknown, details: { frameName: string }) => void;
+    const navHandler = parent.webContents.on.mock.calls.find(
+      (c) => c[0] === "did-start-navigation",
+    )?.[1] as ((details: { isMainFrame: boolean; isSameDocument: boolean }) => void) | undefined;
+
+    function openChild(id: string) {
+      impl.RegisterWindow(id, {} as never);
+      openHandler({ frameName: id, url: "about:blank" });
+      const child = createMockBrowserWindow();
+      didCreate(child, { frameName: id });
+      return child;
+    }
+
+    return { manager, parent, impl, openChild, navHandler };
+  }
+
+  it("reaps owned children on hard main-frame navigation (default)", () => {
+    const { manager, openChild, navHandler } = setupWithOptions();
+    const child = openChild("popout");
+    expect(manager.getAllWindows()).toHaveLength(1);
+    expect(navHandler).toBeDefined();
+
+    navHandler!({ isMainFrame: true, isSameDocument: false });
+
+    expect(child.destroy).toHaveBeenCalled();
+    expect(manager.getAllWindows()).toHaveLength(0);
+  });
+
+  it("does NOT reap on same-document navigation (SPA pushState)", () => {
+    const { manager, openChild, navHandler } = setupWithOptions();
+    const child = openChild("popout");
+
+    navHandler!({ isMainFrame: true, isSameDocument: true });
+
+    expect(child.destroy).not.toHaveBeenCalled();
+    expect(manager.getAllWindows()).toHaveLength(1);
+  });
+
+  it("does NOT reap on iframe navigation", () => {
+    const { manager, openChild, navHandler } = setupWithOptions();
+    const child = openChild("popout");
+
+    navHandler!({ isMainFrame: false, isSameDocument: false });
+
+    expect(child.destroy).not.toHaveBeenCalled();
+    expect(manager.getAllWindows()).toHaveLength(1);
+  });
+
+  it("can be opted out with { reapOnOwnerNavigate: false }", () => {
+    const { navHandler } = setupWithOptions({ reapOnOwnerNavigate: false });
+    expect(navHandler).toBeUndefined();
+  });
+});
