@@ -147,6 +147,22 @@ export class WindowInstance {
   private currentProps: Omit<BaseWindowProps, "open" | "children">;
   private isDestroyed = false;
   private _forceClosing = false;
+  /**
+   * Transient quit-drain flag. While `true`, the `close` handler does NOT
+   * veto the close (no `preventDefault()` for `hideOnClose` or
+   * `closable: false`), so an in-progress `app.quit()` can drain.
+   *
+   * Unlike `_forceClosing` (one-shot, set right before `close()`), this is
+   * REVERSIBLE — `cancelQuit()` clears it. {@link WindowManager} re-arms it
+   * automatically when a `before-quit` is vetoed by another listener, so a
+   * cancelled quit doesn't permanently change pool-window behavior.
+   *
+   * Kept separate from `currentProps.closable` so it doesn't corrupt the
+   * prop diff: a later `setProps({ closable: true })` should still call the
+   * native setter, and a later `setProps({ closable: false })` should still
+   * compare against the consumer-declared value.
+   */
+  private _quitting = false;
   private readonly hideOnClose: boolean;
   private lastDisplay: DisplayInfo | null = null;
 
@@ -223,13 +239,17 @@ export class WindowInstance {
     });
 
     win.on("close", (event) => {
-      if (this.currentProps.closable === false) {
+      // `_quitting` is set by WindowManager.prepareForQuit() (and cleared by
+      // cancelQuit()) so an in-progress app quit can drain — without it, a
+      // hideOnClose pool window's preventDefault() stalls the quit forever.
+      const bypassVeto = this._forceClosing || this._quitting;
+      if (this.currentProps.closable === false && !bypassVeto) {
         event.preventDefault();
         return;
       }
       // Pool windows: hide instead of close. The close button stays enabled
       // but clicking it hides the window and notifies the renderer to release.
-      if (this.hideOnClose && !this._forceClosing) {
+      if (this.hideOnClose && !bypassVeto) {
         try {
           event.preventDefault();
           if (this.browserWindow && !this.browserWindow.isDestroyed()) {
@@ -244,10 +264,21 @@ export class WindowInstance {
         }
         return;
       }
-      if (!this.isDestroyed && !this._forceClosing) {
+      if (!this.isDestroyed && !bypassVeto) {
         this.onEvent({ type: WindowEventType.UserCloseRequested, id: this.id });
       }
     });
+
+    // Windows: `session-end` (logoff/shutdown/restart) is a per-window event,
+    // NOT an `app` event. Without this, a `hideOnClose` window vetoes the
+    // OS-initiated close and the process can hang the shutdown sequence.
+    if (isWindows()) {
+      win.on("session-end", () => {
+        // The OS is shutting the user's session down — irreversible.
+        // Don't go through the cancellable `_quitting` path.
+        this._forceClosing = true;
+      });
+    }
 
     win.on("focus", () => {
       if (!this.isDestroyed) this.onEvent({ type: WindowEventType.Focused, id: this.id });
@@ -460,11 +491,43 @@ export class WindowInstance {
 
   forceClose(): void {
     if (this.browserWindow && !this.isDestroyed) {
+      // `_forceClosing` bypasses both the `closable: false` and `hideOnClose`
+      // vetoes in the `close` handler — no need to mutate currentProps.
       this._forceClosing = true;
-      this.currentProps.closable = true;
       this.browserWindow.close();
-      // _forceClosing and closable don't need resetting — the window is now destroyed
+      // _forceClosing doesn't need resetting — the window is now destroyed
     }
+  }
+
+  /**
+   * Disarm this window's `close` veto so an in-progress app quit can drain.
+   *
+   * `hideOnClose` windows (and `closable: false` windows) call
+   * `event.preventDefault()` on their own `close` event. `app.quit()` and
+   * `autoUpdater.quitAndInstall()` close every BrowserWindow and wait for the
+   * count to reach zero — a window that vetoes its own close stalls the drain
+   * forever and the app becomes a zombie (Dock icon present, won't reopen).
+   *
+   * Unlike {@link forceClose}, this does NOT call `close()` — it just stops
+   * vetoing so whatever is driving the quit (Electron itself, the
+   * autoUpdater) can close the window normally — and it is REVERSIBLE via
+   * {@link cancelQuit}, so a `before-quit` that another listener vetoes
+   * doesn't permanently change pool-window behavior.
+   */
+  prepareForQuit(): void {
+    if (this.isDestroyed) return;
+    this._quitting = true;
+  }
+
+  /**
+   * Re-arm a previously {@link prepareForQuit}-disarmed window.
+   * Called by {@link WindowManager} when a `before-quit` was vetoed by
+   * another listener — without this, a single cancelled quit would leave
+   * `hideOnClose` windows destroying instead of hiding for the rest of the
+   * process.
+   */
+  cancelQuit(): void {
+    this._quitting = false;
   }
 
   /**

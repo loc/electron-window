@@ -2225,3 +2225,166 @@ describe("WindowManager.owns()", () => {
     expect(manager.owns(victimBW as unknown as import("electron").BrowserWindow)).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests: prepareForQuit — disarm hideOnClose veto so app.quit() can drain
+// ---------------------------------------------------------------------------
+
+describe("prepareForQuit", () => {
+  function createHideOnCloseInstance() {
+    const bw = createMockBrowserWindow();
+    const onEvent = vi.fn();
+    const instance = new WindowInstance({
+      id: "pool-win",
+      browserWindow: bw as unknown as import("electron").BrowserWindow,
+      props: {},
+      onEvent,
+      hideOnClose: true,
+    });
+    return { instance, bw, onEvent };
+  }
+
+  it("WindowInstance: hideOnClose vetoes close before, lets it through after", () => {
+    const { instance, bw } = createHideOnCloseInstance();
+
+    // Before: close is vetoed (preventDefault called, window hidden).
+    const ev1 = { preventDefault: vi.fn() };
+    bw.emit("close", ev1);
+    expect(ev1.preventDefault).toHaveBeenCalled();
+    expect(bw.hide).toHaveBeenCalled();
+
+    bw.hide.mockClear();
+
+    instance.prepareForQuit();
+
+    // After: close is NOT vetoed — app.quit() can drain.
+    const ev2 = { preventDefault: vi.fn() };
+    bw.emit("close", ev2);
+    expect(ev2.preventDefault).not.toHaveBeenCalled();
+    expect(bw.hide).not.toHaveBeenCalled();
+  });
+
+  it("WindowInstance: closable:false vetoes close before, lets it through after", () => {
+    const { instance, bw } = createWindowInstance({ closable: false });
+
+    const ev1 = { preventDefault: vi.fn() };
+    bw.emit("close", ev1);
+    expect(ev1.preventDefault).toHaveBeenCalled();
+
+    instance.prepareForQuit();
+
+    const ev2 = { preventDefault: vi.fn() };
+    bw.emit("close", ev2);
+    expect(ev2.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it("WindowManager.prepareForQuit() disarms every managed window", () => {
+    (globalThis as Record<string, unknown>).__lastImpl__ = undefined;
+    const manager = new WindowManager({ devWarnings: false });
+    const parent = createMockParentWindow();
+    manager.setupForWindow(parent as unknown as import("electron").BrowserWindow);
+    const impl = getLastImpl();
+
+    const openHandler = parent.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (arg: {
+      frameName: string;
+      url: string;
+    }) => unknown;
+    const didCreate = parent.webContents.on.mock.calls.find(
+      (c) => c[0] === "did-create-window",
+    )?.[1] as (bw: unknown, details: { frameName: string }) => void;
+
+    const children: MockBrowserWindow[] = [];
+    for (const id of ["a", "b", "c"]) {
+      impl.RegisterWindow(id, { hideOnClose: true } as never);
+      openHandler({ frameName: id, url: "about:blank" });
+      const child = createMockBrowserWindow();
+      children.push(child);
+      didCreate(child, { frameName: id });
+    }
+
+    // Each pool window vetoes close.
+    for (const child of children) {
+      const ev = { preventDefault: vi.fn() };
+      child.emit("close", ev);
+      expect(ev.preventDefault).toHaveBeenCalled();
+    }
+
+    manager.prepareForQuit();
+
+    // After: every window lets close through.
+    for (const child of children) {
+      const ev = { preventDefault: vi.fn() };
+      child.emit("close", ev);
+      expect(ev.preventDefault).not.toHaveBeenCalled();
+    }
+
+    // cancelQuit() re-arms — a vetoed quit must not permanently change pool
+    // window behavior.
+    manager.cancelQuit();
+    for (const child of children) {
+      const ev = { preventDefault: vi.fn() };
+      child.emit("close", ev);
+      expect(ev.preventDefault).toHaveBeenCalled();
+    }
+  });
+
+  it("cancelQuit() re-arms a single instance", () => {
+    const { instance, bw } = createHideOnCloseInstance();
+    instance.prepareForQuit();
+
+    const ev1 = { preventDefault: vi.fn() };
+    bw.emit("close", ev1);
+    expect(ev1.preventDefault).not.toHaveBeenCalled();
+
+    instance.cancelQuit();
+
+    const ev2 = { preventDefault: vi.fn() };
+    bw.emit("close", ev2);
+    expect(ev2.preventDefault).toHaveBeenCalled();
+  });
+
+  it("prepareForQuit() does not corrupt currentProps.closable", () => {
+    // Regression: an earlier implementation set currentProps.closable = true,
+    // which breaks the prop diff (a later setProps({closable:true}) would see
+    // shadow state already true and skip the native setter).
+    const { instance, bw } = createWindowInstance({ closable: false });
+    instance.prepareForQuit();
+    instance.cancelQuit();
+    // After cancelQuit, the window must still veto close — i.e. closable
+    // is still effectively false.
+    const ev = { preventDefault: vi.fn() };
+    bw.emit("close", ev);
+    expect(ev.preventDefault).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: setupWindowManager wires before-quit + re-arm on cancellation
+// ---------------------------------------------------------------------------
+
+describe("setupWindowManager quit listeners", () => {
+  it("registers a before-quit listener via prependListener and re-arms on cancellation", async () => {
+    // setupWindowManager is a module singleton — import the mocked `app` to
+    // assert the listener was prepended. We can't reset the singleton between
+    // tests, so this test just verifies the wiring exists at all.
+    const { app } = await import("electron");
+    const { setupWindowManager, getWindowManager } =
+      await import("../../src/main/WindowManager.js");
+    setupWindowManager();
+    const calls = (app.prependListener as ReturnType<typeof vi.fn>).mock.calls;
+    const beforeQuit = calls.find((c) => c[0] === "before-quit")?.[1] as
+      | ((event: { defaultPrevented: boolean }) => void)
+      | undefined;
+    expect(beforeQuit).toBeDefined();
+
+    // Simulate the listener firing with a quit that another listener vetoes.
+    const manager = getWindowManager()!;
+    const prepareSpy = vi.spyOn(manager, "prepareForQuit");
+    const cancelSpy = vi.spyOn(manager, "cancelQuit");
+    beforeQuit!({ defaultPrevented: true });
+    expect(prepareSpy).toHaveBeenCalled();
+    // cancelQuit fires on process.nextTick so all listeners have run.
+    await new Promise((r) => process.nextTick(r));
+    expect(cancelSpy).toHaveBeenCalled();
+  });
+});

@@ -1,4 +1,4 @@
-import { BrowserWindow, screen, type WebContents } from "electron";
+import { app, BrowserWindow, screen, type WebContents } from "electron";
 import { validateBoundsOnScreen } from "./persistence.js";
 import type { WindowId, WindowState } from "../shared/types.js";
 import { RENDERER_ALLOWED_PROPS } from "../shared/types.js";
@@ -771,6 +771,50 @@ export class WindowManager {
     return this.ownedBrowserWindows.has(win);
   }
 
+  /**
+   * Disarm every managed window's `close` veto so an app quit can drain.
+   *
+   * `hideOnClose` pool windows `event.preventDefault()` their own `close`.
+   * `app.quit()` and `autoUpdater.quitAndInstall()` close every BrowserWindow
+   * and wait for the count to hit zero — a window that vetoes its own close
+   * stalls the drain forever; `before-quit` / `will-quit` never fire and the
+   * app becomes a zombie.
+   *
+   * Wired automatically via `app.on("before-quit")` by
+   * {@link setupWindowManager} (with auto-{@link cancelQuit} if another
+   * listener vetoes the quit). On Windows, the per-window `session-end`
+   * event is also handled inside {@link WindowInstance}.
+   *
+   * Call it manually from your own quit-adjacent listeners when the quit
+   * signal does NOT route through Electron's `app` — most commonly
+   * `electron-updater`'s `autoUpdater.on("before-quit-for-update")`, which
+   * fires on its own emitter, not Electron's:
+   *
+   * ```ts
+   * autoUpdater.on("before-quit-for-update", () => {
+   *   getWindowManager()?.prepareForQuit();
+   * });
+   * ```
+   */
+  prepareForQuit(): void {
+    for (const entry of this.windows.values()) {
+      entry.instance.prepareForQuit();
+    }
+  }
+
+  /**
+   * Re-arm every managed window's `close` veto after a cancelled quit.
+   *
+   * `setupWindowManager()` calls this automatically when `before-quit` was
+   * vetoed by another listener. Exposed for manual flows that mirror that
+   * cancellation (e.g., a custom updater that may abort).
+   */
+  cancelQuit(): void {
+    for (const entry of this.windows.values()) {
+      entry.instance.cancelQuit();
+    }
+  }
+
   destroy(): void {
     // Snapshot keys — removeManagedWindow() mutates this.windows.
     for (const id of [...this.windows.keys()]) {
@@ -803,6 +847,41 @@ export function setupWindowManager(config?: WindowManagerConfig): WindowManager 
     return managerInstance;
   }
   managerInstance = new WindowManager(config);
+
+  // The library introduced `event.preventDefault()` into a quit-critical
+  // path (`hideOnClose` windows veto their own close), so it must clean up
+  // after itself. Without this, `app.quit()` waits for the BrowserWindow
+  // count to drain to zero, hidden pool windows veto their own close, and
+  // the app hangs as a zombie process.
+  //
+  // Use prependListener so we disarm BEFORE consumer `before-quit` listeners
+  // run — a consumer that calls something window-affecting in its own
+  // handler shouldn't see ours still vetoing.
+  //
+  // `before-quit` is CANCELABLE. If a consumer listener calls
+  // `event.preventDefault()` (unsaved-changes prompt, tray app, etc.), the
+  // quit aborts but the disarm would otherwise persist — and `hideOnClose`
+  // windows would silently destroy instead of hide on the next close, for
+  // the rest of the process. Re-arm on the next tick if the quit was vetoed.
+  // `process.nextTick` runs after all `before-quit` listeners (including
+  // consumer ones registered later) but BEFORE Electron acts on the result,
+  // so the re-arm always lands before any close drain would start.
+  //
+  // `electron-updater`'s `autoUpdater.on("before-quit-for-update")` fires on
+  // its OWN emitter (not Electron's `app`), so we cannot hook it here without
+  // a hard dep. Consumers using `electron-updater` should call
+  // `getWindowManager()?.prepareForQuit()` from that listener (no cancelQuit
+  // needed there — `before-quit-for-update` is not cancelable).
+  //
+  // Windows `session-end` (logoff/shutdown) is a per-BrowserWindow event,
+  // not an `app` event, and is handled inside WindowInstance.
+  app.prependListener("before-quit", (event) => {
+    managerInstance?.prepareForQuit();
+    process.nextTick(() => {
+      if (event.defaultPrevented) managerInstance?.cancelQuit();
+    });
+  });
+
   return managerInstance;
 }
 
