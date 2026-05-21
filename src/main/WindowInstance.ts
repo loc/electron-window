@@ -232,9 +232,18 @@ export class WindowInstance {
       if (this.hideOnClose && !this._forceClosing) {
         try {
           event.preventDefault();
-          if (this.browserWindow && !this.browserWindow.isDestroyed()) {
-            this.browserWindow.hide();
-          }
+          // Defer hide() one tick. The macOS red traffic-light fires `close`
+          // from inside the AppKit `windowShouldClose:` delegate; calling
+          // `orderOut:` (which `hide()` does) synchronously within that
+          // callback trips app termination — the consumer's whole app quits.
+          // Cmd+W and `BrowserWindow.close()` route through
+          // `NativeWindowMac::Close()` (no delegate) and never hit this, but
+          // the defer is harmless there too, so it's not Darwin-gated.
+          setImmediate(() => {
+            if (this.browserWindow && !this.browserWindow.isDestroyed()) {
+              this.browserWindow.hide();
+            }
+          });
           this.onEvent({
             type: WindowEventType.UserCloseRequested,
             id: this.id,

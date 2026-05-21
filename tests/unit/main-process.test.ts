@@ -790,6 +790,55 @@ describe("WindowInstance event emission", () => {
       expect.objectContaining({ type: "userCloseRequested" }),
     );
   });
+
+  // Regression: macOS red traffic-light fires `close` from inside AppKit's
+  // windowShouldClose: delegate. Calling hide() (orderOut:) synchronously
+  // within that callback trips app termination. The hideOnClose handler must
+  // preventDefault() synchronously but defer hide() past the delegate.
+  it("hideOnClose: defers hide() past the close event, preventDefault stays synchronous", async () => {
+    const onEvent = vi.fn();
+    const bw = createMockBrowserWindow();
+    new WindowInstance({
+      id: "pool-win",
+      browserWindow: bw as unknown as import("electron").BrowserWindow,
+      props: {},
+      onEvent,
+      hideOnClose: true,
+    });
+
+    const preventDefault = vi.fn();
+    bw.emit("close", { preventDefault });
+
+    // Synchronous: close is vetoed and the renderer is notified immediately.
+    expect(preventDefault).toHaveBeenCalled();
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "userCloseRequested", id: "pool-win" }),
+    );
+    // hide() must NOT run inside the close dispatch — that's the macOS bug.
+    expect(bw.hide).not.toHaveBeenCalled();
+
+    // Next event-loop tick: hide() runs (windowShouldClose: has returned NO).
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(bw.hide).toHaveBeenCalledTimes(1);
+  });
+
+  it("hideOnClose: deferred hide() is a no-op if the window was destroyed in between", async () => {
+    const onEvent = vi.fn();
+    const bw = createMockBrowserWindow();
+    new WindowInstance({
+      id: "pool-win",
+      browserWindow: bw as unknown as import("electron").BrowserWindow,
+      props: {},
+      onEvent,
+      hideOnClose: true,
+    });
+
+    bw.emit("close", { preventDefault: vi.fn() });
+    bw.isDestroyed.mockReturnValue(true);
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(bw.hide).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
