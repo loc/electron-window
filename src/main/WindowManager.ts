@@ -41,6 +41,37 @@ export interface SetupOptions {
    * If not provided, unmanaged window.open() calls are denied.
    */
   fallbackWindowOpenHandler?: (details: Electron.HandlerDetails) => WindowOpenHandlerResult;
+
+  /**
+   * Called for window.open() calls *originating from inside a managed child
+   * window* (e.g., a `<a target="_blank">` link inside a popout).
+   *
+   * The library installs its own `setWindowOpenHandler` on every managed
+   * child window; without this option, all such opens are denied (grandchild
+   * windows are not a supported use case). Provide this to, e.g., route
+   * `_blank` links to the system browser.
+   *
+   * Use this instead of registering your own
+   * `webContents.on("did-create-window")` listener and racing the library
+   * with `setImmediate()` — that pattern depends on listener registration
+   * order and works by accident.
+   */
+  childWindowOpenHandler?: (details: Electron.HandlerDetails) => WindowOpenHandlerResult;
+
+  /**
+   * Called once for every managed child window, after the library has
+   * finished wiring it up (window-open handler installed, instance
+   * registered). Use this to attach `context-menu` listeners, open devtools,
+   * etc. — anything that doesn't fit `childWindowOpenHandler`.
+   *
+   * `ctx.windowId` is the library's id for the window (the `frameName`
+   * passed to `window.open()`) — use it for per-window behavior without
+   * reverse-mapping the `BrowserWindow` yourself.
+   *
+   * Exceptions thrown by this hook are caught and logged
+   * (`console.error`) so they cannot abort child-window registration.
+   */
+  onChildWindowCreated?: (win: BrowserWindow, ctx: { windowId: WindowId }) => void;
 }
 
 /**
@@ -414,18 +445,31 @@ export class WindowManager {
 
       this.pendingWindows.delete(windowId);
 
-      // Child windows are portal targets, not independent renderers. Deny
-      // any window.open() from inside them — otherwise a compromised parent
-      // could spawn a child via the library, then use that child to
-      // window.open arbitrary URLs (bypassing the parent's about:blank-only
-      // restriction). Grandchild windows are not a supported use case.
-      childBW.webContents.setWindowOpenHandler(({ url }) => {
+      // Child windows are portal targets, not independent renderers.
+      // Grandchild *library* windows are never a thing — registrations only
+      // come from the parent renderer — so any window.open() from inside a
+      // child is "raw" (e.g., a `target="_blank"` link in a popout).
+      //
+      // Default behavior: deny. A compromised parent could otherwise spawn a
+      // child via the library, then use that child to window.open arbitrary
+      // URLs (bypassing the parent's about:blank-only restriction).
+      //
+      // `childWindowOpenHandler` lets the consumer opt into routing those
+      // opens (e.g., shell.openExternal for `_blank` links). The library
+      // installs THIS handler — the consumer must not install their own from
+      // a competing `did-create-window` listener (which would race ours).
+      childBW.webContents.setWindowOpenHandler((details) => {
+        if (options?.childWindowOpenHandler) {
+          return options.childWindowOpenHandler(details);
+        }
         if (this.config.devWarnings) {
           devWarning(
-            `window.open("${url}") from inside a <Window>/<PooledWindow> was denied. ` +
+            `window.open("${details.url}") from inside a <Window>/<PooledWindow> was denied. ` +
               `Grandchild windows are not supported. Nested <Window> components are ` +
               `fine (they open from the parent renderer), but code running INSIDE ` +
-              `a child window's document (ownerDocument.defaultView.open) is blocked.`,
+              `a child window's document (ownerDocument.defaultView.open) is blocked. ` +
+              `Pass childWindowOpenHandler to setupForWindow() to handle these (e.g., ` +
+              `route _blank links to shell.openExternal).`,
           );
         }
         return { action: "deny" };
@@ -446,7 +490,35 @@ export class WindowManager {
         hideOnClose: (pending.props as any).hideOnClose === true,
       });
 
-      this.addManagedWindow(windowId, instance, webContents.id, childBW);
+      // Returns false on a cross-owner id collision (the new window was
+      // destroyed — don't run the consumer hook against a dead window).
+      if (!this.addManagedWindow(windowId, instance, webContents.id, childBW)) {
+        return;
+      }
+
+      // Generic post-setup hook. Runs LAST so the consumer sees a fully wired
+      // child (open-handler installed, instance registered, owns() returns
+      // true). This replaces the consumer-side
+      // `webContents.on("did-create-window")` + `setImmediate()` race for
+      // attaching context-menu / devtools / etc.
+      if (options?.onChildWindowCreated && !childBW.isDestroyed()) {
+        try {
+          options.onChildWindowCreated(childBW, { windowId });
+        } catch (err) {
+          // Always surface the error — devWarning is gated on NODE_ENV and
+          // would silence consumer hook bugs in production. Mirrors the
+          // renderer-side onWindowSetup catch in renderer/windowUtils.ts.
+          console.error("[electron-window] onChildWindowCreated threw:", err);
+          if (this.config.devWarnings) {
+            devWarning(
+              `onChildWindowCreated threw for window "${windowId}": ` +
+                `${err instanceof Error ? err.message : String(err)}. ` +
+                `The window is still registered — the hook is not allowed ` +
+                `to abort child wiring.`,
+            );
+          }
+        }
+      }
     });
   }
 

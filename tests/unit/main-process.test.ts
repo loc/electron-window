@@ -2388,3 +2388,102 @@ describe("setupWindowManager quit listeners", () => {
     expect(cancelSpy).toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests: childWindowOpenHandler / onChildWindowCreated
+// ---------------------------------------------------------------------------
+
+describe("child window setup hooks", () => {
+  function setupWithChildHooks(options?: import("../../src/main/WindowManager.js").SetupOptions) {
+    (globalThis as Record<string, unknown>).__lastImpl__ = undefined;
+    const manager = new WindowManager({ devWarnings: false });
+    const parent = createMockParentWindow();
+    manager.setupForWindow(parent as unknown as import("electron").BrowserWindow, options);
+    const impl = getLastImpl();
+
+    impl.RegisterWindow("child", {} as never);
+    const openHandler = parent.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (arg: {
+      frameName: string;
+      url: string;
+    }) => unknown;
+    openHandler({ frameName: "child", url: "about:blank" });
+    const didCreate = parent.webContents.on.mock.calls.find(
+      (c) => c[0] === "did-create-window",
+    )?.[1] as (bw: unknown, details: { frameName: string }) => void;
+    const childBW = createMockBrowserWindow();
+    didCreate(childBW, { frameName: "child" });
+
+    return { manager, childBW };
+  }
+
+  it("childWindowOpenHandler is delegated to for opens from inside the child", () => {
+    const childOpenHandler = vi.fn(() => ({ action: "deny" as const }));
+    const { childBW } = setupWithChildHooks({ childWindowOpenHandler: childOpenHandler });
+
+    const installed = (childBW.webContents.setWindowOpenHandler as ReturnType<typeof vi.fn>).mock
+      .calls[0]?.[0] as (details: { url: string }) => { action: string };
+    installed({ url: "https://example.com" });
+
+    expect(childOpenHandler).toHaveBeenCalledWith({ url: "https://example.com" });
+  });
+
+  it("default behavior (no childWindowOpenHandler) still denies", () => {
+    const { childBW } = setupWithChildHooks();
+    const installed = (childBW.webContents.setWindowOpenHandler as ReturnType<typeof vi.fn>).mock
+      .calls[0]?.[0] as (details: { url: string }) => { action: string };
+    expect(installed({ url: "https://example.com" })).toEqual({ action: "deny" });
+  });
+
+  it("onChildWindowCreated is called with (win, { windowId }) after it is registered", () => {
+    const seen: { win: unknown; ctx: { windowId: string } }[] = [];
+    const { manager, childBW } = setupWithChildHooks({
+      onChildWindowCreated: (win, ctx) => seen.push({ win, ctx }),
+    });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.win).toBe(childBW);
+    // ctx.windowId saves consumers from reverse-mapping the BrowserWindow
+    // (per-window context menus, devtools-for-one-popout, etc.).
+    expect(seen[0]!.ctx).toEqual({ windowId: "child" });
+    // Hook runs AFTER the library wires the child — owns() is already true.
+    expect(manager.owns(childBW as unknown as import("electron").BrowserWindow)).toBe(true);
+  });
+
+  it("onChildWindowCreated runs after the open-handler is installed (no race)", () => {
+    let openHandlerInstalledWhenHookRan = false;
+    const childBW = createMockBrowserWindow();
+    (globalThis as Record<string, unknown>).__lastImpl__ = undefined;
+    const manager = new WindowManager({ devWarnings: false });
+    const parent = createMockParentWindow();
+    manager.setupForWindow(parent as unknown as import("electron").BrowserWindow, {
+      onChildWindowCreated: () => {
+        openHandlerInstalledWhenHookRan =
+          (childBW.webContents.setWindowOpenHandler as ReturnType<typeof vi.fn>).mock.calls.length >
+          0;
+      },
+    });
+    const impl = getLastImpl();
+    impl.RegisterWindow("child", {} as never);
+    const openHandler = parent.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (arg: {
+      frameName: string;
+      url: string;
+    }) => unknown;
+    openHandler({ frameName: "child", url: "about:blank" });
+    const didCreate = parent.webContents.on.mock.calls.find(
+      (c) => c[0] === "did-create-window",
+    )?.[1] as (bw: unknown, details: { frameName: string }) => void;
+    didCreate(childBW, { frameName: "child" });
+
+    expect(openHandlerInstalledWhenHookRan).toBe(true);
+  });
+
+  it("onChildWindowCreated throwing does not abort child wiring", () => {
+    const { manager, childBW } = setupWithChildHooks({
+      onChildWindowCreated: () => {
+        throw new Error("consumer hook bug");
+      },
+    });
+    // Window is still registered despite the hook throwing.
+    expect(manager.getWindow("child")).toBeDefined();
+    expect(manager.owns(childBW as unknown as import("electron").BrowserWindow)).toBe(true);
+  });
+});
