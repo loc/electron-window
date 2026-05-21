@@ -128,8 +128,75 @@ interface ResolvedConfig {
 export class WindowManager {
   private readonly windows: Map<
     WindowId,
-    { instance: WindowInstance; ownerWebContentsId: number }
+    { instance: WindowInstance; ownerWebContentsId: number; browserWindow: BrowserWindow }
   > = new Map();
+
+  /**
+   * Set of BrowserWindows currently managed by this WindowManager. Backs
+   * {@link owns} so callers can answer "is this BrowserWindow one of ours?"
+   * in O(1) instead of scanning {@link getAllWindows} per `browser-window-focus`
+   * / `will-navigate` / etc.
+   *
+   * `WeakSet` so a destroyed-but-not-yet-removed BrowserWindow can't keep the
+   * native handle's JS wrapper alive. We still remove eagerly everywhere we
+   * delete from {@link windows} so {@link owns} doesn't return `true` for a
+   * window that was just torn down.
+   */
+  private readonly ownedBrowserWindows = new WeakSet<BrowserWindow>();
+
+  /**
+   * Add a managed window — keeps {@link windows} and {@link ownedBrowserWindows} in sync.
+   *
+   * Returns `false` (and destroys the supplied window) if the id is already
+   * active for a DIFFERENT owner — `RegisterWindow` only checks
+   * `pendingWindows` for cross-owner collision, and a renderer that learns
+   * another renderer's window id must not be able to evict its window by
+   * re-registering it. Crypto-random ids make this infeasible to guess, but
+   * this closes the overwrite-via-known-ID vector for active windows the
+   * same way the `pendingWindows` check at {@link createImplementation}
+   * closes it for pending ones.
+   */
+  private addManagedWindow(
+    id: WindowId,
+    instance: WindowInstance,
+    ownerWebContentsId: number,
+    browserWindow: BrowserWindow,
+  ): boolean {
+    const existing = this.windows.get(id);
+    if (existing) {
+      if (existing.ownerWebContentsId !== ownerWebContentsId) {
+        // Cross-owner collision — keep the existing window, drop the new one.
+        if (this.config.devWarnings) {
+          devWarning(
+            `Window "${id}" already active for a different WebContents — ` +
+              `new window dropped. This should never happen with library-` +
+              `generated ids; check for a renderer reusing/forging another ` +
+              `renderer's window id.`,
+          );
+        }
+        instance.destroy({ emitClosed: false });
+        return false;
+      }
+      // Same-owner overwrite (e.g., HMR remounts before unmount cleanup runs).
+      // Without cleanup, the old BrowserWindow stays in ownedBrowserWindows
+      // forever and the old instance's `closed` listener would later
+      // removeManagedWindow() the *new* entry.
+      existing.instance.destroy({ emitClosed: false });
+      this.ownedBrowserWindows.delete(existing.browserWindow);
+    }
+    this.windows.set(id, { instance, ownerWebContentsId, browserWindow });
+    this.ownedBrowserWindows.add(browserWindow);
+    return true;
+  }
+
+  /** Remove a managed window — keeps {@link windows} and {@link ownedBrowserWindows} in sync. */
+  private removeManagedWindow(id: WindowId): void {
+    const entry = this.windows.get(id);
+    if (!entry) return;
+    this.ownedBrowserWindows.delete(entry.browserWindow);
+    this.windows.delete(id);
+  }
+
   private readonly pendingWindows: Map<
     WindowId,
     { props: IPCWindowProps; createdAt: number; ownerWebContentsId: number }
@@ -272,7 +339,7 @@ export class WindowManager {
       for (const [id, entry] of this.windows) {
         if (entry.ownerWebContentsId === ownerId) {
           entry.instance.destroy({ emitClosed: false });
-          this.windows.delete(id);
+          this.removeManagedWindow(id);
         }
       }
       dispatchers.delete(webContents);
@@ -379,10 +446,7 @@ export class WindowManager {
         hideOnClose: (pending.props as any).hideOnClose === true,
       });
 
-      this.windows.set(windowId, {
-        instance,
-        ownerWebContentsId: webContents.id,
-      });
+      this.addManagedWindow(windowId, instance, webContents.id, childBW);
     });
   }
 
@@ -544,11 +608,15 @@ export class WindowManager {
           }
           return false;
         }
-        // Defense-in-depth: reject if this ID is already pending for a
-        // different owner. Crypto-random IDs make collision infeasible, but
-        // this closes any overwrite-via-known-ID vector.
-        const existing = this.pendingWindows.get(id);
-        if (existing && existing.ownerWebContentsId !== senderId) {
+        // Defense-in-depth: reject if this ID is already pending OR active
+        // for a different owner. Crypto-random IDs make collision infeasible,
+        // but this closes any overwrite-via-known-ID vector.
+        const existingPending = this.pendingWindows.get(id);
+        if (existingPending && existingPending.ownerWebContentsId !== senderId) {
+          return false;
+        }
+        const existingActive = this.windows.get(id);
+        if (existingActive && existingActive.ownerWebContentsId !== senderId) {
           return false;
         }
         const filteredProps = filterAllowedProps(props, this.config.devWarnings);
@@ -572,7 +640,7 @@ export class WindowManager {
         if (entry) {
           if (!checkOwnership(id, entry)) return false;
           entry.instance.destroy({ emitClosed: false });
-          this.windows.delete(id);
+          this.removeManagedWindow(id);
         }
         return true;
       },
@@ -595,7 +663,7 @@ export class WindowManager {
         const entry = this.windows.get(id);
         if (!checkOwnership(id, entry)) return false;
         entry.instance.destroy({ emitClosed: false });
-        this.windows.delete(id);
+        this.removeManagedWindow(id);
         return true;
       },
 
@@ -676,7 +744,7 @@ export class WindowManager {
     }
 
     if (event.type === WindowEventType.Closed) {
-      this.windows.delete(event.id);
+      this.removeManagedWindow(event.id);
     }
   }
 
@@ -692,11 +760,23 @@ export class WindowManager {
     return this.windows.get(id)?.instance.getState() ?? null;
   }
 
+  /**
+   * O(1) check: is this BrowserWindow managed by this WindowManager?
+   *
+   * Use this in `browser-window-focus` / `-blur` / `will-navigate` listeners
+   * instead of scanning `getAllWindows().some(w => w.window === win)` per
+   * event.
+   */
+  owns(win: BrowserWindow): boolean {
+    return this.ownedBrowserWindows.has(win);
+  }
+
   destroy(): void {
-    for (const entry of this.windows.values()) {
-      entry.instance.destroy({ emitClosed: false });
+    // Snapshot keys — removeManagedWindow() mutates this.windows.
+    for (const id of [...this.windows.keys()]) {
+      this.windows.get(id)?.instance.destroy({ emitClosed: false });
+      this.removeManagedWindow(id);
     }
-    this.windows.clear();
   }
 }
 

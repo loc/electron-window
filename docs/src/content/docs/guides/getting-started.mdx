@@ -117,6 +117,7 @@ Without this, a dev warning fires: `"window.open to <url> denied. Not a managed 
 `setupWindowManager` returns (and `getWindowManager()` retrieves) a `WindowManager` instance. Useful for tray menus, "close all windows", or anything else in the main process that needs to touch child windows:
 
 ```ts
+import { app } from "electron";
 import { getWindowManager } from "@loc/electron-window/main";
 
 const manager = getWindowManager();
@@ -130,6 +131,11 @@ for (const win of manager.getAllWindows()) {
 // One window by ID
 const instance = manager.getWindow(someId);
 instance?.window?.setBounds({ width: 800, height: 600 });  // raw BrowserWindow
+
+// O(1) "is this BrowserWindow one of yours?" — handy in app.on("browser-window-focus") etc.
+app.on("browser-window-focus", (_e, win) => {
+  if (manager.owns(win)) markPopoutActive(win);
+});
 ```
 
 `WindowInstance` wraps a `BrowserWindow` with the library's lifecycle methods. `instance.window` gives you the underlying Electron object if you need something the wrapper doesn't expose.
