@@ -165,6 +165,16 @@ export class WindowInstance {
   private _quitting = false;
   private readonly hideOnClose: boolean;
   private lastDisplay: DisplayInfo | null = null;
+  /**
+   * Native fullscreen state, tracked from the enter/leave-full-screen
+   * events. `isFullScreen()` alone can't be trusted at hide time: once a
+   * leave transition starts (a bounds write on a fullscreen window is
+   * enough to kick one off on macOS) it already reports false, while the
+   * still-running transition swallows a hide and re-orders the window in.
+   */
+  private nativeFullscreen = false;
+  /** Deferred-hide listener armed by hide() on a fullscreen window; show() cancels it. */
+  private pendingFullscreenHide: (() => void) | null = null;
 
   private readonly emitBoundsChange: ReturnType<typeof debounce>;
 
@@ -253,7 +263,7 @@ export class WindowInstance {
         try {
           event.preventDefault();
           if (this.browserWindow && !this.browserWindow.isDestroyed()) {
-            this.browserWindow.hide();
+            this.hide();
           }
           this.onEvent({
             type: WindowEventType.UserCloseRequested,
@@ -307,9 +317,11 @@ export class WindowInstance {
     });
 
     win.on("enter-full-screen", () => {
+      this.nativeFullscreen = true;
       if (!this.isDestroyed) this.onEvent({ type: WindowEventType.EnterFullscreen, id: this.id });
     });
     win.on("leave-full-screen", () => {
+      this.nativeFullscreen = false;
       if (!this.isDestroyed) this.onEvent({ type: WindowEventType.LeaveFullscreen, id: this.id });
     });
 
@@ -401,7 +413,7 @@ export class WindowInstance {
     // visible is re-sent at its current value.
     if ("visible" in newProps && newProps.visible !== oldVisible) {
       if (newProps.visible === false) {
-        this.browserWindow.hide();
+        this.hide();
       } else {
         this.show();
       }
@@ -585,17 +597,42 @@ export class WindowInstance {
   }
 
   show(): void {
-    if (this.browserWindow && !this.isDestroyed) {
-      if (this.currentProps.showInactive) {
-        this.browserWindow.showInactive();
-      } else {
-        this.browserWindow.show();
-      }
+    const win = this.browserWindow;
+    if (!win || this.isDestroyed) return;
+    if (this.pendingFullscreenHide) {
+      win.removeListener("leave-full-screen", this.pendingFullscreenHide);
+      this.pendingFullscreenHide = null;
+    }
+    if (this.currentProps.showInactive) {
+      win.showInactive();
+    } else {
+      win.show();
     }
   }
 
   hide(): void {
-    if (this.browserWindow && !this.isDestroyed) this.browserWindow.hide();
+    const win = this.browserWindow;
+    if (!win || this.isDestroyed) return;
+    // macOS cannot orderOut a window that is fullscreen or mid fullscreen
+    // transition: the hide is swallowed and the window comes back visible
+    // when the transition settles. Exit fullscreen (a no-op if a leave is
+    // already in flight) and hide once the transition completes. Other
+    // platforms hide fullscreen windows correctly and keep their state.
+    if (isMac() && (win.isFullScreen() || this.nativeFullscreen)) {
+      if (this.pendingFullscreenHide) return;
+      const hideOnLeave = () => {
+        this.pendingFullscreenHide = null;
+        this.hide();
+      };
+      this.pendingFullscreenHide = hideOnLeave;
+      win.once("leave-full-screen", hideOnLeave);
+      // The forced exit must be visible to the prop differ, or a later
+      // `fullscreen: true` update is skipped as unchanged.
+      this.currentProps.fullscreen = false;
+      this.exitFullscreen();
+      return;
+    }
+    win.hide();
   }
 
   /**
