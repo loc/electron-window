@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
 import { RENDERER_ALLOWED_PROPS } from "../../src/shared/types.js";
 import { WindowInstance } from "../../src/main/WindowInstance.js";
 import { WindowManager } from "../../src/main/WindowManager.js";
@@ -16,6 +16,28 @@ function createMockBrowserWindow() {
     on: vi.fn((event: string, cb: (...args: unknown[]) => void) => {
       if (!handlers.has(event)) handlers.set(event, []);
       handlers.get(event)!.push(cb);
+    }),
+    once: vi.fn((event: string, cb: (...args: unknown[]) => void) => {
+      const wrapped = Object.assign(
+        (...args: unknown[]) => {
+          handlers.set(
+            event,
+            (handlers.get(event) ?? []).filter((h) => h !== wrapped),
+          );
+          cb(...args);
+        },
+        { listener: cb },
+      );
+      if (!handlers.has(event)) handlers.set(event, []);
+      handlers.get(event)!.push(wrapped);
+    }),
+    removeListener: vi.fn((event: string, cb: (...args: unknown[]) => void) => {
+      handlers.set(
+        event,
+        (handlers.get(event) ?? []).filter(
+          (h) => h !== cb && (h as { listener?: unknown }).listener !== cb,
+        ),
+      );
     }),
     emit: (event: string, ...args: unknown[]) => {
       for (const cb of handlers.get(event) ?? []) cb(...args);
@@ -1245,6 +1267,84 @@ describe("WindowInstance action methods", () => {
     expect(bw.hide).toHaveBeenCalled();
   });
 
+  describe("fullscreen-aware hide (macOS)", () => {
+    const realPlatform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    beforeEach(() => {
+      Object.defineProperty(process, "platform", { value: "darwin" });
+    });
+    afterEach(() => {
+      Object.defineProperty(process, "platform", realPlatform);
+    });
+
+    it("hide on a fullscreen window exits fullscreen and hides on leave-full-screen", () => {
+      const { instance, bw } = createWindowInstance();
+      bw.isFullScreen.mockReturnValue(true);
+      instance.hide();
+      expect(bw.setFullScreen).toHaveBeenCalledWith(false);
+      expect(bw.hide).not.toHaveBeenCalled();
+      bw.isFullScreen.mockReturnValue(false);
+      bw.emit("leave-full-screen");
+      expect(bw.hide).toHaveBeenCalled();
+    });
+
+    it("hide during a leave-fullscreen transition defers until leave-full-screen", () => {
+      const { instance, bw } = createWindowInstance();
+      bw.emit("enter-full-screen");
+      bw.isFullScreen.mockReturnValue(false);
+      instance.hide();
+      expect(bw.hide).not.toHaveBeenCalled();
+      bw.emit("leave-full-screen");
+      expect(bw.hide).toHaveBeenCalled();
+    });
+
+    it("repeated hide calls arm a single deferred hide", () => {
+      const { instance, bw } = createWindowInstance();
+      bw.isFullScreen.mockReturnValue(true);
+      instance.hide();
+      instance.hide();
+      bw.isFullScreen.mockReturnValue(false);
+      bw.emit("leave-full-screen");
+      expect(bw.hide).toHaveBeenCalledTimes(1);
+    });
+
+    it("show cancels a pending deferred hide", () => {
+      const { instance, bw } = createWindowInstance();
+      bw.isFullScreen.mockReturnValue(true);
+      instance.hide();
+      bw.isFullScreen.mockReturnValue(false);
+      instance.show();
+      bw.emit("leave-full-screen");
+      expect(bw.hide).not.toHaveBeenCalled();
+    });
+
+    it("marks the forced fullscreen exit in props so fullscreen:true re-applies", () => {
+      const { instance, bw } = createWindowInstance({ fullscreen: true });
+      bw.isFullScreen.mockReturnValue(true);
+      instance.hide();
+      bw.setFullScreen.mockClear();
+      instance.updateProps({ fullscreen: true });
+      expect(bw.setFullScreen).toHaveBeenCalledWith(true);
+    });
+
+    it("deferred fullscreen hide does not fire after destroy", () => {
+      const { instance, bw } = createWindowInstance();
+      bw.isFullScreen.mockReturnValue(true);
+      instance.hide();
+      instance.destroy();
+      bw.emit("leave-full-screen");
+      expect(bw.hide).not.toHaveBeenCalled();
+    });
+
+    it("hides a fullscreen window directly off macOS", () => {
+      Object.defineProperty(process, "platform", { value: "linux" });
+      const { instance, bw } = createWindowInstance();
+      bw.isFullScreen.mockReturnValue(true);
+      instance.hide();
+      expect(bw.hide).toHaveBeenCalled();
+      expect(bw.setFullScreen).not.toHaveBeenCalled();
+    });
+  });
+
   it("show calls browserWindow.show() by default", () => {
     const { instance, bw } = createWindowInstance();
     // Constructor already called show; reset to isolate the manual call
@@ -2243,6 +2343,24 @@ describe("prepareForQuit", () => {
     });
     return { instance, bw, onEvent };
   }
+
+  it("WindowInstance: hideOnClose on a fullscreen window defers the hide to leave-full-screen", () => {
+    const realPlatform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: "darwin" });
+    onTestFinished(() => Object.defineProperty(process, "platform", realPlatform));
+    const { bw } = createHideOnCloseInstance();
+    bw.isFullScreen.mockReturnValue(true);
+
+    const ev = { preventDefault: vi.fn() };
+    bw.emit("close", ev);
+    expect(ev.preventDefault).toHaveBeenCalled();
+    expect(bw.setFullScreen).toHaveBeenCalledWith(false);
+    expect(bw.hide).not.toHaveBeenCalled();
+
+    bw.isFullScreen.mockReturnValue(false);
+    bw.emit("leave-full-screen");
+    expect(bw.hide).toHaveBeenCalled();
+  });
 
   it("WindowInstance: hideOnClose vetoes close before, lets it through after", () => {
     const { instance, bw } = createHideOnCloseInstance();
