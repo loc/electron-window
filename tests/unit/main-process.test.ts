@@ -702,6 +702,44 @@ describe("WindowInstance constructor", () => {
     const { bw } = createWindowInstance({ visibleOnAllWorkspaces: true });
     expect(bw.setVisibleOnAllWorkspaces).toHaveBeenCalled();
   });
+
+  describe("visibleOnAllWorkspaces on macOS", () => {
+    const realPlatform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    beforeEach(() => {
+      Object.defineProperty(process, "platform", { value: "darwin" });
+    });
+    afterEach(() => {
+      Object.defineProperty(process, "platform", realPlatform);
+    });
+
+    it("never transforms the app's process type", () => {
+      const { bw } = createWindowInstance({ visibleOnAllWorkspaces: true });
+      expect(bw.setVisibleOnAllWorkspaces).toHaveBeenCalled();
+      for (const call of bw.setVisibleOnAllWorkspaces.mock.calls) {
+        expect(call[1]).toMatchObject({ skipTransformProcessType: true });
+      }
+    });
+
+    it("enabling requests fullscreen visibility without the process transform", () => {
+      const { instance, bw } = createWindowInstance({ visibleOnAllWorkspaces: false });
+      bw.setVisibleOnAllWorkspaces.mockClear();
+      instance.updateProps({ visibleOnAllWorkspaces: true });
+      expect(bw.setVisibleOnAllWorkspaces).toHaveBeenCalledWith(true, {
+        visibleOnFullScreen: true,
+        skipTransformProcessType: true,
+      });
+    });
+
+    it("disabling clears fullscreen visibility without the process transform", () => {
+      const { instance, bw } = createWindowInstance({ visibleOnAllWorkspaces: true });
+      bw.setVisibleOnAllWorkspaces.mockClear();
+      instance.updateProps({ visibleOnAllWorkspaces: false });
+      expect(bw.setVisibleOnAllWorkspaces).toHaveBeenCalledWith(false, {
+        visibleOnFullScreen: false,
+        skipTransformProcessType: true,
+      });
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -83,8 +83,14 @@ const PROP_SETTERS: Record<string, (win: BrowserWindow, value: unknown) => void>
   },
   visibleOnAllWorkspaces: (win, v) => {
     if (isMac()) {
+      // Without skipTransformProcessType, Electron implements
+      // visibleOnFullScreen by transforming the app into a UIElement, which
+      // removes it from the Dock and Cmd+Tab — on the disable call too.
+      // FullScreenAuxiliary collection behavior alone is enough to float
+      // over fullscreen Spaces.
       win.setVisibleOnAllWorkspaces(v as boolean, {
-        visibleOnFullScreen: true,
+        visibleOnFullScreen: v as boolean,
+        skipTransformProcessType: true,
       });
     } else {
       win.setVisibleOnAllWorkspaces(v as boolean);
@@ -222,7 +228,12 @@ export class WindowInstance {
 
     if (this.currentProps.visibleOnAllWorkspaces) {
       if (isMac()) {
-        win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+        // See PROP_SETTERS.visibleOnAllWorkspaces — skip the UIElement
+        // transform so the host app keeps its Dock icon.
+        win.setVisibleOnAllWorkspaces(true, {
+          visibleOnFullScreen: true,
+          skipTransformProcessType: true,
+        });
       } else {
         win.setVisibleOnAllWorkspaces(true);
       }
