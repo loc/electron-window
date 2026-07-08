@@ -66,6 +66,8 @@ Setting `open={false}` destroys the window via `BrowserWindow.destroy()`, which 
 | `ignoreMouseEvents`      | `boolean`                     | `false` |
 | `visibleOnAllWorkspaces` | `boolean`                     | `false` |
 
+On macOS, `visibleOnAllWorkspaces` is applied with collection behaviors only (`skipTransformProcessType`): the window joins every Space and your app's own fullscreen Spaces, and the app keeps its Dock icon and Cmd+Tab entry. macOS does not let a regular (Dock-visible) app float a window over *another* app's fullscreen Space; if you need that, hide the Dock icon at the app level (`app.dock.hide()`) rather than relying on this prop.
+
 `AlwaysOnTopLevel` is a string union: `"normal" | "floating" | "torn-off-menu" | "modal-panel" | "main-menu" | "status" | "pop-up-menu" | "screen-saver"`. Higher levels float above lower ones. `true` is equivalent to `"floating"`.
 
 ## Events
